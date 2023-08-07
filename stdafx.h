@@ -21,6 +21,7 @@
 
 #include <windows.h>
 
+#include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <D3Dcompiler.h>

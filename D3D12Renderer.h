@@ -12,6 +12,7 @@
 #pragma once
 
 #include "DXSample.h"
+#include "D3D12MemAlloc.h"
 
 using namespace DirectX;
 
@@ -63,7 +64,10 @@ private:
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
     UINT m_rtvDescriptorSize;
 
+    ComPtr<D3D12MA::Allocator> m_allocator;
+
     // App resources.
+    D3D12MA::Allocation* m_vertexBufferAllocation;
     ComPtr<ID3D12Resource> m_vertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 

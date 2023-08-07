@@ -112,6 +112,7 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="D3D12MemAlloc.h" />
     <ClInclude Include="Win32Application.h" />
     <ClInclude Include="D3D12Renderer.h" />
     <ClInclude Include="d3dx12.h" />
@@ -120,6 +121,7 @@
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="D3D12MemAlloc.cpp" />
     <ClCompile Include="Win32Application.cpp" />
     <ClCompile Include="D3D12Renderer.cpp" />
     <ClCompile Include="DXSample.cpp" />

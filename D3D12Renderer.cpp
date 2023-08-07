@@ -51,18 +51,18 @@ void D3D12Renderer::LoadPipeline()
     ComPtr<IDXGIFactory4> factory;
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
-    if (m_useWarpDevice)
-    {
-        ComPtr<IDXGIAdapter> warpAdapter;
-        ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
+    //if (m_useWarpDevice)
+    //{
+    //    ComPtr<IDXGIAdapter> warpAdapter;
+    //    ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
 
-        ThrowIfFailed(D3D12CreateDevice(
-            warpAdapter.Get(),
-            D3D_FEATURE_LEVEL_11_0,
-            IID_PPV_ARGS(&m_device)
-            ));
-    }
-    else
+    //    ThrowIfFailed(D3D12CreateDevice(
+    //        warpAdapter.Get(),
+    //        D3D_FEATURE_LEVEL_11_0,
+    //        IID_PPV_ARGS(&m_device)
+    //        ));
+    //}
+    //else
     {
         ComPtr<IDXGIAdapter1> hardwareAdapter;
         GetHardwareAdapter(factory.Get(), &hardwareAdapter);
@@ -72,6 +72,22 @@ void D3D12Renderer::LoadPipeline()
             D3D_FEATURE_LEVEL_11_0,
             IID_PPV_ARGS(&m_device)
             ));
+
+        // Create allocator
+        D3D12MA::ALLOCATOR_DESC desc = {};
+        desc.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
+        desc.pDevice = m_device.Get();
+        desc.pAdapter = hardwareAdapter.Get();
+
+        //if(ENABLE_CPU_ALLOCATION_CALLBACKS)
+        //{
+        //    g_AllocationCallbacks.pAllocate = &CustomAllocate;
+        //    g_AllocationCallbacks.pFree = &CustomFree;
+        //    g_AllocationCallbacks.pPrivateData = CUSTOM_ALLOCATION_PRIVATE_DATA;
+        //    desc.pAllocationCallbacks = &g_AllocationCallbacks;
+        //}
+
+        ThrowIfFailed(D3D12MA::CreateAllocator(&desc, &m_allocator));
     }
 
     // Describe and create the command queue.
@@ -208,33 +224,90 @@ void D3D12Renderer::LoadAssets()
 
         const UINT vertexBufferSize = sizeof(triangleVertices);
 
-        // Note: using upload heaps to transfer static data like vert buffers is not 
-        // recommended. Every time the GPU needs it, the upload heap will be marshalled 
-        // over. Please read up on Default Heap usage. An upload heap is used here for 
-        // code simplicity and because there are very few verts to actually transfer.
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-            D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&m_vertexBuffer)));
+        D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
+        vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_DESC vertexBufferResourceDesc = {};
+        vertexBufferResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        vertexBufferResourceDesc.Alignment = 0;
+        vertexBufferResourceDesc.Width = vertexBufferSize;
+        vertexBufferResourceDesc.Height = 1;
+        vertexBufferResourceDesc.DepthOrArraySize = 1;
+        vertexBufferResourceDesc.MipLevels = 1;
+        vertexBufferResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+        vertexBufferResourceDesc.SampleDesc.Count = 1;
+        vertexBufferResourceDesc.SampleDesc.Quality = 0;
+        vertexBufferResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        vertexBufferResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        ID3D12Resource* vertexBufferPtr;
+        ThrowIfFailed(m_allocator->CreateResource(
+            &vertexBufferAllocDesc,
+            &vertexBufferResourceDesc, // resource description for a buffer
+            D3D12_RESOURCE_STATE_COPY_DEST, // we will start this heap in the copy destination state since we will copy data
+                                            // from the upload heap to this heap
+            nullptr, // optimized clear value must be null for this type of resource. used for render targets and depth/stencil buffers
+            &m_vertexBufferAllocation,
+            IID_PPV_ARGS(&vertexBufferPtr)));
+        m_vertexBuffer.Attach(vertexBufferPtr);
 
-        // Copy the triangle data to the vertex buffer.
-        UINT8* pVertexDataBegin;
-        CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-        ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
-        memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-        m_vertexBuffer->Unmap(0, nullptr);
+        // we can give resource heaps a name so when we debug with the graphics debugger we know what resource we are looking at
+        m_vertexBuffer->SetName(L"Vertex Buffer Resource Heap");
+        m_vertexBufferAllocation->SetName(L"Vertex Buffer Resource Heap");
+        
+        // create upload heap
+        // upload heaps are used to upload data to the GPU. CPU can write to it, GPU can read from it
+        // We will upload the vertex buffer using this heap to the default heap
+        D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
+        vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC vertexBufferUploadResourceDesc = {};
+        vertexBufferUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        vertexBufferUploadResourceDesc.Alignment = 0;
+        vertexBufferUploadResourceDesc.Width = vertexBufferSize;
+        vertexBufferUploadResourceDesc.Height = 1;
+        vertexBufferUploadResourceDesc.DepthOrArraySize = 1;
+        vertexBufferUploadResourceDesc.MipLevels = 1;
+        vertexBufferUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+        vertexBufferUploadResourceDesc.SampleDesc.Count = 1;
+        vertexBufferUploadResourceDesc.SampleDesc.Quality = 0;
+        vertexBufferUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        vertexBufferUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        ComPtr<ID3D12Resource> vBufferUploadHeap;
+        D3D12MA::Allocation* vBufferUploadHeapAllocation = nullptr;
+        ThrowIfFailed(m_allocator->CreateResource(
+            &vBufferUploadAllocDesc,
+            &vertexBufferUploadResourceDesc, // resource description for a buffer
+            D3D12_RESOURCE_STATE_GENERIC_READ, // GPU will read from this buffer and copy its contents to the default heap
+            nullptr,
+            &vBufferUploadHeapAllocation,
+            IID_PPV_ARGS(&vBufferUploadHeap)));
+        vBufferUploadHeap->SetName(L"Vertex Buffer Upload Resource Heap");
+        vBufferUploadHeapAllocation->SetName(L"Vertex Buffer Upload Resource Heap");
+
+        // store vertex buffer in upload heap
+        D3D12_SUBRESOURCE_DATA vertexData = {};
+        vertexData.pData = reinterpret_cast<BYTE*>(triangleVertices); // pointer to our vertex array
+        vertexData.RowPitch = vertexBufferSize; // size of all our triangle vertex data
+        vertexData.SlicePitch = vertexBufferSize; // also the size of our triangle vertex data
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), NULL));
+
+        // we are now creating a command with the command list to copy the data from
+        // the upload heap to the default heap
+        UINT64 r = UpdateSubresources(m_commandList.Get(), m_vertexBuffer.Get(), vBufferUploadHeap.Get(), 0, 0, 1, &vertexData);
+        assert(r);
 
         // Initialize the vertex buffer view.
         m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
         m_vertexBufferView.StrideInBytes = sizeof(Vertex);
         m_vertexBufferView.SizeInBytes = vertexBufferSize;
-    }
 
+        m_commandList->Close();
+        // Execute the command list.
+        ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    
+    //}
     // Create synchronization objects and wait until assets have been uploaded to the GPU.
-    {
+    //{
         ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
         m_fenceValues[m_frameIndex]++;
 
@@ -249,6 +322,8 @@ void D3D12Renderer::LoadAssets()
         // list in our main loop but for now, we just want to wait for setup to 
         // complete before continuing.
         WaitForGpu();
+
+        vBufferUploadHeapAllocation->Release();
     }
 }
 
@@ -275,6 +350,9 @@ void D3D12Renderer::OnRender()
 
 void D3D12Renderer::OnDestroy()
 {
+    m_vertexBufferAllocation->Release();
+    m_vertexBufferAllocation = nullptr;
+    m_allocator.Reset();
     // Ensure that the GPU is no longer referencing resources that are about to be
     // cleaned up by the destructor.
     WaitForGpu();
