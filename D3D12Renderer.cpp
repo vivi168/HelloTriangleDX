@@ -51,44 +51,30 @@ void D3D12Renderer::LoadPipeline()
     ComPtr<IDXGIFactory4> factory;
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
-    //if (m_useWarpDevice)
+    ComPtr<IDXGIAdapter1> hardwareAdapter;
+    GetHardwareAdapter(factory.Get(), &hardwareAdapter);
+
+    ThrowIfFailed(D3D12CreateDevice(
+        hardwareAdapter.Get(),
+        D3D_FEATURE_LEVEL_11_0,
+        IID_PPV_ARGS(&m_device)
+        ));
+
+    // Create allocator
+    D3D12MA::ALLOCATOR_DESC desc = {};
+    desc.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
+    desc.pDevice = m_device.Get();
+    desc.pAdapter = hardwareAdapter.Get();
+
+    //if(ENABLE_CPU_ALLOCATION_CALLBACKS)
     //{
-    //    ComPtr<IDXGIAdapter> warpAdapter;
-    //    ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
-
-    //    ThrowIfFailed(D3D12CreateDevice(
-    //        warpAdapter.Get(),
-    //        D3D_FEATURE_LEVEL_11_0,
-    //        IID_PPV_ARGS(&m_device)
-    //        ));
+    //    g_AllocationCallbacks.pAllocate = &CustomAllocate;
+    //    g_AllocationCallbacks.pFree = &CustomFree;
+    //    g_AllocationCallbacks.pPrivateData = CUSTOM_ALLOCATION_PRIVATE_DATA;
+    //    desc.pAllocationCallbacks = &g_AllocationCallbacks;
     //}
-    //else
-    {
-        ComPtr<IDXGIAdapter1> hardwareAdapter;
-        GetHardwareAdapter(factory.Get(), &hardwareAdapter);
 
-        ThrowIfFailed(D3D12CreateDevice(
-            hardwareAdapter.Get(),
-            D3D_FEATURE_LEVEL_11_0,
-            IID_PPV_ARGS(&m_device)
-            ));
-
-        // Create allocator
-        D3D12MA::ALLOCATOR_DESC desc = {};
-        desc.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
-        desc.pDevice = m_device.Get();
-        desc.pAdapter = hardwareAdapter.Get();
-
-        //if(ENABLE_CPU_ALLOCATION_CALLBACKS)
-        //{
-        //    g_AllocationCallbacks.pAllocate = &CustomAllocate;
-        //    g_AllocationCallbacks.pFree = &CustomFree;
-        //    g_AllocationCallbacks.pPrivateData = CUSTOM_ALLOCATION_PRIVATE_DATA;
-        //    desc.pAllocationCallbacks = &g_AllocationCallbacks;
-        //}
-
-        ThrowIfFailed(D3D12MA::CreateAllocator(&desc, &m_allocator));
-    }
+    ThrowIfFailed(D3D12MA::CreateAllocator(&desc, &m_allocator));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};

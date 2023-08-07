@@ -51,9 +51,6 @@ protected:
     UINT m_height;
     float m_aspectRatio;
 
-    // Adapter info.
-    bool m_useWarpDevice;
-
 private:
     // Root assets path.
     std::wstring m_assetsPath;
