@@ -12,6 +12,8 @@
 #include "stdafx.h"
 #include "D3D12Renderer.h"
 
+#include "Mesh.h"
+
 D3D12Renderer::D3D12Renderer(UINT width, UINT height, std::wstring name) :
     DXSample(width, height, name),
     m_frameIndex(0),
@@ -170,7 +172,9 @@ void D3D12Renderer::LoadAssets()
         D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
         {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-            { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+            { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "UV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 40, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
         };
 
         // Describe and create the graphics pipeline state object (PSO).
@@ -196,19 +200,26 @@ void D3D12Renderer::LoadAssets()
 
     // Command lists are created in the recording state, but there is nothing
     // to record yet. The main loop expects it to be closed, so close it now.
-    ThrowIfFailed(m_commandList->Close());
+    //ThrowIfFailed(m_commandList->Close());
+    //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), NULL));
+
+    D3D12MA::Allocation* vBufferUploadHeapAllocation = nullptr;
+    D3D12MA::Allocation* iBufferUploadHeapAllocation = nullptr;
+
+    // Define the geometry for a triangle.
+    Vertex triangleVertices[3] =
+    {
+        { { 0.0f, 0.25f * m_aspectRatio, 0.0f }, { 0.f, 0.f, 0.f}, { 1.0f, 0.0f, 0.0f, 1.0f }, { 0.f, 0.f } },
+        { { 0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.f, 0.f, 0.f}, { 0.0f, 1.0f, 0.0f, 1.0f }, { 0.f, 0.f } },
+        { { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.f, 0.f, 0.f}, { 1.0f, 0.0f, 1.0f, 1.0f }, { 0.f, 0.f } },
+    };
+
+    Mesh3D cube;
+    cube.read("assets/cube.objb");
 
     // Create the vertex buffer.
     {
-        // Define the geometry for a triangle.
-        Vertex triangleVertices[] =
-        {
-            { { 0.0f, 0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-            { { 0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-            { { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
-        };
-
-        const UINT vertexBufferSize = sizeof(triangleVertices);
+        const UINT vertexBufferSize = sizeof(Vertex) * cube.header.numVerts;
 
         D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
         vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
@@ -257,7 +268,7 @@ void D3D12Renderer::LoadAssets()
         vertexBufferUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         vertexBufferUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
         ComPtr<ID3D12Resource> vBufferUploadHeap;
-        D3D12MA::Allocation* vBufferUploadHeapAllocation = nullptr;
+        
         ThrowIfFailed(m_allocator->CreateResource(
             &vBufferUploadAllocDesc,
             &vertexBufferUploadResourceDesc, // resource description for a buffer
@@ -270,47 +281,124 @@ void D3D12Renderer::LoadAssets()
 
         // store vertex buffer in upload heap
         D3D12_SUBRESOURCE_DATA vertexData = {};
-        vertexData.pData = reinterpret_cast<BYTE*>(triangleVertices); // pointer to our vertex array
+        vertexData.pData = reinterpret_cast<BYTE*>(cube.vertices.data()); // pointer to our vertex array
         vertexData.RowPitch = vertexBufferSize; // size of all our triangle vertex data
         vertexData.SlicePitch = vertexBufferSize; // also the size of our triangle vertex data
-
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), NULL));
-
-        // we are now creating a command with the command list to copy the data from
-        // the upload heap to the default heap
-        UINT64 r = UpdateSubresources(m_commandList.Get(), m_vertexBuffer.Get(), vBufferUploadHeap.Get(), 0, 0, 1, &vertexData);
-        assert(r);
 
         // Initialize the vertex buffer view.
         m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
         m_vertexBufferView.StrideInBytes = sizeof(Vertex);
         m_vertexBufferView.SizeInBytes = vertexBufferSize;
 
-        m_commandList->Close();
-        // Execute the command list.
-        ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-        m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-    
-    //}
-    // Create synchronization objects and wait until assets have been uploaded to the GPU.
-    //{
-        ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-        m_fenceValues[m_frameIndex]++;
-
-        // Create an event handle to use for frame synchronization.
-        m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-        if (m_fenceEvent == nullptr)
-        {
-            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-        }
-
-        // Wait for the command list to execute; we are reusing the same command 
-        // list in our main loop but for now, we just want to wait for setup to 
-        // complete before continuing.
-        WaitForGpu();
-
-        vBufferUploadHeapAllocation->Release();
+        // we are now creating a command with the command list to copy the data from
+        // the upload heap to the default heap
+        UINT64 r = UpdateSubresources(m_commandList.Get(), m_vertexBuffer.Get(), vBufferUploadHeap.Get(), 0, 0, 1, &vertexData);
+        assert(r);
     }
+
+    // create the index buffer
+    {
+        const UINT vertexBufferSize = sizeof(unsigned int) * cube.header.numIndices;
+
+        D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
+        vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_DESC vertexBufferResourceDesc = {};
+        vertexBufferResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        vertexBufferResourceDesc.Alignment = 0;
+        vertexBufferResourceDesc.Width = vertexBufferSize;
+        vertexBufferResourceDesc.Height = 1;
+        vertexBufferResourceDesc.DepthOrArraySize = 1;
+        vertexBufferResourceDesc.MipLevels = 1;
+        vertexBufferResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+        vertexBufferResourceDesc.SampleDesc.Count = 1;
+        vertexBufferResourceDesc.SampleDesc.Quality = 0;
+        vertexBufferResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        vertexBufferResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        ID3D12Resource* vertexBufferPtr;
+        ThrowIfFailed(m_allocator->CreateResource(
+            &vertexBufferAllocDesc,
+            &vertexBufferResourceDesc, // resource description for a buffer
+            D3D12_RESOURCE_STATE_COPY_DEST, // we will start this heap in the copy destination state since we will copy data
+            // from the upload heap to this heap
+            nullptr, // optimized clear value must be null for this type of resource. used for render targets and depth/stencil buffers
+            &m_indexBufferAllocation,
+            IID_PPV_ARGS(&vertexBufferPtr)));
+        m_indexBuffer.Attach(vertexBufferPtr);
+
+        // we can give resource heaps a name so when we debug with the graphics debugger we know what resource we are looking at
+        m_indexBuffer->SetName(L"Index Buffer Resource Heap");
+        m_indexBufferAllocation->SetName(L"Index Buffer Resource Heap");
+
+        // create upload heap
+        // upload heaps are used to upload data to the GPU. CPU can write to it, GPU can read from it
+        // We will upload the vertex buffer using this heap to the default heap
+        D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
+        vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+        D3D12_RESOURCE_DESC vertexBufferUploadResourceDesc = {};
+        vertexBufferUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        vertexBufferUploadResourceDesc.Alignment = 0;
+        vertexBufferUploadResourceDesc.Width = vertexBufferSize;
+        vertexBufferUploadResourceDesc.Height = 1;
+        vertexBufferUploadResourceDesc.DepthOrArraySize = 1;
+        vertexBufferUploadResourceDesc.MipLevels = 1;
+        vertexBufferUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+        vertexBufferUploadResourceDesc.SampleDesc.Count = 1;
+        vertexBufferUploadResourceDesc.SampleDesc.Quality = 0;
+        vertexBufferUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        vertexBufferUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        ComPtr<ID3D12Resource> vBufferUploadHeap;
+
+        ThrowIfFailed(m_allocator->CreateResource(
+            &vBufferUploadAllocDesc,
+            &vertexBufferUploadResourceDesc, // resource description for a buffer
+            D3D12_RESOURCE_STATE_GENERIC_READ, // GPU will read from this buffer and copy its contents to the default heap
+            nullptr,
+            &iBufferUploadHeapAllocation,
+            IID_PPV_ARGS(&vBufferUploadHeap)));
+        vBufferUploadHeap->SetName(L"Index Buffer Upload Resource Heap");
+        iBufferUploadHeapAllocation->SetName(L"Index Buffer Upload Resource Heap");
+
+        // store vertex buffer in upload heap
+        D3D12_SUBRESOURCE_DATA vertexData = {};
+        vertexData.pData = reinterpret_cast<BYTE*>(cube.indices.data()); // pointer to our vertex array
+        vertexData.RowPitch = vertexBufferSize; // size of all our triangle vertex data
+        vertexData.SlicePitch = vertexBufferSize; // also the size of our triangle vertex data
+
+        // Initialize the vertex buffer view.
+        m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
+        m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+        m_indexBufferView.SizeInBytes = vertexBufferSize;
+
+        // we are now creating a command with the command list to copy the data from
+        // the upload heap to the default heap
+        UINT64 r = UpdateSubresources(m_commandList.Get(), m_indexBuffer.Get(), vBufferUploadHeap.Get(), 0, 0, 1, &vertexData);
+        assert(r);
+    }
+
+    m_commandList->Close();
+    // Execute the command list.
+    ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+
+    ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+    m_fenceValues[m_frameIndex]++;
+
+    // Create an event handle to use for frame synchronization.
+    m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (m_fenceEvent == nullptr)
+    {
+        ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    // Wait for the command list to execute; we are reusing the same command 
+    // list in our main loop but for now, we just want to wait for setup to 
+    // complete before continuing.
+    WaitForGpu();
+
+    vBufferUploadHeapAllocation->Release();
+    iBufferUploadHeapAllocation->Release();
 }
 
 // Update frame-based values.
@@ -338,6 +426,10 @@ void D3D12Renderer::OnDestroy()
 {
     m_vertexBufferAllocation->Release();
     m_vertexBufferAllocation = nullptr;
+
+    m_indexBufferAllocation->Release();
+    m_indexBufferAllocation = nullptr;
+
     m_allocator.Reset();
     // Ensure that the GPU is no longer referencing resources that are about to be
     // cleaned up by the destructor.
@@ -374,7 +466,9 @@ void D3D12Renderer::PopulateCommandList()
     m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-    m_commandList->DrawInstanced(3, 1, 0, 0);
+    m_commandList->IASetIndexBuffer(&m_indexBufferView);
+    m_commandList->DrawIndexedInstanced(42, 1, 0, 0, 0); // todo need to draw with indices
+    // todo: create index buffer
 
     // Indicate that the back buffer will now be used to present.
     m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));

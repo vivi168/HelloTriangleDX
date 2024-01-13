@@ -44,12 +44,6 @@ private:
     // may result in noticeable latency in your app.
     static const UINT FrameCount = 2;
 
-    struct Vertex
-    {
-        XMFLOAT3 position;
-        XMFLOAT4 color;
-    };
-
     // Pipeline objects.
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
@@ -70,6 +64,10 @@ private:
     D3D12MA::Allocation* m_vertexBufferAllocation;
     ComPtr<ID3D12Resource> m_vertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+    D3D12MA::Allocation* m_indexBufferAllocation;
+    ComPtr<ID3D12Resource> m_indexBuffer;
+    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
     // Synchronization objects.
     UINT m_frameIndex;
