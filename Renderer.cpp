@@ -553,7 +553,12 @@ void Renderer::InitD3D()
 		{ {  0.5f, -0.5f, -0.5f }, {0.f, 0.f, 0.f}, {1.f, 0.f, 1.f, 0.5f}, { 0.f, 1.f } },
 		{ { -0.5f, -0.5f,  0.5f }, {0.f, 0.f, 0.f}, {1.f, 0.f, 1.f, 0.5f}, { 1.f, 0.f } },
 	};
-	const uint32_t vBufferSize = sizeof(vList);
+
+	Mesh3D cube;
+	cube.read("assets/cube.objb");
+
+	//const uint32_t vBufferSize = sizeof(vList);
+	const uint32_t vBufferSize = sizeof(Vertex) * cube.header.numVerts;
 
 	// create default heap
 	// default heap is memory on the GPU. Only the GPU has access to this memory
@@ -619,7 +624,8 @@ void Renderer::InitD3D()
 
 	// store vertex buffer in upload heap
 	D3D12_SUBRESOURCE_DATA vertexData = {};
-	vertexData.pData = reinterpret_cast<BYTE*>(vList); // pointer to our vertex array
+	//vertexData.pData = reinterpret_cast<BYTE*>(vList); // pointer to our vertex array
+	vertexData.pData = reinterpret_cast<BYTE*>(cube.vertices.data()); // pointer to our vertex array
 	vertexData.RowPitch = vBufferSize; // size of all our triangle vertex data
 	vertexData.SlicePitch = vBufferSize; // also the size of our triangle vertex data
 
@@ -668,9 +674,11 @@ void Renderer::InitD3D()
 		20, 23, 21, // second triangle
 	};
 
-	m_CubeIndexCount = (uint32_t)_countof(iList);
+	//m_CubeIndexCount = (uint32_t)_countof(iList);
+	m_CubeIndexCount = (uint32_t)cube.header.numIndices;
 
-	size_t iBufferSize = sizeof(iList);
+	//size_t iBufferSize = sizeof(iList);
+	size_t iBufferSize = sizeof(uint16_t) * cube.header.numIndices;
 
 	// create default heap to hold index buffer
 	D3D12MA::ALLOCATION_DESC indexBufferAllocDesc = {};
@@ -728,7 +736,8 @@ void Renderer::InitD3D()
 
 	// store vertex buffer in upload heap
 	D3D12_SUBRESOURCE_DATA indexData = {};
-	indexData.pData = iList; // pointer to our index array
+	//indexData.pData = iList; // pointer to our index array
+	indexData.pData = reinterpret_cast<BYTE*>(cube.indices.data()); // pointer to our index array
 	indexData.RowPitch = iBufferSize; // size of all our index buffer
 	indexData.SlicePitch = iBufferSize; // also the size of our index buffer
 

@@ -26,12 +26,12 @@ struct Subset
 struct Mesh3D
 {
     struct Header {
-        int numVerts;
-        int numIndices;
-        int numSubsets;
+        unsigned int numVerts;
+        unsigned int numIndices;
+        unsigned int numSubsets;
     } header;
     std::vector<Vertex> vertices;
-    std::vector<unsigned int> indices;
+    std::vector<uint16_t> indices;
     std::vector<Subset> subsets;
 
     void read(std::string filename);
