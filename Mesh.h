@@ -5,7 +5,7 @@
 
 typedef char STRING20[20];
 
-struct Vertex
+struct Vertex3D
 {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
@@ -29,7 +29,7 @@ struct Mesh3D
         int numIndices;
         int numSubsets;
     } header;
-    std::vector<Vertex> vertices;
+    std::vector<Vertex3D> vertices;
     std::vector<unsigned int> indices;
     std::vector<Subset> subsets;
 

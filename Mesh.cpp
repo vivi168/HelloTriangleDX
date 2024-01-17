@@ -13,7 +13,7 @@ void Mesh3D::read(std::string filename)
 	indices.resize(header.numIndices);
 	subsets.resize(header.numSubsets);
 
-	fread(vertices.data(), sizeof(Vertex), header.numVerts, fp);
+	fread(vertices.data(), sizeof(Vertex3D), header.numVerts, fp);
 	fread(indices.data(), sizeof(unsigned int), header.numIndices, fp);
 	fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 

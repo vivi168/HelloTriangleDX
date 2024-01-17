@@ -1,14 +1,3 @@
-//*********************************************************
-//
-// Copyright (c) Microsoft. All rights reserved.
-// This code is licensed under the MIT License (MIT).
-// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
-// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
-// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
-//
-//*********************************************************
-
 // stdafx.h : include file for standard system include files,
 // or project specific include files that are used frequently, but
 // are changed infrequently.
@@ -28,6 +17,24 @@
 #include <DirectXMath.h>
 #include "d3dx12.h"
 
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <memory>
+#include <algorithm>
+#include <numeric>
+#include <array>
+#include <type_traits>
+#include <utility>
+#include <chrono>
 #include <string>
+#include <exception>
+#include <string>
+
+#include <cassert>
+#include <cstdlib>
+#include <cstdio>
+#include <cstdarg>
+
 #include <wrl.h>
 #include <shellapi.h>

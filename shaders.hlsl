@@ -1,31 +1,37 @@
-//*********************************************************
-//
-// Copyright (c) Microsoft. All rights reserved.
-// This code is licensed under the MIT License (MIT).
-// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
-// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
-// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
-//
-//*********************************************************
+Texture2D t0 : register(t0);
+SamplerState s0 : register(s0);
 
-struct PSInput
+cbuffer ConstantBuffer0 : register(b0)
 {
-    float4 position : SV_POSITION;
-    float4 color : COLOR;
+    float4 color;
 };
 
-PSInput VSMain(float4 position : POSITION, float4 normal : NORMAL, float4 color : COLOR, float2 uv : UV)
+cbuffer ConstantBuffer1 : register(b1)
 {
-    PSInput result;
+    float4x4 WorldViewProj;
+};
 
-    result.position = position;
-    result.color = color;
+struct VS_INPUT
+{
+    float3 pos : POSITION;
+    float2 texCoord : TEXCOORD;
+};
 
-    return result;
+struct VS_OUTPUT
+{
+    float4 pos : SV_POSITION;
+    float2 texCoord : TEXCOORD;
+};
+
+VS_OUTPUT VSMain(VS_INPUT input)
+{
+    VS_OUTPUT output;
+    output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
+    output.texCoord = input.texCoord;
+    return output;
 }
 
-float4 PSMain(PSInput input) : SV_TARGET
+float4 PSMain(VS_OUTPUT input) : SV_TARGET
 {
-    return input.color;
+    return t0.Sample(s0, input.texCoord) * color;
 }

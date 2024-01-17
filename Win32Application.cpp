@@ -1,45 +1,52 @@
-//*********************************************************
-//
-// Copyright (c) Microsoft. All rights reserved.
-// This code is licensed under the MIT License (MIT).
-// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
-// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
-// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
-//
-//*********************************************************
-
 #include "stdafx.h"
 #include "Win32Application.h"
+#include "Renderer.h"
+
+#define CATCH_PRINT_ERROR(extraCatchCode) \
+    catch(const std::exception& ex) \
+    { \
+        fwprintf(stderr, L"ERROR: %hs\n", ex.what()); \
+        extraCatchCode \
+    } \
+    catch(...) \
+    { \
+        fwprintf(stderr, L"UNKNOWN ERROR.\n"); \
+        extraCatchCode \
+    }
+
+static const wchar_t* const CLASS_NAME = L"D3D12MemAllocSample";
 
 HWND Win32Application::m_hwnd = nullptr;
+UINT64 Win32Application::m_TimeOffset;
+UINT64 Win32Application::m_TimeValue;
+float Win32Application::m_Time;
+float Win32Application::m_TimeDelta;
 
-int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
+int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 {
-    // Parse the command line parameters
-    int argc;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    pSample->ParseCommandLineArgs(argv, argc);
-    LocalFree(argv);
-
-    // Initialize the window class.
-    WNDCLASSEX windowClass = { 0 };
-    windowClass.cbSize = sizeof(WNDCLASSEX);
-    windowClass.style = CS_HREDRAW | CS_VREDRAW;
-    windowClass.lpfnWndProc = WindowProc;
-    windowClass.hInstance = hInstance;
+    WNDCLASSEX windowClass;
+    ZeroMemory(&windowClass, sizeof(windowClass));
+    windowClass.cbSize = sizeof(windowClass);
+    windowClass.style = CS_VREDRAW | CS_HREDRAW | CS_DBLCLKS;
+    windowClass.hbrBackground = NULL;
     windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-    windowClass.lpszClassName = L"DXSampleClass";
-    RegisterClassEx(&windowClass);
+    windowClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    windowClass.hInstance = hInstance;
+    windowClass.lpfnWndProc = &WindowProc;
+    windowClass.lpszClassName = CLASS_NAME;
 
+    ATOM classR = RegisterClassEx(&windowClass);
+    assert(classR);
+
+    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     RECT windowRect = { 0, 0, static_cast<LONG>(pSample->GetWidth()), static_cast<LONG>(pSample->GetHeight()) };
-    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+    AdjustWindowRect(&windowRect, style, FALSE);
 
     // Create the window and store a handle to it.
     m_hwnd = CreateWindow(
         windowClass.lpszClassName,
         pSample->GetTitle(),
-        WS_OVERLAPPEDWINDOW,
+        style,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         windowRect.right - windowRect.left,
@@ -48,72 +55,70 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
         nullptr,        // We aren't using menus.
         hInstance,
         pSample);
+    assert(m_hwnd);
 
-    // Initialize the sample. OnInit is defined in each child-implementation of DXSample.
-    pSample->OnInit();
+    pSample->InitD3D();
+    m_TimeOffset = GetTickCount64();
 
     ShowWindow(m_hwnd, nCmdShow);
 
-    // Main sample loop.
-    MSG msg = {};
-    while (msg.message != WM_QUIT)
+    MSG msg;
+    for (;;)
     {
-        // Process any messages in the queue.
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
+            if (msg.message == WM_QUIT)
+                break;
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
+        else
+        {
+            const UINT64 newTimeValue = GetTickCount64() - m_TimeOffset;
+            m_TimeDelta = (float)(newTimeValue - m_TimeValue) * 0.001f;
+            m_TimeValue = newTimeValue;
+            m_Time = (float)newTimeValue * 0.001f;
+
+            pSample->Update(m_Time);
+            pSample->Render();
+        }
     }
-
-    pSample->OnDestroy();
-
-    // Return this part of the WM_QUIT message to Windows.
-    return static_cast<char>(msg.wParam);
+    return (int)msg.wParam;
 }
 
-// Main message handler for the sample.
 LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+    Renderer* pSample = reinterpret_cast<Renderer*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
     switch (message)
     {
-    case WM_CREATE:
+        case WM_CREATE:
         {
-            // Save the DXSample* passed in to CreateWindow.
+            // Save the Renderer* passed in to CreateWindow.
             LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
             SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
         }
+
+        return 0;
+    case WM_DESTROY:
+        try
+        {
+            pSample->Cleanup();
+        }
+        CATCH_PRINT_ERROR(;)
+        
+        PostQuitMessage(0);
         return 0;
 
     case WM_KEYDOWN:
-        if (pSample)
+        try
         {
-            pSample->OnKeyDown(static_cast<UINT8>(wParam));
+            pSample->OnKeyDown(wParam);
         }
-        return 0;
-
-    case WM_KEYUP:
-        if (pSample)
-        {
-            pSample->OnKeyUp(static_cast<UINT8>(wParam));
-        }
-        return 0;
-
-    case WM_PAINT:
-        if (pSample)
-        {
-            pSample->OnUpdate();
-            pSample->OnRender();
-        }
-        return 0;
-
-    case WM_DESTROY:
-        PostQuitMessage(0);
+        CATCH_PRINT_ERROR(DestroyWindow(hWnd);)
+        
         return 0;
     }
 
-    // Handle any messages the switch statement didn't.
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
