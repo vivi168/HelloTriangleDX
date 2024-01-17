@@ -95,7 +95,7 @@
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Win32Application.h" />
     <ClInclude Include="d3dx12.h" />
-    <ClInclude Include="DXSampleHelper.h" />
+    <ClInclude Include="RendererHelper.h" />
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>

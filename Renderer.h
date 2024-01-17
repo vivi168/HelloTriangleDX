@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DXSampleHelper.h"
+#include "RendererHelper.h"
 #include "D3D12MemAlloc.h"
 
 using namespace DirectX;

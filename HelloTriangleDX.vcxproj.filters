@@ -21,7 +21,7 @@
     <ClInclude Include="d3dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DXSampleHelper.h">
+    <ClInclude Include="RendererHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Win32Application.h">
