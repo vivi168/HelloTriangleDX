@@ -113,11 +113,6 @@ private:
 	D3D12MA::Allocation* m_DepthStencilAllocation;
 	ComPtr<ID3D12DescriptorHeap> m_DepthStencilDescriptorHeap;
 
-	struct Vertex {
-		XMFLOAT3 pos;
-		XMFLOAT2 texCoord;
-	};
-
 	struct ConstantBuffer0_PS
 	{
 		XMFLOAT4 Color;

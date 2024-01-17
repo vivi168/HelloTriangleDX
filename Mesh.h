@@ -3,9 +3,10 @@
 #include <string>
 #include <vector>
 
-typedef char STRING20[20];
+#define MAX_TEXTURE_NAME_LEN 64
+typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
 
-struct Vertex3D
+struct Vertex
 {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
@@ -19,7 +20,7 @@ struct Subset
 {
     unsigned int start, count;
     Texture* texture;
-    STRING20 name;
+    TEXTURENAME name;
 };
 
 struct Mesh3D
@@ -29,7 +30,7 @@ struct Mesh3D
         int numIndices;
         int numSubsets;
     } header;
-    std::vector<Vertex3D> vertices;
+    std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
     std::vector<Subset> subsets;
 
