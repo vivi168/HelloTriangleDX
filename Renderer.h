@@ -86,6 +86,7 @@ private:
 	ComPtr<ID3D12Device> m_Device;
 	DXGI_ADAPTER_DESC1 m_AdapterDesc;
 	ComPtr<D3D12MA::Allocator> m_Allocator;
+	D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks; // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
 
 	ComPtr<IDXGISwapChain3> m_SwapChain; // swapchain used to switch between render targets
 	ComPtr<ID3D12CommandQueue> m_CommandQueue; // container for command lists
@@ -139,4 +140,12 @@ private:
 
 	ComPtr<ID3D12Resource> m_Texture;
 	D3D12MA::Allocation* m_TextureAllocation;
+
+	static const UINT PRESENT_SYNC_INTERVAL;
+	static const DXGI_FORMAT RENDER_TARGET_FORMAT;
+	static const DXGI_FORMAT DEPTH_STENCIL_FORMAT;
+	static const D3D_FEATURE_LEVEL MY_D3D_FEATURE_LEVEL;
+
+	static const bool ENABLE_DEBUG_LAYER;
+	static const bool ENABLE_CPU_ALLOCATION_CALLBACKS;
 };

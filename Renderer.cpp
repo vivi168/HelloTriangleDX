@@ -6,16 +6,13 @@
 #include <Shlwapi.h>
 #include <atomic>
 
-static const UINT PRESENT_SYNC_INTERVAL = 1;
-static const DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
-static const D3D_FEATURE_LEVEL MY_D3D_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_0;
+const UINT Renderer::PRESENT_SYNC_INTERVAL = 1;
+const DXGI_FORMAT Renderer::RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+const DXGI_FORMAT Renderer::DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
+const D3D_FEATURE_LEVEL Renderer::MY_D3D_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_0;
 
-static const bool ENABLE_DEBUG_LAYER = true;
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
-static constexpr D3D12MA::ALLOCATOR_FLAGS g_AllocatorFlags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
-static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks = {}; // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
+const bool Renderer::ENABLE_DEBUG_LAYER = true;
+const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 
 // ===========
 
@@ -94,6 +91,7 @@ ComPtr<IDXGIAdapter1> DXGIUsage::CreateAdapter(const GPUSelection& GPUSelection)
 
 // ===========
 
+static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
 static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
 
 static std::atomic<size_t> g_CpuAllocationCount{ 0 };
@@ -172,7 +170,7 @@ void Renderer::InitD3D()
 
     {
         D3D12MA::ALLOCATOR_DESC desc = {};
-        desc.Flags = g_AllocatorFlags;
+        desc.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
         desc.pDevice = device;
         desc.pAdapter = m_Adapter.Get();
 
