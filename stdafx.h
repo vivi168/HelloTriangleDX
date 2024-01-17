@@ -35,6 +35,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <cstddef>
+#include <cstdint>
 
 #include <wrl.h>
 #include <shellapi.h>

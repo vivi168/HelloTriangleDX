@@ -482,13 +482,14 @@ void Renderer::InitD3D()
 	psoDesc.InputLayout.pInputElementDescs = inputLayout;
 	psoDesc.pRootSignature = m_RootSignature.Get(); // the root signature that describes the input data this pso needs
 
-	//psoDesc.VS.BytecodeLength = sizeof(VS::g_main);
-	//psoDesc.VS.pShaderBytecode = VS::g_main;
-	//psoDesc.PS.BytecodeLength = sizeof(PS::g_main);
-	//psoDesc.PS.pShaderBytecode = PS::g_main;
+	auto vertexShaderBlob = ReadData(GetAssetFullPath(L"VS.cso").c_str());
+	auto pixelShaderBlob = ReadData(GetAssetFullPath(L"PS.cso").c_str());
 
-	ComPtr<ID3DBlob> vertexShader;
-	ComPtr<ID3DBlob> pixelShader;
+	D3D12_SHADER_BYTECODE vertexShader = { vertexShaderBlob.data(), vertexShaderBlob.size() };
+	D3D12_SHADER_BYTECODE pixelShader = { pixelShaderBlob.data(), pixelShaderBlob.size() };
+
+	psoDesc.VS = vertexShader;
+	psoDesc.PS = pixelShader;
 
 #if defined(_DEBUG)
 	// Enable better shader debugging with the graphics debugging tools.
@@ -496,12 +497,6 @@ void Renderer::InitD3D()
 #else
 	UINT compileFlags = 0;
 #endif
-
-	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr));
-	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr));
-
-	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
 
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; // type of topology we are drawing
 	psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT; // format of the render target

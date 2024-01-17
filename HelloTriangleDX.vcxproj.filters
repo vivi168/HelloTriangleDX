@@ -58,8 +58,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="shaders.hlsl">
+    <FxCompile Include="VS.hlsl">
       <Filter>Assets\Shaders</Filter>
-    </CustomBuild>
+    </FxCompile>
+    <FxCompile Include="PS.hlsl">
+      <Filter>Assets\Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
