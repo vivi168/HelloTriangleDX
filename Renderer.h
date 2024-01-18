@@ -86,14 +86,14 @@ private:
 	ComPtr<ID3D12Device> m_Device;
 	DXGI_ADAPTER_DESC1 m_AdapterDesc;
 	ComPtr<D3D12MA::Allocator> m_Allocator;
-	D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks; // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
+	D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks; // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
 
 	ComPtr<IDXGISwapChain3> m_SwapChain; // swapchain used to switch between render targets
 	ComPtr<ID3D12CommandQueue> m_CommandQueue; // container for command lists
 	ComPtr<ID3D12DescriptorHeap> m_RtvDescriptorHeap; // a descriptor heap to hold resources like the render targets
 	ComPtr<ID3D12Resource> m_RenderTargets[FRAME_BUFFER_COUNT]; // number of render targets equal to buffer count
-	ComPtr<ID3D12CommandAllocator> g_CommandAllocators[FRAME_BUFFER_COUNT]; // we want enough allocators for each buffer * number of threads (we only have one thread)
-	ComPtr<ID3D12GraphicsCommandList> g_CommandList; // a command list we can record commands into, then execute them to render the frame
+	ComPtr<ID3D12CommandAllocator> m_CommandAllocators[FRAME_BUFFER_COUNT]; // we want enough allocators for each buffer * number of threads (we only have one thread)
+	ComPtr<ID3D12GraphicsCommandList> m_CommandList; // a command list we can record commands into, then execute them to render the frame
 	ComPtr<ID3D12Fence> m_Fences[FRAME_BUFFER_COUNT];    // an object that is locked while our command list is being executed by the gpu. We need as many
 	//as we have allocators (more if we want to know when the gpu is finished with an asset)
 	HANDLE m_FenceEvent; // a handle to an event when our m_Fences is unlocked by the gpu
@@ -120,6 +120,7 @@ private:
 	struct ConstantBuffer1_VS
 	{
 		XMFLOAT4X4 WorldViewProj;
+		float time;
 	};
 
 	const size_t ConstantBufferPerObjectAlignedSize = AlignUp<size_t>(sizeof(ConstantBuffer1_VS), 256);
@@ -139,7 +140,7 @@ private:
 	static const UINT PRESENT_SYNC_INTERVAL;
 	static const DXGI_FORMAT RENDER_TARGET_FORMAT;
 	static const DXGI_FORMAT DEPTH_STENCIL_FORMAT;
-	static const D3D_FEATURE_LEVEL MY_D3D_FEATURE_LEVEL;
+	static const D3D_FEATURE_LEVEL D3D_FEATURE_LEVEL;
 
 	static const bool ENABLE_DEBUG_LAYER;
 	static const bool ENABLE_CPU_ALLOCATION_CALLBACKS;

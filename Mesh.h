@@ -14,11 +14,51 @@ struct Vertex
     DirectX::XMFLOAT2 uv;
 };
 
-struct Texture;
+struct Texture
+{
+    struct Header {
+        uint16_t width;
+        uint16_t height;
+    } header;
+
+    std::vector<uint8_t> pixels;
+
+    void Read(std::string filename);
+
+    DXGI_FORMAT Format() const
+    {
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    uint32_t BytesPerPixel() const
+    {
+        return 4;
+    }
+
+    uint32_t Width() const
+    {
+        return header.width;
+    }
+
+    uint32_t Height() const
+    {
+        return header.height;
+    }
+
+    uint64_t BytesPerRow() const
+    {
+        return Width() * BytesPerPixel();
+    }
+
+    uint64_t ImageSize() const
+    {
+        return Height() * BytesPerRow();
+    }
+};
 
 struct Subset
 {
-    unsigned int start, count;
+    uint32_t start, count;
     Texture* texture;
     TEXTURENAME name;
 };
@@ -26,13 +66,24 @@ struct Subset
 struct Mesh3D
 {
     struct Header {
-        unsigned int numVerts;
-        unsigned int numIndices;
-        unsigned int numSubsets;
+        uint32_t numVerts;
+        uint32_t numIndices;
+        uint32_t numSubsets;
     } header;
     std::vector<Vertex> vertices;
     std::vector<uint16_t> indices;
     std::vector<Subset> subsets;
 
-    void read(std::string filename);
+    // TODO: automatically read textures as well
+    void Read(std::string filename);
+
+    uint64_t VertexBufferSize() const
+    {
+        return sizeof(Vertex) * header.numVerts;
+    }
+
+    uint64_t IndexBufferSize() const
+    {
+        return sizeof(uint16_t) * header.numIndices;
+    }
 };

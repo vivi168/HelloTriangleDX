@@ -3,6 +3,7 @@
 cbuffer ConstantBuffer1 : register(b1)
 {
     float4x4 WorldViewProj;
+    float time;
 };
 
 VS_OUTPUT main(VS_INPUT input)

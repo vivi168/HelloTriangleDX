@@ -1,7 +1,18 @@
 #include "stdafx.h"
 #include "Mesh.h"
 
-void Mesh3D::read(std::string filename)
+void Texture::Read(std::string filename)
+{
+	FILE* fp;
+	fopen_s(&fp, filename.c_str(), "rb");
+	assert(fp);
+
+	fread(&header, sizeof(Header), 1, fp);
+	pixels.resize(ImageSize());
+	fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
+}
+
+void Mesh3D::Read(std::string filename)
 {
 	FILE* fp;
 	fopen_s(&fp, filename.c_str(), "rb");
