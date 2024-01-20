@@ -491,13 +491,6 @@ void Renderer::InitD3D()
 	psoDesc.VS = vertexShader;
 	psoDesc.PS = pixelShader;
 
-#if defined(_DEBUG)
-	// Enable better shader debugging with the graphics debugging tools.
-	UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#else
-	UINT compileFlags = 0;
-#endif
-
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; // type of topology we are drawing
 	psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT; // format of the render target
 	psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
@@ -684,7 +677,7 @@ void Renderer::InitD3D()
 	// create a vertex buffer view for the triangle. We get the GPU memory address to the vertex pointer using the GetGPUVirtualAddress() method
 	m_VertexBufferView.BufferLocation = m_VertexBuffer->GetGPUVirtualAddress();
 	m_VertexBufferView.StrideInBytes = sizeof(Vertex);
-	m_VertexBufferView.SizeInBytes = vBufferSize;
+	m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
 
 	// create a index buffer view for the triangle. We get the GPU memory address to the vertex pointer using the GetGPUVirtualAddress() method
 	m_IndexBufferView.BufferLocation = m_IndexBuffer->GetGPUVirtualAddress();
