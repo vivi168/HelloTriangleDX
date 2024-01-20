@@ -36,13 +36,15 @@ public:
 	const WCHAR* GetTitle() const { return m_title.c_str(); }
 
     void InitAdapter(DXGIUsage*, GPUSelection);
-	void InitD3D();
+	void Init();
 	void Update(float);
 	void Render();
 	void Cleanup();
 	void OnKeyDown(WPARAM key);
 
 private:
+	void InitD3D();
+	void InitResources();
 	void WaitForFrame(size_t frameIndex) // wait until gpu is finished with command list
 	{
 		// if the current m_Fences value is still less than "m_FenceValues", then we know the GPU has not finished executing

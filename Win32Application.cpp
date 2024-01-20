@@ -57,7 +57,7 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
         pSample);
     assert(m_hwnd);
 
-    pSample->InitD3D();
+    pSample->Init();
     m_TimeOffset = GetTickCount64();
 
     ShowWindow(m_hwnd, nCmdShow);
