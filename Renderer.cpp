@@ -2,7 +2,7 @@
 
 #include "Win32Application.h"
 #include "Renderer.h"
-#include "Mesh.h"
+#include "Input.h"
 
 #include <Shlwapi.h>
 #include <atomic>
@@ -745,8 +745,8 @@ void Renderer::InitResources()
 				nullptr,
 				&m_ConstantBufferUploadAllocation[i],
 				IID_PPV_ARGS(&m_ConstantBufferUploadHeap[i])));
-			m_ConstantBufferUploadHeap[i]->SetName(L"Constant Buffer Upload Resource Heap");
-			m_ConstantBufferUploadAllocation[i]->SetName(L"Constant Buffer Upload Resource Heap");
+			m_ConstantBufferUploadHeap[i]->SetName(L"Constant Buffer (per frame) Upload Resource Heap");
+			m_ConstantBufferUploadAllocation[i]->SetName(L"Constant Buffer (per frame) Upload Resource Heap");
 
 			D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
 			cbvDesc.BufferLocation = m_ConstantBufferUploadHeap[i]->GetGPUVirtualAddress();
@@ -782,8 +782,10 @@ void Renderer::InitResources()
 				nullptr, // we do not have use an optimized clear value for constant buffers
 				&m_CbPerObjectUploadHeapAllocations[i],
 				IID_PPV_ARGS(&m_CbPerObjectUploadHeaps[i])));
-			m_CbPerObjectUploadHeaps[i]->SetName(L"Constant Buffer Upload Resource Heap");
-			m_CbPerObjectUploadHeapAllocations[i]->SetName(L"Constant Buffer Upload Resource Heap");
+
+			std::wstring name = L"Constant Buffer (per obj) Upload Resource Heap - " + std::to_wstring(i);
+			m_CbPerObjectUploadHeaps[i]->SetName(name.c_str());
+			m_CbPerObjectUploadHeapAllocations[i]->SetName(name.c_str());
 
 			CHECK_HR(m_CbPerObjectUploadHeaps[i]->Map(0, &EMPTY_RANGE, &m_CbPerObjectAddress[i]));
 		}
@@ -1086,23 +1088,12 @@ void Renderer::Cleanup()
 }
 
 
-void Renderer::OnKeyDown(WPARAM key)
+void Renderer::PrintStatsString()
 {
-	switch (key)
-	{
-	case 'J':
-	{
-		WCHAR* statsString = NULL;
-		m_Allocator->BuildStatsString(&statsString, TRUE);
-		wprintf(L"%s\n", statsString);
-		m_Allocator->FreeStatsString(statsString);
-	}
-	break;
-
-	case VK_ESCAPE:
-		PostMessage(Win32Application::GetHwnd(), WM_CLOSE, 0, 0);
-		break;
-	}
+	WCHAR* statsString = NULL;
+	m_Allocator->BuildStatsString(&statsString, TRUE);
+	wprintf(L"%s\n", statsString);
+	m_Allocator->FreeStatsString(statsString);
 }
 
 // ===========

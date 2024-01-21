@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "Win32Application.h"
 #include "Renderer.h"
+#include "Input.h"
 
 #define CATCH_PRINT_ERROR(extraCatchCode) \
     catch(const std::exception& ex) \
@@ -62,6 +63,8 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
     ShowWindow(m_hwnd, nCmdShow);
 
+    Camera camera;
+
     MSG msg;
     for (;;)
     {
@@ -79,8 +82,18 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
             m_TimeValue = newTimeValue;
             m_Time = (float)newTimeValue * 0.001f;
 
+            Input::Update();
+
             pSample->Update(m_Time);
             pSample->Render();
+
+            if (Input::IsPressed(Input::KB::S)) {
+                pSample->PrintStatsString();
+            }
+
+            if (Input::IsPressed(Input::KB::Escape)) {
+                PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+            }
         }
     }
     return (int)msg.wParam;
@@ -109,14 +122,11 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
         
         PostQuitMessage(0);
         return 0;
-
+    case WM_KEYUP:
+        Input::OnKeyUp(wParam);
+        return 0;
     case WM_KEYDOWN:
-        try
-        {
-            pSample->OnKeyDown(wParam);
-        }
-        CATCH_PRINT_ERROR(DestroyWindow(hWnd);)
-        
+        Input::OnKeyDown(wParam);
         return 0;
     }
 

@@ -2,6 +2,10 @@
 
 #include "RendererHelper.h"
 #include "D3D12MemAlloc.h"
+#include "Mesh.h"
+#include "Camera.h"
+
+#include <list>
 
 using namespace DirectX;
 
@@ -40,7 +44,12 @@ public:
 	void Update(float);
 	void Render();
 	void Cleanup();
-	void OnKeyDown(WPARAM key);
+	void PrintStatsString();
+
+	void SetSceneCamera(Camera* cam)
+	{
+		m_Scene.camera = cam;
+	}
 
 private:
 	void InitD3D();
@@ -155,4 +164,15 @@ private:
 	ComPtr<ID3D12Resource> m_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 	D3D12MA::Allocation* m_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 	void* m_ConstantBufferAddress[FRAME_BUFFER_COUNT];
+
+	struct SceneNode
+	{
+		Mesh3D* mesh;
+
+	};
+	struct Scene
+	{
+		std::list<SceneNode> nodes;
+		Camera* camera;
+	} m_Scene;
 };
