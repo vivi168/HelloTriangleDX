@@ -75,6 +75,14 @@ private:
 
 	void PrintAdapterInformation(IDXGIAdapter1*);
 
+	static const UINT PRESENT_SYNC_INTERVAL;
+	static const DXGI_FORMAT RENDER_TARGET_FORMAT;
+	static const DXGI_FORMAT DEPTH_STENCIL_FORMAT;
+	static const D3D_FEATURE_LEVEL D3D_FEATURE_LEVEL;
+
+	static const bool ENABLE_DEBUG_LAYER;
+	static const bool ENABLE_CPU_ALLOCATION_CALLBACKS;
+
 	UINT m_width;
 	UINT m_height;
 	float m_aspectRatio;
@@ -82,7 +90,8 @@ private:
 	std::wstring m_title;
 	std::wstring m_assetsPath;
 
-    DXGIUsage* m_DXGIUsage;
+	// Pipeline objects
+	DXGIUsage* m_DXGIUsage;
 	ComPtr<IDXGIAdapter1> m_Adapter;
 
 	ComPtr<ID3D12Device> m_Device;
@@ -92,37 +101,48 @@ private:
 
 	ComPtr<IDXGISwapChain3> m_SwapChain; // swapchain used to switch between render targets
 	ComPtr<ID3D12CommandQueue> m_CommandQueue; // container for command lists
-	ComPtr<ID3D12DescriptorHeap> m_RtvDescriptorHeap; // a descriptor heap to hold resources like the render targets
-	ComPtr<ID3D12Resource> m_RenderTargets[FRAME_BUFFER_COUNT]; // number of render targets equal to buffer count
 	ComPtr<ID3D12CommandAllocator> m_CommandAllocators[FRAME_BUFFER_COUNT]; // we want enough allocators for each buffer * number of threads (we only have one thread)
 	ComPtr<ID3D12GraphicsCommandList> m_CommandList; // a command list we can record commands into, then execute them to render the frame
+	ComPtr<ID3D12PipelineState> m_PipelineStateObject;
+
+	// Synchronization objects.
 	ComPtr<ID3D12Fence> m_Fences[FRAME_BUFFER_COUNT];    // an object that is locked while our command list is being executed by the gpu. We need as many
 	//as we have allocators (more if we want to know when the gpu is finished with an asset)
 	HANDLE m_FenceEvent; // a handle to an event when our m_Fences is unlocked by the gpu
 	UINT64 m_FenceValues[FRAME_BUFFER_COUNT]; // this value is incremented each frame. each m_Fences will have its own value
 	UINT m_FrameIndex; // current rtv we are on
+
+	// Resources
+	ComPtr<ID3D12DescriptorHeap> m_RtvDescriptorHeap; // a descriptor heap to hold resources like the render targets
+	ComPtr<ID3D12Resource> m_RenderTargets[FRAME_BUFFER_COUNT]; // number of render targets equal to buffer count
 	UINT m_RtvDescriptorSize; // size of the rtv descriptor on the m_Device (all front and back buffers will be the same size)
 
-	ComPtr<ID3D12PipelineState> m_PipelineStateObject;
-	ComPtr<ID3D12RootSignature> m_RootSignature;
-	ComPtr<ID3D12Resource> m_VertexBuffer;
-	D3D12MA::Allocation* m_VertexBufferAllocation;
-	ComPtr<ID3D12Resource> m_IndexBuffer;
-	D3D12MA::Allocation* m_IndexBufferAllocation;
-	D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
-	D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
 	ComPtr<ID3D12Resource> m_DepthStencilBuffer;
 	D3D12MA::Allocation* m_DepthStencilAllocation;
 	ComPtr<ID3D12DescriptorHeap> m_DepthStencilDescriptorHeap;
 
+	ComPtr<ID3D12RootSignature> m_RootSignature;
+
+	ComPtr<ID3D12Resource> m_VertexBuffer;
+	D3D12MA::Allocation* m_VertexBufferAllocation;
+	D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
+
+	ComPtr<ID3D12Resource> m_IndexBuffer;
+	D3D12MA::Allocation* m_IndexBufferAllocation;
+	D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
+
+	ComPtr<ID3D12Resource> m_Texture;
+	D3D12MA::Allocation* m_TextureAllocation;
+
 	struct ConstantBuffer0_PS
 	{
-		XMFLOAT4 Color;
+	    XMFLOAT4 Color;
 	};
+
 	struct ConstantBuffer1_VS
 	{
-		XMFLOAT4X4 WorldViewProj;
-		float time;
+	    XMFLOAT4X4 WorldViewProj;
+	    float time;
 	};
 
 	const size_t ConstantBufferPerObjectAlignedSize = AlignUp<size_t>(sizeof(ConstantBuffer1_VS), 256);
@@ -135,15 +155,4 @@ private:
 	ComPtr<ID3D12Resource> m_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 	D3D12MA::Allocation* m_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 	void* m_ConstantBufferAddress[FRAME_BUFFER_COUNT];
-
-	ComPtr<ID3D12Resource> m_Texture;
-	D3D12MA::Allocation* m_TextureAllocation;
-
-	static const UINT PRESENT_SYNC_INTERVAL;
-	static const DXGI_FORMAT RENDER_TARGET_FORMAT;
-	static const DXGI_FORMAT DEPTH_STENCIL_FORMAT;
-	static const D3D_FEATURE_LEVEL D3D_FEATURE_LEVEL;
-
-	static const bool ENABLE_DEBUG_LAYER;
-	static const bool ENABLE_CPU_ALLOCATION_CALLBACKS;
 };
