@@ -64,6 +64,9 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
     ShowWindow(m_hwnd, nCmdShow);
 
     Camera camera;
+    camera.Translate(0.f, 0.f, 10.f);
+
+    pSample->SetSceneCamera(&camera);
 
     MSG msg;
     for (;;)
@@ -83,6 +86,7 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
             m_Time = (float)newTimeValue * 0.001f;
 
             Input::Update();
+            camera.ProcessKeyboard();
 
             pSample->Update(m_Time);
             pSample->Render();

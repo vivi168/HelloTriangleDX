@@ -3,7 +3,7 @@
 namespace Input
 {
 	enum class KB {
-		W, A, S, D, Up, Left, Down, Right, Escape
+		Q, W, E, A, S, D, Up, Left, Down, Right, Escape
 	};
 
 	void Update();

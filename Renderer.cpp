@@ -882,12 +882,8 @@ void Renderer::Update(float time)
 			m_aspectRatio,
 			0.1f,
 			1000.f);
-
-		XMVECTOR at = XMVectorSet(0.f, 0.f, 0.f, 1.f);
-		XMVECTOR eye = XMVectorSet(0.f, 3.5f, -5.5f, 1.f);
-		XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 1.f);
-		XMMATRIX view = XMMatrixLookAtLH(eye, at, up);
-
+		
+		XMMATRIX view = m_Scene.camera->LookAt();
 		XMMATRIX viewProjection = XMMatrixMultiply(view, projection);
 
 		// cube 1

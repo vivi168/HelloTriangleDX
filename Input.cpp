@@ -44,8 +44,14 @@ void SetNewKeyState(WPARAM key, bool state)
 {
 	switch (key)
 	{
+	case 'Q':
+		inputState.newKeyState[KB::Q] = state;
+		break;
 	case 'W':
 		inputState.newKeyState[KB::W] = state;
+		break;
+	case 'E':
+		inputState.newKeyState[KB::E] = state;
 		break;
 	case 'A':
 		inputState.newKeyState[KB::A] = state;
