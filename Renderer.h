@@ -54,15 +54,20 @@ struct Texture
 		uint16_t height;
 	} header;
 	std::vector<uint8_t> pixels;
+	std::string name;
 
 	ComPtr<ID3D12Resource> m_Texture;
 	D3D12MA::Allocation* m_TextureAllocation = nullptr;
+
+	D3D12MA::Allocation* textureUploadAllocation = nullptr;
 
 	void Read(std::string filename)
 	{
 		FILE* fp;
 		fopen_s(&fp, filename.c_str(), "rb");
 		assert(fp);
+
+		name = filename;
 
 		fread(&header, sizeof(Header), 1, fp);
 		pixels.resize(ImageSize());
@@ -211,8 +216,8 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_RootSignature;
 
-	ComPtr<ID3D12Resource> m_Texture;
-	D3D12MA::Allocation* m_TextureAllocation;
+	//ComPtr<ID3D12Resource> m_Texture;
+	//D3D12MA::Allocation* m_TextureAllocation;
 
 	struct ConstantBuffer0_PS
 	{
@@ -246,5 +251,5 @@ private:
 
 	void LoadMesh3D(Mesh3D*);
 	Geometry* CreateGeometry(Mesh3D* mesh);
-	Texture* CreateTexture(char* filename);
+	Texture* CreateTexture(std::string name);
 };

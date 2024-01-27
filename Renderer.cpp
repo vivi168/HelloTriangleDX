@@ -352,6 +352,11 @@ void Renderer::InitFrameResources()
 		m_Device->CreateDepthStencilView(m_DepthStencilBuffer.Get(), &depthStencilDesc, m_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
+	// SRV heap desc
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+	}
+
 	// CBV descriptor heap
 	for (int i = 0; i < FRAME_BUFFER_COUNT; ++i)
 	{
@@ -574,105 +579,6 @@ void Renderer::LoadAssets()
 		LoadMesh3D(node->mesh);
 	}
 
-	// Texture
-	D3D12MA::Allocation* textureUploadAllocation;
-	{
-		Texture tex;
-		tex.Read("assets/alteractreebranch05a.raw");
-
-		D3D12_RESOURCE_DESC textureDesc;
-		textureDesc = {};
-		textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-		textureDesc.Alignment = 0;
-		textureDesc.Width = tex.Width();
-		textureDesc.Height = tex.Height();
-		textureDesc.DepthOrArraySize = 1;
-		textureDesc.MipLevels = 1;
-		textureDesc.Format = tex.Format();
-		textureDesc.SampleDesc.Count = 1;
-		textureDesc.SampleDesc.Quality = 0;
-		textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-		textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-		D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
-		textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-		CHECK_HR(m_Allocator->CreateResource(
-			&textureAllocDesc,
-			&textureDesc,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			nullptr, // pOptimizedClearValue
-			&m_TextureAllocation,
-			IID_PPV_ARGS(&m_Texture)));
-		m_Texture->SetName(L"texture");
-		m_TextureAllocation->SetName(L"texture");
-
-		UINT64 textureUploadBufferSize;
-		m_Device->GetCopyableFootprints(
-			&textureDesc,
-			0, // FirstSubresource
-			1, // NumSubresources
-			0, // BaseOffset
-			nullptr, // pLayouts
-			nullptr, // pNumRows
-			nullptr, // pRowSizeInBytes
-			&textureUploadBufferSize); // pTotalBytes
-
-		D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
-		textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-		D3D12_RESOURCE_DESC textureUploadResourceDesc = {};
-		textureUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		textureUploadResourceDesc.Alignment = 0;
-		textureUploadResourceDesc.Width = textureUploadBufferSize;
-		textureUploadResourceDesc.Height = 1;
-		textureUploadResourceDesc.DepthOrArraySize = 1;
-		textureUploadResourceDesc.MipLevels = 1;
-		textureUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-		textureUploadResourceDesc.SampleDesc.Count = 1;
-		textureUploadResourceDesc.SampleDesc.Quality = 0;
-		textureUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-		textureUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-		ComPtr<ID3D12Resource> textureUpload;
-
-		CHECK_HR(m_Allocator->CreateResource(
-			&textureUploadAllocDesc,
-			&textureUploadResourceDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr, // pOptimizedClearValue
-			&textureUploadAllocation,
-			IID_PPV_ARGS(&textureUpload)));
-		textureUpload->SetName(L"textureUpload");
-		textureUploadAllocation->SetName(L"textureUpload");
-
-		D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
-		textureSubresourceData.pData = tex.pixels.data();
-		textureSubresourceData.RowPitch = tex.BytesPerRow();
-		textureSubresourceData.SlicePitch = tex.ImageSize();
-
-		UpdateSubresources(m_CommandList.Get(), m_Texture.Get(), textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
-
-		D3D12_RESOURCE_BARRIER textureBarrier = {};
-		textureBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		textureBarrier.Transition.pResource = m_Texture.Get();
-		textureBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		textureBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-		textureBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-		m_CommandList->ResourceBarrier(1, &textureBarrier);
-
-		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		srvDesc.Format = textureDesc.Format;
-		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-		srvDesc.Texture2D.MipLevels = 1;
-		for (size_t i = 0; i < FRAME_BUFFER_COUNT; ++i)
-		{
-			D3D12_CPU_DESCRIPTOR_HANDLE descHandle = {
-				m_MainDescriptorHeap[i]->GetCPUDescriptorHandleForHeapStart().ptr +
-				m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
-			};
-			m_Device->CreateShaderResourceView(m_Texture.Get(), &srvDesc, descHandle);
-		}
-	}
-
 	// End of initial command list
 	{
 		m_CommandList->Close();
@@ -684,7 +590,11 @@ void Renderer::LoadAssets()
 		// increment the fence value now, otherwise the buffer might not be uploaded by the time we start drawing
 		WaitGPUIdle(m_FrameIndex);
 
-		textureUploadAllocation->Release();
+		// TODO: need method + ensure not null
+		for (auto& [k, tex] : m_Textures)
+		{
+			tex->textureUploadAllocation->Release();
+		}
 
 		// TODO: need method + ensure not null
 		for (auto& [k, geom] : m_Geometries)
@@ -800,17 +710,19 @@ void Renderer::Render()
 	D3D12_RECT scissorRect{ 0, 0, m_width, m_height };
 	m_CommandList->RSSetScissorRects(1, &scissorRect); // set the scissor rects
 
-	m_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // set the primitive topology
-
 	int i = 0;
 	for (auto node : m_Scene.nodes) {
 		auto geom = node->mesh->geometry;
 		m_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView); // set the vertex buffer (using the vertex buffer view)
 		m_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
+		m_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // set the primitive topology
 
 		int cbIndex = i * ConstantBufferPerObjectAlignedSize;
 		m_CommandList->SetGraphicsRootConstantBufferView(1,
 			m_CbPerObjectUploadHeaps[m_FrameIndex]->GetGPUVirtualAddress() + cbIndex);
+
+		// Loop over subsets and draw Indexed Instanced by subsets
+		// also need to switch texture
 		m_CommandList->DrawIndexedInstanced(node->mesh->header.numIndices, 1, 0, 0, 0);
 
 		i++;
@@ -862,8 +774,12 @@ void Renderer::Cleanup()
 
 	WaitGPUIdle(0);
 
-	m_Texture.Reset();
-	m_TextureAllocation->Release(); m_TextureAllocation = nullptr;
+	// TODO: need method + ensure not null
+	for (auto& [k, tex] : m_Textures)
+	{
+		tex->m_Texture.Reset();
+		tex->m_TextureAllocation->Release(); tex->m_TextureAllocation = nullptr;
+	}
 
 	// TODO: need method + ensure not null
 	for (auto& [k, geom] : m_Geometries)
@@ -981,14 +897,35 @@ void Renderer::PrintAdapterInformation(IDXGIAdapter1* adapter)
 
 void Renderer::LoadMesh3D(Mesh3D* mesh)
 {
-	if (m_Geometries.find(mesh->name) == std::end(m_Geometries))
+	auto geomNeedle = m_Geometries.find(mesh->name);
+	if (geomNeedle == std::end(m_Geometries))
 	{
+		printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
 		mesh->geometry = CreateGeometry(mesh);
+	}
+	else
+	{
+		printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
+		mesh->geometry = geomNeedle->second.get();
 	}
 
 	for (auto& subset : mesh->subsets)
 	{
-		// Textures
+		// TODO: get assets path
+		std::string name(subset.name);
+		std::string fullName = "assets/" + name;
+
+		auto needle = m_Textures.find(fullName);
+		if (needle == std::end(m_Textures))
+		{
+			subset.texture = CreateTexture(fullName);
+			printf("CREATE TEXTURE %s\n", fullName.c_str());
+		}
+		else
+		{
+			subset.texture = needle->second.get();
+			printf("TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
+		}
 	}
 }
 
@@ -1178,7 +1115,106 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
 	return m_Geometries[mesh->name].get();
 }
 
-Texture* Renderer::CreateTexture(char* filename)
+Texture* Renderer::CreateTexture(std::string name)
 {
-	return NULL;
+	std::unique_ptr<Texture> tex = std::make_unique<Texture>();
+	tex->Read(name);
+
+	D3D12_RESOURCE_DESC textureDesc;
+	textureDesc = {};
+	textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	textureDesc.Alignment = 0;
+	textureDesc.Width = tex->Width();
+	textureDesc.Height = tex->Height();
+	textureDesc.DepthOrArraySize = 1;
+	textureDesc.MipLevels = 1;
+	textureDesc.Format = tex->Format();
+	textureDesc.SampleDesc.Count = 1;
+	textureDesc.SampleDesc.Quality = 0;
+	textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+	D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
+	textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+	CHECK_HR(m_Allocator->CreateResource(
+		&textureAllocDesc,
+		&textureDesc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr, // pOptimizedClearValue
+		&tex->m_TextureAllocation,
+		IID_PPV_ARGS(&tex->m_Texture)));
+	tex->m_Texture->SetName(L"texture");
+	tex->m_TextureAllocation->SetName(L"texture");
+
+	UINT64 textureUploadBufferSize;
+	m_Device->GetCopyableFootprints(
+		&textureDesc,
+		0, // FirstSubresource
+		1, // NumSubresources
+		0, // BaseOffset
+		nullptr, // pLayouts
+		nullptr, // pNumRows
+		nullptr, // pRowSizeInBytes
+		&textureUploadBufferSize); // pTotalBytes
+
+	D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
+	textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+	D3D12_RESOURCE_DESC textureUploadResourceDesc = {};
+	textureUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	textureUploadResourceDesc.Alignment = 0;
+	textureUploadResourceDesc.Width = textureUploadBufferSize;
+	textureUploadResourceDesc.Height = 1;
+	textureUploadResourceDesc.DepthOrArraySize = 1;
+	textureUploadResourceDesc.MipLevels = 1;
+	textureUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+	textureUploadResourceDesc.SampleDesc.Count = 1;
+	textureUploadResourceDesc.SampleDesc.Quality = 0;
+	textureUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	textureUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+	ComPtr<ID3D12Resource> textureUpload;
+
+	CHECK_HR(m_Allocator->CreateResource(
+		&textureUploadAllocDesc,
+		&textureUploadResourceDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr, // pOptimizedClearValue
+		&tex->textureUploadAllocation,
+		IID_PPV_ARGS(&textureUpload)));
+	textureUpload->SetName(L"textureUpload");
+	tex->textureUploadAllocation->SetName(L"textureUpload");
+
+	D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
+	textureSubresourceData.pData = tex->pixels.data();
+	textureSubresourceData.RowPitch = tex->BytesPerRow();
+	textureSubresourceData.SlicePitch = tex->ImageSize();
+
+	UpdateSubresources(m_CommandList.Get(), tex->m_Texture.Get(), textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
+
+	D3D12_RESOURCE_BARRIER textureBarrier = {};
+	textureBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	textureBarrier.Transition.pResource = tex->m_Texture.Get();
+	textureBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+	textureBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	textureBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	m_CommandList->ResourceBarrier(1, &textureBarrier);
+
+	// HOW THE FUCK DOES switching texture work
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = textureDesc.Format;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+	for (size_t i = 0; i < FRAME_BUFFER_COUNT; ++i)
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE descHandle = {
+			m_MainDescriptorHeap[i]->GetCPUDescriptorHandleForHeapStart().ptr +
+			m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+		};
+		// need to offset into descHandle ?
+		m_Device->CreateShaderResourceView(tex->m_Texture.Get(), &srvDesc, descHandle);
+	}
+
+	m_Textures[name] = std::move(tex);
+
+	return m_Textures[name].get();
 }
