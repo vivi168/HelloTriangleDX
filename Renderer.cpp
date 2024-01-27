@@ -152,7 +152,7 @@ void Renderer::InitAdapter(DXGIUsage* dxgiUsage, GPUSelection gpuSelection)
 void Renderer::Init()
 {
 	InitD3D();
-	InitResources();
+	InitFrameResources();
 }
 
 void Renderer::InitD3D()
@@ -266,7 +266,7 @@ void Renderer::InitD3D()
 	}
 }
 
-void Renderer::InitResources()
+void Renderer::InitFrameResources()
 {
 	// RTV descriptor heap
 	{

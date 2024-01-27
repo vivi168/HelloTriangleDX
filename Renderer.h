@@ -131,8 +131,7 @@ public:
 
 private:
 	void InitD3D();
-	void InitResources();
-	
+	void InitFrameResources();
 
 	void WaitForFrame(size_t frameIndex) // wait until gpu is finished with command list
 	{
@@ -212,16 +211,6 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_RootSignature;
 
-	//ComPtr<ID3D12Resource> m_VertexBuffer;
-	//D3D12MA::Allocation* m_VertexBufferAllocation;
-	//D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
-
-	//ComPtr<ID3D12Resource> m_IndexBuffer;
-	//D3D12MA::Allocation* m_IndexBufferAllocation;
-	//D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
-
-	//uint32_t m_CubeIndexCount;
-
 	ComPtr<ID3D12Resource> m_Texture;
 	D3D12MA::Allocation* m_TextureAllocation;
 
@@ -245,7 +234,6 @@ private:
 	ComPtr<ID3D12Resource> m_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 	D3D12MA::Allocation* m_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 	void* m_ConstantBufferAddress[FRAME_BUFFER_COUNT];
-
 
 	struct Scene
 	{
