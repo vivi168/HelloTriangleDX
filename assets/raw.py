@@ -22,7 +22,7 @@ class RawImage:
         else:
             alpha = pixel[3]
 
-        print(pixel[0], pixel[1], pixel[2])
+        # print(pixel[0], pixel[1], pixel[2], 'ALPHA:', alpha)
 
         return struct.pack('<BBBB', pixel[0], pixel[1], pixel[2], alpha)
 

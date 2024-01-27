@@ -58,8 +58,9 @@ struct Texture
 struct Subset
 {
     uint32_t start, count;
-    Texture* texture;
     TEXTURENAME name;
+
+    Texture* texture = nullptr;
 };
 
 struct Mesh3D

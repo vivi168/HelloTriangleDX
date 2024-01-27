@@ -117,9 +117,9 @@ class Subset:
         return '{} {} ({})'.format(self.start * 3, self.count * 3, self.texture_name)
 
     def pack(self):
-        data = struct.pack('<IIQ', self.start * 3, self.count * 3, 0) # pad Texture pointer
-
-        return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
+        data = struct.pack('<II', self.start * 3, self.count * 3)
+        pointer = struct.pack('<Q', 0)
+        return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii') + pointer
 
 class Mesh:
     def __init__(self):
