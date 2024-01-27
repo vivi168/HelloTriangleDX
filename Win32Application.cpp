@@ -68,6 +68,25 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
     pSample->SetSceneCamera(&camera);
 
+    Mesh3D treeMesh, cubeMesh;
+    treeMesh.Read("assets/tree.objb");
+    cubeMesh.Read("assets/cube.objb");
+
+    Model3D bigTree, smallTree, cube;
+
+    bigTree.mesh = &treeMesh;
+    smallTree.mesh = &treeMesh;
+    cube.mesh = &cubeMesh;
+    smallTree.Scale(0.5f);
+    smallTree.Translate(-2.f, 0.f, 0.f);
+    cube.Translate(5.f, 0.f, 0.f);
+
+    pSample->AppendToScene(&bigTree);
+    pSample->AppendToScene(&smallTree);
+    pSample->AppendToScene(&cube);
+
+    pSample->LoadAssets();
+
     MSG msg;
     for (;;)
     {
@@ -85,19 +104,24 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
             m_TimeValue = newTimeValue;
             m_Time = (float)newTimeValue * 0.001f;
 
-            Input::Update();
-            camera.ProcessKeyboard();
+            {
+                Input::Update();
+                camera.ProcessKeyboard();
+
+                if (Input::IsPressed(Input::KB::Escape)) {
+                    PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+                }
+
+                //if (Input::IsPressed(Input::KB::S)) {
+                //    pSample->PrintStatsString();
+                //}
+            }
+
+            bigTree.Rotate(0.f, m_Time, 0.f);
+            smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
 
             pSample->Update(m_Time);
             pSample->Render();
-
-            if (Input::IsPressed(Input::KB::S)) {
-                pSample->PrintStatsString();
-            }
-
-            if (Input::IsPressed(Input::KB::Escape)) {
-                PostMessage(m_hwnd, WM_CLOSE, 0, 0);
-            }
         }
     }
     return (int)msg.wParam;
@@ -123,7 +147,7 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
             pSample->Cleanup();
         }
         CATCH_PRINT_ERROR(;)
-        
+
         PostQuitMessage(0);
         return 0;
     case WM_KEYUP:

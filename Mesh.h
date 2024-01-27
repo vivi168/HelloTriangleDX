@@ -14,46 +14,7 @@ struct Vertex
     DirectX::XMFLOAT2 uv;
 };
 
-struct Texture
-{
-    struct Header {
-        uint16_t width;
-        uint16_t height;
-    } header;
-    std::vector<uint8_t> pixels;
-
-    void Read(std::string filename);
-
-    DXGI_FORMAT Format() const
-    {
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-    }
-
-    uint32_t BytesPerPixel() const
-    {
-        return 4;
-    }
-
-    uint32_t Width() const
-    {
-        return header.width;
-    }
-
-    uint32_t Height() const
-    {
-        return header.height;
-    }
-
-    uint64_t BytesPerRow() const
-    {
-        return Width() * BytesPerPixel();
-    }
-
-    uint64_t ImageSize() const
-    {
-        return Height() * BytesPerRow();
-    }
-};
+struct Texture; // GPU data
 
 struct Subset
 {
@@ -62,6 +23,8 @@ struct Subset
 
     Texture* texture = nullptr;
 };
+
+struct Geometry; // GPU data
 
 struct Mesh3D
 {
@@ -74,8 +37,12 @@ struct Mesh3D
     std::vector<uint16_t> indices;
     std::vector<Subset> subsets;
 
+    std::string name;
+    Geometry* geometry = nullptr;
+
     // TODO: automatically read textures as well
     void Read(std::string filename);
+    void CreateTextures();
 
     uint64_t VertexBufferSize() const
     {
@@ -85,5 +52,32 @@ struct Mesh3D
     uint64_t IndexBufferSize() const
     {
         return sizeof(uint16_t) * header.numIndices;
+    }
+};
+
+struct Model3D
+{
+    Mesh3D* mesh = nullptr;
+
+    DirectX::XMFLOAT3 scale;
+    DirectX::XMFLOAT3 rotate;
+    DirectX::XMFLOAT3 translate;
+
+    Model3D();
+    DirectX::XMMATRIX WorldMatrix();
+
+    void Scale(float s)
+    {
+        scale = { s, s, s };
+    }
+
+    void Rotate(float x, float y, float z)
+    {
+        rotate = { x, y, z };
+    }
+
+    void Translate(float x, float y, float z)
+    {
+        translate = { x, y, z };
     }
 };

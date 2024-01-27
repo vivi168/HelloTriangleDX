@@ -6,6 +6,7 @@
 #include "Camera.h"
 
 #include <list>
+#include <unordered_map>
 
 using namespace DirectX;
 
@@ -30,6 +31,77 @@ private:
     ComPtr<IDXGIFactory4> m_DXGIFactory;
 };
 
+struct Geometry
+{
+	ComPtr<ID3D12Resource> m_VertexBuffer;
+	D3D12MA::Allocation* m_VertexBufferAllocation;
+	D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
+
+	ComPtr<ID3D12Resource> m_IndexBuffer;
+	D3D12MA::Allocation* m_IndexBufferAllocation;
+	D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
+
+	D3D12MA::Allocation* vBufferUploadHeapAllocation = nullptr;
+	D3D12MA::Allocation* iBufferUploadHeapAllocation = nullptr;
+
+	void Unload();
+};
+
+struct Texture
+{
+	struct Header {
+		uint16_t width;
+		uint16_t height;
+	} header;
+	std::vector<uint8_t> pixels;
+
+	ComPtr<ID3D12Resource> m_Texture;
+	D3D12MA::Allocation* m_TextureAllocation = nullptr;
+
+	void Read(std::string filename)
+	{
+		FILE* fp;
+		fopen_s(&fp, filename.c_str(), "rb");
+		assert(fp);
+
+		fread(&header, sizeof(Header), 1, fp);
+		pixels.resize(ImageSize());
+		fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
+	}
+
+	void Unload();
+
+	DXGI_FORMAT Format() const
+	{
+		return DXGI_FORMAT_R8G8B8A8_UNORM;
+	}
+
+	uint32_t BytesPerPixel() const
+	{
+		return 4;
+	}
+
+	uint32_t Width() const
+	{
+		return header.width;
+	}
+
+	uint32_t Height() const
+	{
+		return header.height;
+	}
+
+	uint64_t BytesPerRow() const
+	{
+		return Width() * BytesPerPixel();
+	}
+
+	uint64_t ImageSize() const
+	{
+		return Height() * BytesPerRow();
+	}
+};
+
 class Renderer
 {
 public:
@@ -41,6 +113,7 @@ public:
 
     void InitAdapter(DXGIUsage*, GPUSelection);
 	void Init();
+	void LoadAssets();
 	void Update(float);
 	void Render();
 	void Cleanup();
@@ -50,10 +123,17 @@ public:
 	{
 		m_Scene.camera = cam;
 	}
+	
+	void AppendToScene(Model3D* model)
+	{
+		m_Scene.nodes.push_back(model);
+	}
 
 private:
 	void InitD3D();
 	void InitResources();
+	
+
 	void WaitForFrame(size_t frameIndex) // wait until gpu is finished with command list
 	{
 		// if the current m_Fences value is still less than "m_FenceValues", then we know the GPU has not finished executing
@@ -132,13 +212,15 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_RootSignature;
 
-	ComPtr<ID3D12Resource> m_VertexBuffer;
-	D3D12MA::Allocation* m_VertexBufferAllocation;
-	D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
+	//ComPtr<ID3D12Resource> m_VertexBuffer;
+	//D3D12MA::Allocation* m_VertexBufferAllocation;
+	//D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
 
-	ComPtr<ID3D12Resource> m_IndexBuffer;
-	D3D12MA::Allocation* m_IndexBufferAllocation;
-	D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
+	//ComPtr<ID3D12Resource> m_IndexBuffer;
+	//D3D12MA::Allocation* m_IndexBufferAllocation;
+	//D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
+
+	//uint32_t m_CubeIndexCount;
 
 	ComPtr<ID3D12Resource> m_Texture;
 	D3D12MA::Allocation* m_TextureAllocation;
@@ -158,21 +240,23 @@ private:
 	D3D12MA::Allocation* m_CbPerObjectUploadHeapAllocations[FRAME_BUFFER_COUNT];
 	ComPtr<ID3D12Resource> m_CbPerObjectUploadHeaps[FRAME_BUFFER_COUNT];
 	void* m_CbPerObjectAddress[FRAME_BUFFER_COUNT];
-	uint32_t m_CubeIndexCount;
 
 	ComPtr<ID3D12DescriptorHeap> m_MainDescriptorHeap[FRAME_BUFFER_COUNT];
 	ComPtr<ID3D12Resource> m_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 	D3D12MA::Allocation* m_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 	void* m_ConstantBufferAddress[FRAME_BUFFER_COUNT];
 
-	struct SceneNode
-	{
-		Mesh3D* mesh;
 
-	};
 	struct Scene
 	{
-		std::list<SceneNode> nodes;
+		std::list<Model3D*> nodes;
 		Camera* camera;
 	} m_Scene;
+
+	std::unordered_map<std::string, std::unique_ptr<Geometry>> m_Geometries;
+	std::unordered_map<std::string, std::unique_ptr<Texture>> m_Textures;
+
+	void LoadMesh3D(Mesh3D*);
+	Geometry* CreateGeometry(Mesh3D* mesh);
+	Texture* CreateTexture(char* filename);
 };
