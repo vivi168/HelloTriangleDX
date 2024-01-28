@@ -10,10 +10,10 @@ cbuffer ConstantBuffer0 : register(b0)
 
 float4 main(VS_OUTPUT input) : SV_TARGET
 {
-    float4 color = t0.Sample(s0, input.texCoord);
+    float4 color2 = t0.Sample(s0, input.texCoord) * color;
     
-    if (color.a < 0.01)
+    if (color2.a < 0.01)
         discard;
     
-    return color;
+    return color2;
 }

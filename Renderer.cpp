@@ -15,6 +15,8 @@ const D3D_FEATURE_LEVEL Renderer::D3D_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_0;
 const bool Renderer::ENABLE_DEBUG_LAYER = true;
 const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 
+unsigned int Texture::texCount = 0;
+
 // ===========
 
 void DXGIUsage::Init()
@@ -352,16 +354,11 @@ void Renderer::InitFrameResources()
 		m_Device->CreateDepthStencilView(m_DepthStencilBuffer.Get(), &depthStencilDesc, m_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
-	// SRV heap desc
-	{
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	}
-
 	// CBV descriptor heap
 	for (int i = 0; i < FRAME_BUFFER_COUNT; ++i)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-		heapDesc.NumDescriptors = 2;
+		heapDesc.NumDescriptors = 64;
 		heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		CHECK_HR(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_MainDescriptorHeap[i])));
@@ -620,7 +617,7 @@ void Renderer::Update(float time)
 			m_aspectRatio,
 			0.1f,
 			1000.f);
-		
+
 		XMMATRIX view = m_Scene.camera->LookAt();
 		XMMATRIX viewProjection = XMMatrixMultiply(view, projection);
 
@@ -632,7 +629,7 @@ void Renderer::Update(float time)
 
 			XMMATRIX worldViewProjection = XMMatrixMultiplyTranspose(node->WorldMatrix(), viewProjection);
 			XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
-			
+
 			int cbIndex = i * ConstantBufferPerObjectAlignedSize;
 			memcpy((uint8_t*)m_CbPerObjectAddress[m_FrameIndex] + cbIndex, &cb, sizeof(cb));
 
@@ -701,8 +698,11 @@ void Renderer::Render()
 	ID3D12DescriptorHeap* descriptorHeaps[] = { m_MainDescriptorHeap[m_FrameIndex].Get() };
 	m_CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-	m_CommandList->SetGraphicsRootDescriptorTable(0, m_MainDescriptorHeap[m_FrameIndex]->GetGPUDescriptorHandleForHeapStart());
-	m_CommandList->SetGraphicsRootDescriptorTable(2, m_MainDescriptorHeap[m_FrameIndex]->GetGPUDescriptorHandleForHeapStart());
+	D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart = m_MainDescriptorHeap[m_FrameIndex]->GetGPUDescriptorHandleForHeapStart();
+	const UINT cbvSrvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	m_CommandList->SetGraphicsRootDescriptorTable(0, cbvSrvHeapStart);
+	//m_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHeapStart);
 
 	D3D12_VIEWPORT viewport{ 0.f, 0.f, (float)m_width, (float)m_height, 0.f, 1.f };
 	m_CommandList->RSSetViewports(1, &viewport); // set the viewports
@@ -711,8 +711,9 @@ void Renderer::Render()
 	m_CommandList->RSSetScissorRects(1, &scissorRect); // set the scissor rects
 
 	int i = 0;
-	for (auto node : m_Scene.nodes) {
-		auto geom = node->mesh->geometry;
+	for (const auto node : m_Scene.nodes) {
+		auto mesh = node->mesh;
+		auto geom = mesh->geometry;
 		m_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView); // set the vertex buffer (using the vertex buffer view)
 		m_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
 		m_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // set the primitive topology
@@ -721,9 +722,11 @@ void Renderer::Render()
 		m_CommandList->SetGraphicsRootConstantBufferView(1,
 			m_CbPerObjectUploadHeaps[m_FrameIndex]->GetGPUVirtualAddress() + cbIndex);
 
-		// Loop over subsets and draw Indexed Instanced by subsets
-		// also need to switch texture
-		m_CommandList->DrawIndexedInstanced(node->mesh->header.numIndices, 1, 0, 0, 0);
+		for (const auto& subset : mesh->subsets) {
+			CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, subset.texture->texIndex - 1, cbvSrvDescriptorSize);
+			m_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
+			m_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
+		}
 
 		i++;
 	}
@@ -1120,6 +1123,8 @@ Texture* Renderer::CreateTexture(std::string name)
 	std::unique_ptr<Texture> tex = std::make_unique<Texture>();
 	tex->Read(name);
 
+	tex->texIndex = ++Texture::texCount;
+
 	D3D12_RESOURCE_DESC textureDesc;
 	textureDesc = {};
 	textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -1143,8 +1148,17 @@ Texture* Renderer::CreateTexture(std::string name)
 		nullptr, // pOptimizedClearValue
 		&tex->m_TextureAllocation,
 		IID_PPV_ARGS(&tex->m_Texture)));
-	tex->m_Texture->SetName(L"texture");
+
+	// TODO: helper function/better way ?
+	int size_needed = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), static_cast<int>(name.length()), NULL, 0);
+	LPWSTR wide_string = new WCHAR[size_needed + 1];
+	MultiByteToWideChar(CP_UTF8, 0, name.c_str(), static_cast<int>(name.length()), wide_string, size_needed);
+	wide_string[size_needed] = 0; // null terminate the wide string
+
+	tex->m_Texture->SetName(wide_string);
 	tex->m_TextureAllocation->SetName(L"texture");
+
+	delete[] wide_string;
 
 	UINT64 textureUploadBufferSize;
 	m_Device->GetCopyableFootprints(
@@ -1198,7 +1212,6 @@ Texture* Renderer::CreateTexture(std::string name)
 	textureBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 	m_CommandList->ResourceBarrier(1, &textureBarrier);
 
-	// HOW THE FUCK DOES switching texture work
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.Format = textureDesc.Format;
@@ -1206,11 +1219,11 @@ Texture* Renderer::CreateTexture(std::string name)
 	srvDesc.Texture2D.MipLevels = 1;
 	for (size_t i = 0; i < FRAME_BUFFER_COUNT; ++i)
 	{
+		// TODO use CD3D12 ?
 		D3D12_CPU_DESCRIPTOR_HANDLE descHandle = {
 			m_MainDescriptorHeap[i]->GetCPUDescriptorHandleForHeapStart().ptr +
-			m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+			m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * tex->texIndex
 		};
-		// need to offset into descHandle ?
 		m_Device->CreateShaderResourceView(tex->m_Texture.Get(), &srvDesc, descHandle);
 	}
 

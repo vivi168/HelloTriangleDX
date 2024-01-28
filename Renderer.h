@@ -61,6 +61,9 @@ struct Texture
 
 	D3D12MA::Allocation* textureUploadAllocation = nullptr;
 
+	static unsigned int texCount;
+	unsigned int texIndex;
+
 	void Read(std::string filename)
 	{
 		FILE* fp;
