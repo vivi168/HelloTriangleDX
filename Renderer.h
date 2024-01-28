@@ -44,7 +44,16 @@ struct Geometry
 	D3D12MA::Allocation* vBufferUploadHeapAllocation = nullptr;
 	D3D12MA::Allocation* iBufferUploadHeapAllocation = nullptr;
 
-	void Unload();
+	void Unload()
+	{
+		m_IndexBuffer.Reset();
+		m_IndexBufferAllocation->Release();
+		m_IndexBufferAllocation = nullptr;
+
+		m_VertexBuffer.Reset();
+		m_VertexBufferAllocation->Release();
+		m_VertexBufferAllocation = nullptr;
+	}
 };
 
 struct Texture
@@ -77,7 +86,12 @@ struct Texture
 		fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
 	}
 
-	void Unload();
+	void Unload()
+	{
+		m_Texture.Reset();
+		m_TextureAllocation->Release();
+		m_TextureAllocation = nullptr;
+	}
 
 	DXGI_FORMAT Format() const
 	{
@@ -179,6 +193,8 @@ private:
 	static const bool ENABLE_DEBUG_LAYER;
 	static const bool ENABLE_CPU_ALLOCATION_CALLBACKS;
 
+	static const UINT NUM_DESCRIPTORS_PER_HEAP;
+
 	UINT m_width;
 	UINT m_height;
 	float m_aspectRatio;
@@ -219,21 +235,18 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_RootSignature;
 
-	//ComPtr<ID3D12Resource> m_Texture;
-	//D3D12MA::Allocation* m_TextureAllocation;
-
-	struct ConstantBuffer0_PS
+	struct PerFrameCB0_ALL
 	{
 	    XMFLOAT4 Color;
+		float time;
 	};
 
-	struct ConstantBuffer1_VS
+	struct PerObjectCB1_VS
 	{
 	    XMFLOAT4X4 WorldViewProj;
-	    float time;
 	};
 
-	const size_t ConstantBufferPerObjectAlignedSize = AlignUp<size_t>(sizeof(ConstantBuffer1_VS), 256);
+	const size_t ConstantBufferPerObjectAlignedSize = AlignUp<size_t>(sizeof(PerObjectCB1_VS), 256);
 	D3D12MA::Allocation* m_CbPerObjectUploadHeapAllocations[FRAME_BUFFER_COUNT];
 	ComPtr<ID3D12Resource> m_CbPerObjectUploadHeaps[FRAME_BUFFER_COUNT];
 	void* m_CbPerObjectAddress[FRAME_BUFFER_COUNT];

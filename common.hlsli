@@ -12,3 +12,9 @@ struct VS_OUTPUT
     float4 color : COLOR;
     float2 texCoord : TEXCOORD;
 };
+
+cbuffer ConstantBuffer0 : register(b0)
+{
+    float4 color;
+    float time;
+};
