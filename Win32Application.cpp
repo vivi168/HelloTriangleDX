@@ -68,22 +68,27 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
     pSample->SetSceneCamera(&camera);
 
-    Mesh3D treeMesh, cubeMesh;
+    Mesh3D treeMesh, cubeMesh, houseMesh;
     treeMesh.Read("assets/tree.objb");
     cubeMesh.Read("assets/cube.objb");
+    houseMesh.Read("assets/house.objb");
 
-    Model3D bigTree, smallTree, cube;
+    Model3D bigTree, smallTree, cube, house;
 
     bigTree.mesh = &treeMesh;
     smallTree.mesh = &treeMesh;
     cube.mesh = &cubeMesh;
+    house.mesh = &houseMesh;
+
     smallTree.Scale(0.5f);
     smallTree.Translate(-2.f, 0.f, 0.f);
     cube.Translate(5.f, 0.f, 0.f);
+    house.Translate(0.f, 0.f, 0.f);
 
     pSample->AppendToScene(&bigTree);
     pSample->AppendToScene(&smallTree);
     pSample->AppendToScene(&cube);
+    pSample->AppendToScene(&house);
 
     pSample->LoadAssets();
 
