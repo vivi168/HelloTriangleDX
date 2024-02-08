@@ -13,7 +13,7 @@ struct VS_OUTPUT
     float2 texCoord : TEXCOORD;
 };
 
-cbuffer ConstantBuffer0 : register(b0)
+cbuffer PassCb : register(b0)
 {
     float4 color;
     float time;

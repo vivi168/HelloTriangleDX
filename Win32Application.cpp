@@ -83,7 +83,7 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
     smallTree.Scale(0.5f);
     smallTree.Translate(-2.f, 0.f, 0.f);
     cube.Translate(5.f, 0.f, 0.f);
-    house.Translate(0.f, 0.f, 0.f);
+    house.Translate(50.f, 0.f, 20.f);
 
     pSample->AppendToScene(&bigTree);
     pSample->AppendToScene(&smallTree);

@@ -1,6 +1,6 @@
 #include "common.hlsli"
 
-cbuffer ConstantBuffer1 : register(b1)
+cbuffer ObjectCb : register(b1)
 {
     float4x4 WorldViewProj;
 };

@@ -369,9 +369,7 @@ void Renderer::InitFrameResources()
 	// Root Signature
 	{
 		// Root parameters
-		D3D12_ROOT_PARAMETER rootParameters[3];
-
-		//
+		
 		D3D12_DESCRIPTOR_RANGE cbDescriptorRange;
 		cbDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 		cbDescriptorRange.NumDescriptors = 1;
@@ -379,16 +377,6 @@ void Renderer::InitFrameResources()
 		cbDescriptorRange.RegisterSpace = 0;
 		cbDescriptorRange.OffsetInDescriptorsFromTableStart = 0;
 
-		rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameters[0].DescriptorTable = { 1, &cbDescriptorRange };
-		rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-		//
-		rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-		rootParameters[1].Descriptor = { 1, 0 };
-		rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-
-		//
 		D3D12_DESCRIPTOR_RANGE textureDescRange;
 		textureDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 		textureDescRange.NumDescriptors = 1;
@@ -396,9 +384,10 @@ void Renderer::InitFrameResources()
 		textureDescRange.RegisterSpace = 0;
 		textureDescRange.OffsetInDescriptorsFromTableStart = 1;
 
-		rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameters[2].DescriptorTable = { 1, &textureDescRange };
-		rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		CD3DX12_ROOT_PARAMETER rootParameters[3] = {};
+		rootParameters[0].InitAsDescriptorTable(1, &cbDescriptorRange);
+		rootParameters[1].InitAsConstantBufferView(1);
+		rootParameters[2].InitAsDescriptorTable(1, &textureDescRange);
 
 		// Static sampler
 		D3D12_STATIC_SAMPLER_DESC sampler = {};
