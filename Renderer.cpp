@@ -2,7 +2,6 @@
 
 #include "Win32Application.h"
 #include "Renderer.h"
-#include "Input.h"
 
 #include <Shlwapi.h>
 #include <atomic>
@@ -10,7 +9,7 @@
 const UINT Renderer::PRESENT_SYNC_INTERVAL = 1;
 const DXGI_FORMAT Renderer::RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 const DXGI_FORMAT Renderer::DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
-const D3D_FEATURE_LEVEL Renderer::D3D_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_0;
+const D3D_FEATURE_LEVEL Renderer::D3D_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 const bool Renderer::ENABLE_DEBUG_LAYER = true;
 const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
@@ -176,6 +175,10 @@ void Renderer::InitD3D()
 			D3D_FEATURE_LEVEL,
 			IID_PPV_ARGS(&device)));
 		m_Device.Attach(device);
+
+		D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+		CHECK_HR(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
+		assert(options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
 	}
 
 	// Create Memory allocator
@@ -366,10 +369,24 @@ void Renderer::InitFrameResources()
 		CHECK_HR(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_MainDescriptorHeap[i])));
 	}
 
+
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+		heapDesc.NumDescriptors = NUM_DESCRIPTORS_PER_HEAP;
+		heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		CHECK_HR(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_SrvDescriptorHeap)));
+    }
+
+	// Setup Platform/Renderer backends
+    ImGui_ImplDX12_Init(m_Device.Get(), FRAME_BUFFER_COUNT,
+        DXGI_FORMAT_R8G8B8A8_UNORM, m_SrvDescriptorHeap.Get(),
+		m_SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+		m_SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
 	// Root Signature
 	{
 		// Root parameters
-		
 		D3D12_DESCRIPTOR_RANGE cbDescriptorRange;
 		cbDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 		cbDescriptorRange.NumDescriptors = 1;
@@ -633,6 +650,11 @@ void Renderer::Render()
 {
 	// # Here was UpdatePipeline function.
 
+	ImGui_ImplDX12_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+	ImGui::ShowDemoWindow(); // Show demo window! :)
+
 	// swap the current rtv buffer index so we draw on the correct buffer
 	m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
 	// We have to wait for the gpu to finish with the command allocator before we reset it
@@ -687,7 +709,7 @@ void Renderer::Render()
 	m_CommandList->SetGraphicsRootSignature(m_RootSignature.Get());
 
 	ID3D12DescriptorHeap* descriptorHeaps[] = { m_MainDescriptorHeap[m_FrameIndex].Get() };
-	m_CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	m_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
 	D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart = m_MainDescriptorHeap[m_FrameIndex]->GetGPUDescriptorHandleForHeapStart();
 	const UINT cbvSrvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -722,6 +744,12 @@ void Renderer::Render()
 		i++;
 	}
 
+	ID3D12DescriptorHeap* imguiDescriptorHeaps[] = { m_SrvDescriptorHeap.Get() };
+	m_CommandList->SetDescriptorHeaps(1, imguiDescriptorHeaps);
+
+	ImGui::Render();
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_CommandList.Get());
+
 	// transition the "m_FrameIndex" render target from the render target state to the present state. If the debug layer is enabled, you will receive a
 	// warning if present is called on the render target when it's not in the present state
 	D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier = {};
@@ -753,6 +781,10 @@ void Renderer::Render()
 
 void Renderer::Cleanup()
 {
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+
 	// wait for the gpu to finish all frames
 	for (size_t i = 0; i < FRAME_BUFFER_COUNT; ++i)
 	{
@@ -800,6 +832,7 @@ void Renderer::Cleanup()
 	m_DepthStencilBuffer.Reset();
 	m_DepthStencilAllocation->Release(); m_DepthStencilAllocation = nullptr;
 	m_RtvDescriptorHeap.Reset();
+	m_SrvDescriptorHeap->Release(); m_SrvDescriptorHeap = nullptr;
 	for (size_t i = FRAME_BUFFER_COUNT; i--; )
 	{
 		m_RenderTargets[i].Reset();

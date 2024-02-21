@@ -145,10 +145,15 @@ public:
 	{
 		m_Scene.camera = cam;
 	}
-	
+
 	void AppendToScene(Model3D* model)
 	{
 		m_Scene.nodes.push_back(model);
+	}
+
+	void ToggleRaster()
+	{
+		m_Raster = !m_Raster;
 	}
 
 private:
@@ -226,6 +231,7 @@ private:
 
 	// Resources
 	ComPtr<ID3D12DescriptorHeap> m_RtvDescriptorHeap; // a descriptor heap to hold resources like the render targets
+	ComPtr<ID3D12DescriptorHeap> m_SrvDescriptorHeap;
 	ComPtr<ID3D12Resource> m_RenderTargets[FRAME_BUFFER_COUNT]; // number of render targets equal to buffer count
 	UINT m_RtvDescriptorSize; // size of the rtv descriptor on the m_Device (all front and back buffers will be the same size)
 
@@ -234,6 +240,8 @@ private:
 	ComPtr<ID3D12DescriptorHeap> m_DepthStencilDescriptorHeap;
 
 	ComPtr<ID3D12RootSignature> m_RootSignature;
+
+	bool m_Raster = true;
 
 	struct PerFrameCB0_ALL
 	{

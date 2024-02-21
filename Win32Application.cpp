@@ -25,143 +25,155 @@ float Win32Application::m_TimeDelta;
 
 int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 {
-    WNDCLASSEX windowClass;
-    ZeroMemory(&windowClass, sizeof(windowClass));
-    windowClass.cbSize = sizeof(windowClass);
-    windowClass.style = CS_VREDRAW | CS_HREDRAW | CS_DBLCLKS;
-    windowClass.hbrBackground = NULL;
-    windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-    windowClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    windowClass.hInstance = hInstance;
-    windowClass.lpfnWndProc = &WindowProc;
-    windowClass.lpszClassName = CLASS_NAME;
+	WNDCLASSEX windowClass;
+	ZeroMemory(&windowClass, sizeof(windowClass));
+	windowClass.cbSize = sizeof(windowClass);
+	windowClass.style = CS_VREDRAW | CS_HREDRAW | CS_DBLCLKS;
+	windowClass.hbrBackground = NULL;
+	windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
+	windowClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+	windowClass.hInstance = hInstance;
+	windowClass.lpfnWndProc = &WindowProc;
+	windowClass.lpszClassName = CLASS_NAME;
 
-    ATOM classR = RegisterClassEx(&windowClass);
-    assert(classR);
+	ATOM classR = RegisterClassEx(&windowClass);
+	assert(classR);
 
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT windowRect = { 0, 0, static_cast<LONG>(pSample->GetWidth()), static_cast<LONG>(pSample->GetHeight()) };
-    AdjustWindowRect(&windowRect, style, FALSE);
+	DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+	RECT windowRect = { 0, 0, static_cast<LONG>(pSample->GetWidth()), static_cast<LONG>(pSample->GetHeight()) };
+	AdjustWindowRect(&windowRect, style, FALSE);
 
-    // Create the window and store a handle to it.
-    m_hwnd = CreateWindow(
-        windowClass.lpszClassName,
-        pSample->GetTitle(),
-        style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        windowRect.right - windowRect.left,
-        windowRect.bottom - windowRect.top,
-        nullptr,        // We have no parent window.
-        nullptr,        // We aren't using menus.
-        hInstance,
-        pSample);
-    assert(m_hwnd);
+	// Create the window and store a handle to it.
+	m_hwnd = CreateWindow(
+		windowClass.lpszClassName,
+		pSample->GetTitle(),
+		style,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
+		nullptr,        // We have no parent window.
+		nullptr,        // We aren't using menus.
+		hInstance,
+		pSample);
+	assert(m_hwnd);
 
-    pSample->Init();
-    m_TimeOffset = GetTickCount64();
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
 
-    ShowWindow(m_hwnd, nCmdShow);
+	ImGui_ImplWin32_Init(Win32Application::GetHwnd());
 
-    Camera camera;
-    camera.Translate(0.f, 0.f, 10.f);
+	pSample->Init();
+	m_TimeOffset = GetTickCount64();
 
-    pSample->SetSceneCamera(&camera);
+	ShowWindow(m_hwnd, nCmdShow);
 
-    Mesh3D treeMesh, cubeMesh, houseMesh;
-    treeMesh.Read("assets/tree.objb");
-    cubeMesh.Read("assets/cube.objb");
-    houseMesh.Read("assets/house.objb");
+	Camera camera;
+	camera.Translate(0.f, 0.f, 10.f);
 
-    Model3D bigTree, smallTree, cube, house;
+	pSample->SetSceneCamera(&camera);
 
-    bigTree.mesh = &treeMesh;
-    smallTree.mesh = &treeMesh;
-    cube.mesh = &cubeMesh;
-    house.mesh = &houseMesh;
+	Mesh3D treeMesh, cubeMesh, houseMesh;
+	treeMesh.Read("assets/tree.objb");
+	cubeMesh.Read("assets/cube.objb");
+	houseMesh.Read("assets/house.objb");
 
-    smallTree.Scale(0.5f);
-    smallTree.Translate(-2.f, 0.f, 0.f);
-    cube.Translate(5.f, 0.f, 0.f);
-    house.Translate(50.f, 0.f, 20.f);
+	Model3D bigTree, smallTree, cube, house;
 
-    pSample->AppendToScene(&bigTree);
-    pSample->AppendToScene(&smallTree);
-    pSample->AppendToScene(&cube);
-    pSample->AppendToScene(&house);
+	bigTree.mesh = &treeMesh;
+	smallTree.mesh = &treeMesh;
+	cube.mesh = &cubeMesh;
+	house.mesh = &houseMesh;
 
-    pSample->LoadAssets();
+	smallTree.Scale(0.5f);
+	smallTree.Translate(-2.f, 0.f, 0.f);
+	cube.Translate(5.f, 0.f, 0.f);
+	house.Translate(50.f, 0.f, 20.f);
 
-    MSG msg;
-    for (;;)
-    {
-        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT)
-                break;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        else
-        {
-            const UINT64 newTimeValue = GetTickCount64() - m_TimeOffset;
-            m_TimeDelta = (float)(newTimeValue - m_TimeValue) * 0.001f;
-            m_TimeValue = newTimeValue;
-            m_Time = (float)newTimeValue * 0.001f;
+	pSample->AppendToScene(&bigTree);
+	pSample->AppendToScene(&smallTree);
+	pSample->AppendToScene(&cube);
+	pSample->AppendToScene(&house);
 
-            {
-                Input::Update();
-                camera.ProcessKeyboard();
+	pSample->LoadAssets();
 
-                if (Input::IsPressed(Input::KB::Escape)) {
-                    PostMessage(m_hwnd, WM_CLOSE, 0, 0);
-                }
+	MSG msg;
+	for (;;)
+	{
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			if (msg.message == WM_QUIT)
+				break;
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+		else
+		{
+			const UINT64 newTimeValue = GetTickCount64() - m_TimeOffset;
+			m_TimeDelta = (float)(newTimeValue - m_TimeValue) * 0.001f;
+			m_TimeValue = newTimeValue;
+			m_Time = (float)newTimeValue * 0.001f;
 
-                //if (Input::IsPressed(Input::KB::S)) {
-                //    pSample->PrintStatsString();
-                //}
-            }
+			{
+				Input::Update();
+				camera.ProcessKeyboard();
 
-            bigTree.Rotate(0.f, m_Time, 0.f);
-            smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
+				if (Input::IsPressed(Input::KB::Escape)) {
+					PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+				}
 
-            pSample->Update(m_Time);
-            pSample->Render();
-        }
-    }
-    return (int)msg.wParam;
+				//if (Input::IsPressed(Input::KB::S)) {
+				//    pSample->PrintStatsString();
+				//}
+			}
+
+			bigTree.Rotate(0.f, m_Time, 0.f);
+			smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
+
+			pSample->Update(m_Time);
+			pSample->Render();
+		}
+	}
+	return (int)msg.wParam;
 }
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    Renderer* pSample = reinterpret_cast<Renderer*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+	Renderer* pSample = reinterpret_cast<Renderer*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
-    switch (message)
-    {
-        case WM_CREATE:
-        {
-            // Save the Renderer* passed in to CreateWindow.
-            LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
-            SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
-        }
+	if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+		return true;
 
-        return 0;
-    case WM_DESTROY:
-        try
-        {
-            pSample->Cleanup();
-        }
-        CATCH_PRINT_ERROR(;)
+	switch (message)
+	{
+	case WM_CREATE:
+	{
+		// Save the Renderer* passed in to CreateWindow.
+		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+	}
 
-        PostQuitMessage(0);
-        return 0;
-    case WM_KEYUP:
-        Input::OnKeyUp(wParam);
-        return 0;
-    case WM_KEYDOWN:
-        Input::OnKeyDown(wParam);
-        return 0;
-    }
+	return 0;
+	case WM_DESTROY:
+		try
+		{
+			pSample->Cleanup();
+		}
+		CATCH_PRINT_ERROR(;)
 
-    return DefWindowProc(hWnd, message, wParam, lParam);
+			PostQuitMessage(0);
+		return 0;
+	case WM_KEYUP:
+		Input::OnKeyUp(wParam);
+		return 0;
+	case WM_KEYDOWN:
+		Input::OnKeyDown(wParam);
+		return 0;
+	}
+
+	return DefWindowProc(hWnd, message, wParam, lParam);
 }
