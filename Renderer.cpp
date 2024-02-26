@@ -16,7 +16,7 @@ const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 
 const UINT Renderer::NUM_DESCRIPTORS_PER_HEAP = 1024;
 
-unsigned int Texture::texCount = 1;
+unsigned int Texture::texCount = 1; // imgui texture is 0
 
 // ===========
 
@@ -391,7 +391,7 @@ void Renderer::InitFrameResources()
 		textureDescRange.NumDescriptors = 1;
 		textureDescRange.BaseShaderRegister = 0;
 		textureDescRange.RegisterSpace = 0;
-		textureDescRange.OffsetInDescriptorsFromTableStart = 1;
+		textureDescRange.OffsetInDescriptorsFromTableStart = 0;
 
 		CD3DX12_ROOT_PARAMETER rootParameters[3] = {};
 		rootParameters[0].InitAsDescriptorTable(1, &cbDescriptorRange);
@@ -726,7 +726,7 @@ void Renderer::Render()
 			m_CbPerObjectUploadHeaps[m_FrameIndex]->GetGPUVirtualAddress() + cbIndex);
 
 		for (const auto& subset : mesh->subsets) {
-			CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, subset.texture->texIndex - 1, cbvSrvDescriptorSize);
+			CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, subset.texture->texIndex, cbvSrvDescriptorSize);
 			m_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
 			m_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
 		}

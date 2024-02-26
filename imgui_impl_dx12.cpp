@@ -276,7 +276,7 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandL
                 const D3D12_RECT r = { (LONG)clip_min.x, (LONG)clip_min.y, (LONG)clip_max.x, (LONG)clip_max.y };
                 D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart = bd->pd3dSrvDescHeap[bd->frameIndex]->GetGPUDescriptorHandleForHeapStart();
                 const UINT cbvSrvDescriptorSize = bd->pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-                CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, 1, cbvSrvDescriptorSize);
+                CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, cbvSrvDescriptorSize);
                 ctx->SetGraphicsRootDescriptorTable(1, cbvSrvHandle);
                 ctx->RSSetScissorRects(1, &r);
                 ctx->DrawIndexedInstanced(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
@@ -431,7 +431,7 @@ static void ImGui_ImplDX12_CreateFontsTexture()
         const UINT cbvSrvDescriptorSize = bd->pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         for (size_t i = 0; i < bd->numFramesInFlight; ++i)
         {
-            CD3DX12_CPU_DESCRIPTOR_HANDLE descHandle(bd->pd3dSrvDescHeap[i]->GetCPUDescriptorHandleForHeapStart(), 1, cbvSrvDescriptorSize);
+            CD3DX12_CPU_DESCRIPTOR_HANDLE descHandle(bd->pd3dSrvDescHeap[i]->GetCPUDescriptorHandleForHeapStart(), cbvSrvDescriptorSize);
 
             bd->pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, descHandle);
         }
