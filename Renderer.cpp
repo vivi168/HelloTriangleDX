@@ -16,7 +16,7 @@ const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 
 const UINT Renderer::NUM_DESCRIPTORS_PER_HEAP = 1024;
 
-unsigned int Texture::texCount = 0;
+unsigned int Texture::texCount = 1;
 
 // ===========
 
@@ -367,22 +367,14 @@ void Renderer::InitFrameResources()
 		heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		CHECK_HR(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_MainDescriptorHeap[i])));
+
+		m_pMainDescriptorHeap[i] = m_MainDescriptorHeap[i].Get();
 	}
 
 
-	{
-		D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-		heapDesc.NumDescriptors = NUM_DESCRIPTORS_PER_HEAP;
-		heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		CHECK_HR(m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_SrvDescriptorHeap)));
-    }
 
 	// Setup Platform/Renderer backends
-    ImGui_ImplDX12_Init(m_Device.Get(), FRAME_BUFFER_COUNT,
-        DXGI_FORMAT_R8G8B8A8_UNORM, m_SrvDescriptorHeap.Get(),
-		m_SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-		m_SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGui_ImplDX12_Init(m_Device.Get(), FRAME_BUFFER_COUNT, DXGI_FORMAT_R8G8B8A8_UNORM, m_pMainDescriptorHeap);
 
 	// Root Signature
 	{
@@ -644,17 +636,15 @@ void Renderer::Update(float time)
 			i++;
 		}
 	}
-}
-
-void Renderer::Render()
-{
-	// # Here was UpdatePipeline function.
 
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 	ImGui::ShowDemoWindow(); // Show demo window! :)
+}
 
+void Renderer::Render()
+{
 	// swap the current rtv buffer index so we draw on the correct buffer
 	m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
 	// We have to wait for the gpu to finish with the command allocator before we reset it
@@ -744,11 +734,8 @@ void Renderer::Render()
 		i++;
 	}
 
-	ID3D12DescriptorHeap* imguiDescriptorHeaps[] = { m_SrvDescriptorHeap.Get() };
-	m_CommandList->SetDescriptorHeaps(1, imguiDescriptorHeaps);
-
 	ImGui::Render();
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_CommandList.Get());
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_CommandList.Get(), m_FrameIndex);
 
 	// transition the "m_FrameIndex" render target from the render target state to the present state. If the debug layer is enabled, you will receive a
 	// warning if present is called on the render target when it's not in the present state
@@ -832,7 +819,6 @@ void Renderer::Cleanup()
 	m_DepthStencilBuffer.Reset();
 	m_DepthStencilAllocation->Release(); m_DepthStencilAllocation = nullptr;
 	m_RtvDescriptorHeap.Reset();
-	m_SrvDescriptorHeap->Release(); m_SrvDescriptorHeap = nullptr;
 	for (size_t i = FRAME_BUFFER_COUNT; i--; )
 	{
 		m_RenderTargets[i].Reset();

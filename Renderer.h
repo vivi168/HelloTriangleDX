@@ -231,7 +231,6 @@ private:
 
 	// Resources
 	ComPtr<ID3D12DescriptorHeap> m_RtvDescriptorHeap; // a descriptor heap to hold resources like the render targets
-	ComPtr<ID3D12DescriptorHeap> m_SrvDescriptorHeap;
 	ComPtr<ID3D12Resource> m_RenderTargets[FRAME_BUFFER_COUNT]; // number of render targets equal to buffer count
 	UINT m_RtvDescriptorSize; // size of the rtv descriptor on the m_Device (all front and back buffers will be the same size)
 
@@ -260,6 +259,7 @@ private:
 	void* m_CbPerObjectAddress[FRAME_BUFFER_COUNT];
 
 	ComPtr<ID3D12DescriptorHeap> m_MainDescriptorHeap[FRAME_BUFFER_COUNT];
+	ID3D12DescriptorHeap* m_pMainDescriptorHeap[FRAME_BUFFER_COUNT];
 	ComPtr<ID3D12Resource> m_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 	D3D12MA::Allocation* m_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 	void* m_ConstantBufferAddress[FRAME_BUFFER_COUNT];
