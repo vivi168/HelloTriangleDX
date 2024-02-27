@@ -18,6 +18,7 @@ const bool Renderer::ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 
 const UINT Renderer::NUM_DESCRIPTORS_PER_HEAP = 1024;
 
+unsigned int Renderer::cbNextIndex = 0;
 unsigned int Texture::texCount = 1; // imgui texture is 0
 
 // ===========
@@ -575,7 +576,7 @@ void Renderer::LoadAssets()
 	CHECK_HR(m_CommandList->Reset(m_CommandAllocators[m_FrameIndex].Get(), NULL));
 
 	for (auto node : m_Scene.nodes) {
-		LoadMesh3D(node->mesh);
+		LoadMesh3D(node.model->mesh);
 	}
 
 	// End of initial command list
@@ -623,19 +624,15 @@ void Renderer::Update(float time)
 
 		XMMATRIX view = m_Scene.camera->LookAt();
 		XMMATRIX viewProjection = XMMatrixMultiply(view, projection);
-
-		int i = 0;
+		
 		for (auto node : m_Scene.nodes)
 		{
 			PerObjectCB1_VS cb;
 
-			XMMATRIX worldViewProjection = XMMatrixMultiplyTranspose(node->WorldMatrix(), viewProjection);
+			XMMATRIX worldViewProjection = XMMatrixMultiplyTranspose(node.model->WorldMatrix(), viewProjection);
 			XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
 
-			size_t cbIndex = i * ConstantBufferPerObjectAlignedSize;
-			memcpy((uint8_t*)m_CbPerObjectAddress[m_FrameIndex] + cbIndex, &cb, sizeof(cb));
-
-			i++;
+			memcpy((uint8_t*)m_CbPerObjectAddress[m_FrameIndex] + node.cbIndex, &cb, sizeof(cb));
 		}
 	}
 
@@ -714,26 +711,20 @@ void Renderer::Render()
 	D3D12_RECT scissorRect{ 0, 0, m_width, m_height };
 	m_CommandList->RSSetScissorRects(1, &scissorRect); // set the scissor rects
 
-	int i = 0;
 	for (const auto node : m_Scene.nodes) {
-		auto mesh = node->mesh;
+		auto mesh = node.model->mesh;
 		auto geom = mesh->geometry;
 		m_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView); // set the vertex buffer (using the vertex buffer view)
 		m_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
 		m_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // set the primitive topology
 
-		// TODO: have this as part of geometry struct ?
-		size_t cbIndex = i * ConstantBufferPerObjectAlignedSize;
-		m_CommandList->SetGraphicsRootConstantBufferView(1,
-			m_CbPerObjectUploadHeaps[m_FrameIndex]->GetGPUVirtualAddress() + cbIndex);
+		m_CommandList->SetGraphicsRootConstantBufferView(1, m_CbPerObjectUploadHeaps[m_FrameIndex]->GetGPUVirtualAddress() + node.cbIndex);
 
 		for (const auto& subset : mesh->subsets) {
 			CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(cbvSrvHeapStart, subset.texture->texIndex, cbvSrvDescriptorSize);
 			m_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
 			m_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
 		}
-
-		i++;
 	}
 
 	ImGui::Render();

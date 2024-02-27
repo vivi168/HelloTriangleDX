@@ -148,7 +148,9 @@ public:
 
 	void AppendToScene(Model3D* model)
 	{
-		m_Scene.nodes.push_back(model);
+		size_t cbIndex = ConstantBufferPerObjectAlignedSize * cbNextIndex++;
+
+		m_Scene.nodes.push_back({model, cbIndex});
 	}
 
 	void ToggleRaster()
@@ -257,6 +259,7 @@ private:
 	D3D12MA::Allocation* m_CbPerObjectUploadHeapAllocations[FRAME_BUFFER_COUNT];
 	ComPtr<ID3D12Resource> m_CbPerObjectUploadHeaps[FRAME_BUFFER_COUNT];
 	void* m_CbPerObjectAddress[FRAME_BUFFER_COUNT];
+	static unsigned int cbNextIndex;
 
 	ComPtr<ID3D12DescriptorHeap> m_MainDescriptorHeap[FRAME_BUFFER_COUNT];
 	ID3D12DescriptorHeap* m_pMainDescriptorHeap[FRAME_BUFFER_COUNT];
@@ -266,7 +269,13 @@ private:
 
 	struct Scene
 	{
-		std::list<Model3D*> nodes;
+		struct SceneNode
+		{
+			Model3D* model;
+			size_t cbIndex;
+		};
+
+		std::list<SceneNode> nodes;
 		Camera* camera;
 	} m_Scene;
 
