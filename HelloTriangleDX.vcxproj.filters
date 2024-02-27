@@ -19,12 +19,6 @@
     <Filter Include="Source Files\imgui">
       <UniqueIdentifier>{d8e51cf3-7138-4dfd-89ac-df1f2cc335bd}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\vendor">
-      <UniqueIdentifier>{dabfddb4-cc88-4f7b-b72c-e76598e2248d}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\vendor">
-      <UniqueIdentifier>{061c8c17-118c-4187-8a4f-364974bec44f}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\D3D12MemoryAllocator">
       <UniqueIdentifier>{415b8ec1-3c6b-4ec5-bf30-162313ed7d71}</UniqueIdentifier>
     </Filter>
@@ -56,9 +50,6 @@
     </ClInclude>
     <ClInclude Include="imgui_impl_dx12.h">
       <Filter>Header Files\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="d3dx12.h">
-      <Filter>Header Files\vendor</Filter>
     </ClInclude>
     <ClInclude Include="imgui\imconfig.h">
       <Filter>Header Files\imgui</Filter>

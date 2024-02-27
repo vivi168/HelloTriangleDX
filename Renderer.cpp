@@ -2,6 +2,8 @@
 
 #include "Win32Application.h"
 #include "Renderer.h"
+#include "d3dx12_root_signature.h"
+#include "d3dx12_resource_helpers.h"
 
 #include <Shlwapi.h>
 #include <atomic>
