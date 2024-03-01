@@ -1,0 +1,6 @@
+Language:     Cpp
+BasedOnStyle: Google
+AccessModifierOffset: -2
+BreakBeforeBraces: Linux
+InsertNewlineAtEOF: true
+SortIncludes: false

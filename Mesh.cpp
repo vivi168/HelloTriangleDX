@@ -5,49 +5,46 @@ using namespace DirectX;
 
 void Mesh3D::Read(std::string filename)
 {
-	FILE* fp;
-	fopen_s(&fp, filename.c_str(), "rb");
-	assert(fp);
+  FILE* fp;
+  fopen_s(&fp, filename.c_str(), "rb");
+  assert(fp);
 
-	name = filename;
-	
-	fread(&header, sizeof(Header), 1, fp);
+  name = filename;
 
-	vertices.resize(header.numVerts);
-	indices.resize(header.numIndices);
-	subsets.resize(header.numSubsets);
+  fread(&header, sizeof(Header), 1, fp);
 
-	fread(vertices.data(), sizeof(Vertex), header.numVerts, fp);
-	fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
-	fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
+  vertices.resize(header.numVerts);
+  indices.resize(header.numIndices);
+  subsets.resize(header.numSubsets);
 
-	fclose(fp);
+  fread(vertices.data(), sizeof(Vertex), header.numVerts, fp);
+  fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
+  fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
+
+  fclose(fp);
 }
 
 Model3D::Model3D()
-	: scale(1.f, 1.f, 1.f)
-	, rotate(0.f, 0.f, 0.f)
-	, translate(0.f, 0.f, 0.f)
+    : scale(1.f, 1.f, 1.f), rotate(0.f, 0.f, 0.f), translate(0.f, 0.f, 0.f)
 {
-
 }
 
 DirectX::XMMATRIX Model3D::WorldMatrix()
 {
-	XMVECTOR scaleVector = XMLoadFloat3(&scale);
-	XMVECTOR transVector = XMLoadFloat3(&translate);
-	
-	XMMATRIX scaleMatrix = XMMatrixScalingFromVector(scaleVector);
-	XMMATRIX transMatrix = XMMatrixTranslationFromVector(transVector);
-	
-	XMMATRIX rotX = XMMatrixRotationX(rotate.x);
-	XMMATRIX rotY = XMMatrixRotationY(rotate.y);
-	XMMATRIX rotZ = XMMatrixRotationZ(rotate.z);
+  XMVECTOR scaleVector = XMLoadFloat3(&scale);
+  XMVECTOR transVector = XMLoadFloat3(&translate);
 
-	XMMATRIX rotXY = XMMatrixMultiply(rotX, rotY);
-	XMMATRIX rotXYZ = XMMatrixMultiply(rotXY, rotZ);
+  XMMATRIX scaleMatrix = XMMatrixScalingFromVector(scaleVector);
+  XMMATRIX transMatrix = XMMatrixTranslationFromVector(transVector);
 
-	XMMATRIX scaleRot = XMMatrixMultiply(scaleMatrix, rotXYZ);
+  XMMATRIX rotX = XMMatrixRotationX(rotate.x);
+  XMMATRIX rotY = XMMatrixRotationY(rotate.y);
+  XMMATRIX rotZ = XMMatrixRotationZ(rotate.z);
 
-	return XMMatrixMultiply(scaleRot, transMatrix);
+  XMMATRIX rotXY = XMMatrixMultiply(rotX, rotY);
+  XMMATRIX rotXYZ = XMMatrixMultiply(rotXY, rotZ);
+
+  XMMATRIX scaleRot = XMMatrixMultiply(scaleMatrix, rotXYZ);
+
+  return XMMatrixMultiply(scaleRot, transMatrix);
 }
