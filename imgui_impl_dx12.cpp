@@ -464,18 +464,10 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
     descRange.RegisterSpace = 0;
     descRange.OffsetInDescriptorsFromTableStart = 0;
 
-    D3D12_ROOT_PARAMETER param[2] = {};
-
-    param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    param[0].Constants.ShaderRegister = 0;
-    param[0].Constants.RegisterSpace = 0;
-    param[0].Constants.Num32BitValues = 16;
-    param[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-
-    param[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    param[1].DescriptorTable.NumDescriptorRanges = 1;
-    param[1].DescriptorTable.pDescriptorRanges = &descRange;
-    param[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    CD3DX12_ROOT_PARAMETER param[2] = {};
+    param[0].InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+    param[1].InitAsDescriptorTable(1, &descRange,
+                                   D3D12_SHADER_VISIBILITY_PIXEL);
 
     // Bilinear sampling is required by default. Set 'io.Fonts->Flags |=
     // ImFontAtlasFlags_NoBakedLines' or 'style.AntiAliasedLinesUseTex = false'
@@ -528,6 +520,7 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
 
   std::vector<uint8_t> vertexShaderBlob;
   std::vector<uint8_t> pixelShaderBlob;
+
   // Pipeline State
   {
     WCHAR assetsPath[512];
@@ -535,11 +528,12 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
     std::wstring basePath = assetsPath;
     std::wstring vertexShaderPath = basePath + L"ImguiVS.cso";
     std::wstring pixelShaderPath = basePath + L"ImguiPS.cso";
+
     // Vertex Shader
     vertexShaderBlob = ReadData(vertexShaderPath.c_str());
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
                                           vertexShaderBlob.size()};
-
+    
     // Pixel Shader
     pixelShaderBlob = ReadData(pixelShaderPath.c_str());
     D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
