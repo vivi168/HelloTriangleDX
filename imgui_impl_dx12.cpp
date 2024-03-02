@@ -5,13 +5,9 @@
 
 // DirectX
 #include <d3d12.h>
-#include <dxgi1_4.h>
-#include <d3dcompiler.h>
+#include <dxgi1_6.h>
 #include "d3dx12_root_signature.h"
-#ifdef _MSC_VER
-// Automatically link with d3dcompiler.lib as we are using D3DCompile() below.
-#pragma comment(lib, "d3dcompiler")
-#endif
+#include "RendererHelper.h"
 
 // DirectX data
 struct ImGui_ImplDX12_RenderBuffers;
@@ -208,9 +204,8 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data,
   D3D12_RANGE range;
   memset(&range, 0, sizeof(D3D12_RANGE));
 
-  if (fr->VertexBuffer->Map(0, &range, &vtx_resource) != S_OK) return;
-
-  if (fr->IndexBuffer->Map(0, &range, &idx_resource) != S_OK) return;
+  CHECK_HR(fr->VertexBuffer->Map(0, &range, &vtx_resource));
+  CHECK_HR(fr->IndexBuffer->Map(0, &range, &idx_resource));
 
   ImDrawVert* vtx_dst = (ImDrawVert*)vtx_resource;
   ImDrawIdx* idx_dst = (ImDrawIdx*)idx_resource;
@@ -514,41 +509,9 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
                  D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
                  D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
-    // Load d3d12.dll and D3D12SerializeRootSignature() function address
-    // dynamically to facilitate using with D3D12On7. See if any version of
-    // d3d12.dll is already loaded in the process. If so, give preference to
-    // that.
-    static HINSTANCE d3d12_dll = ::GetModuleHandleA("d3d12.dll");
-    if (d3d12_dll == nullptr) {
-      // Attempt to load d3d12.dll from local directories. This will only
-      // succeed if (1) the current OS is Windows 7, and (2) there exists a
-      // version of d3d12.dll for Windows 7 (D3D12On7) in one of the following
-      // directories. See https://github.com/ocornut/imgui/pull/3696 for
-      // details.
-      const char* localD3d12Paths[] = {
-          ".\\d3d12.dll", ".\\d3d12on7\\d3d12.dll",
-          ".\\12on7\\d3d12.dll"};  // A. current directory, B. used by some
-                                   // games, C. used in Microsoft D3D12On7
-                                   // sample
-
-      for (int i = 0; i < IM_ARRAYSIZE(localD3d12Paths); i++)
-        if ((d3d12_dll = ::LoadLibraryA(localD3d12Paths[i])) != nullptr) break;
-
-      // If failed, we are on Windows >= 10.
-      if (d3d12_dll == nullptr) d3d12_dll = ::LoadLibraryA("d3d12.dll");
-
-      if (d3d12_dll == nullptr) return false;
-    }
-
-    PFN_D3D12_SERIALIZE_ROOT_SIGNATURE D3D12SerializeRootSignatureFn =
-        (PFN_D3D12_SERIALIZE_ROOT_SIGNATURE)::GetProcAddress(
-            d3d12_dll, "D3D12SerializeRootSignature");
-    if (D3D12SerializeRootSignatureFn == nullptr) return false;
-
     ID3DBlob* blob = nullptr;
-    if (D3D12SerializeRootSignatureFn(&desc, D3D_ROOT_SIGNATURE_VERSION_1,
-                                      &blob, nullptr) != S_OK)
-      return false;
+    CHECK_HR(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                         &blob, nullptr));
 
     bd->pd3dDevice->CreateRootSignature(0, blob->GetBufferPointer(),
                                         blob->GetBufferSize(),
@@ -556,15 +519,6 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
     blob->Release();
   }
 
-  // By using D3DCompile() from <d3dcompiler.h> / d3dcompiler.lib, we introduce
-  // a dependency to a given version of d3dcompiler_XX.dll (see
-  // D3DCOMPILER_DLL_A) If you would like to use this DX12 sample code but
-  // remove this dependency you can:
-  //  1) compile once, save the compiled shader blobs into a file or source code
-  //  and assign them to psoDesc.VS/PS [preferred solution] 2) use code to
-  //  detect any version of the DLL and grab a pointer to D3DCompile from the
-  //  DLL.
-  // See https://github.com/ocornut/imgui/pull/638 for sources and details.
   D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
   memset(&psoDesc, 0, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
   psoDesc.NodeMask = 1;
@@ -576,50 +530,24 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
   psoDesc.SampleDesc.Count = 1;
   psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-  ID3DBlob* vertexShaderBlob;
-  ID3DBlob* pixelShaderBlob;
-
-  // Create the vertex shader
+  std::vector<uint8_t> vertexShaderBlob;
+  std::vector<uint8_t> pixelShaderBlob;
+  // Pipeline State
   {
-    static const char* vertexShader =
-        "cbuffer vertexBuffer : register(b0) \
-            {\
-              float4x4 ProjectionMatrix; \
-            };\
-            struct VS_INPUT\
-            {\
-              float2 pos : POSITION;\
-              float4 col : COLOR0;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            struct PS_INPUT\
-            {\
-              float4 pos : SV_POSITION;\
-              float4 col : COLOR0;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            PS_INPUT main(VS_INPUT input)\
-            {\
-              PS_INPUT output;\
-              output.pos = mul( ProjectionMatrix, float4(input.pos.xy, 0.f, 1.f));\
-              output.col = input.col;\
-              output.uv  = input.uv;\
-              return output;\
-            }";
+    WCHAR assetsPath[512];
+    GetAssetsPath(assetsPath, _countof(assetsPath));
+    std::wstring basePath = assetsPath;
+    std::wstring vertexShaderPath = basePath + L"ImguiVS.cso";
+    std::wstring pixelShaderPath = basePath + L"ImguiPS.cso";
+    // Vertex Shader
+    vertexShaderBlob = ReadData(vertexShaderPath.c_str());
+    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
+                                          vertexShaderBlob.size()};
 
-    if (FAILED(D3DCompile(vertexShader, strlen(vertexShader), nullptr, nullptr,
-                          nullptr, "main", "vs_5_0", 0, 0, &vertexShaderBlob,
-                          nullptr))) {
-      // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in
-      // (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the
-      // blob!
-      return false;
-    }
-
-    psoDesc.VS = {vertexShaderBlob->GetBufferPointer(),
-                  vertexShaderBlob->GetBufferSize()};
+    // Pixel Shader
+    pixelShaderBlob = ReadData(pixelShaderPath.c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
 
     // Create the input layout
     static D3D12_INPUT_ELEMENT_DESC local_layout[] = {
@@ -634,40 +562,10 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
          D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
     };
 
-    psoDesc.InputLayout = {local_layout, 3};
-  }
-
-  // Create the pixel shader
-  {
-    static const char* pixelShader =
-        "struct PS_INPUT\
-            {\
-              float4 pos : SV_POSITION;\
-              float4 col : COLOR0;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            SamplerState sampler0 : register(s0);\
-            Texture2D texture0 : register(t0);\
-            \
-            float4 main(PS_INPUT input) : SV_Target\
-            {\
-              float4 out_col = input.col * texture0.Sample(sampler0, input.uv); \
-              return out_col; \
-            }";
-
-    if (FAILED(D3DCompile(pixelShader, strlen(pixelShader), nullptr, nullptr,
-                          nullptr, "main", "ps_5_0", 0, 0, &pixelShaderBlob,
-                          nullptr))) {
-      vertexShaderBlob->Release();
-
-      // NB: Pass ID3DBlob* pErrorBlob to D3DCompile() to get error showing in
-      // (const char*)pErrorBlob->GetBufferPointer(). Make sure to Release() the
-      // blob!
-      return false;  
-    }
-
-    psoDesc.PS = {pixelShaderBlob->GetBufferPointer(),
-                  pixelShaderBlob->GetBufferSize()};
+    psoDesc.InputLayout.NumElements = _countof(local_layout);
+    psoDesc.InputLayout.pInputElementDescs = local_layout;
+    psoDesc.VS = vertexShader;
+    psoDesc.PS = pixelShader;
   }
 
   // Create the blending setup
@@ -713,12 +611,8 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
     desc.BackFace = desc.FrontFace;
   }
 
-  HRESULT result_pipeline_state = bd->pd3dDevice->CreateGraphicsPipelineState(
-      &psoDesc, IID_PPV_ARGS(&bd->pPipelineState));
-  vertexShaderBlob->Release();
-  pixelShaderBlob->Release();
-
-  if (result_pipeline_state != S_OK) return false;
+  CHECK_HR(bd->pd3dDevice->CreateGraphicsPipelineState(
+      &psoDesc, IID_PPV_ARGS(&bd->pPipelineState)));
 
   ImGui_ImplDX12_CreateFontsTexture();
 

@@ -1,7 +1,12 @@
 #pragma once
 
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
 #include <stdexcept>
 #include <chrono>
+#include <wrl.h>
 
 // Note that while ComPtr is used to manage the lifetime of resources on the
 // CPU, it has no understanding of the lifetime of resources on the GPU. Apps
