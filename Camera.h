@@ -8,6 +8,8 @@ public:
   void ProcessKeyboard();
   DirectX::XMMATRIX LookAt();
 
+  std::string DebugString();
+
 private:
   float yaw, pitch;
   float speed, sensitivity;

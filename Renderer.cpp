@@ -682,7 +682,13 @@ void Renderer::Update(float time)
   ImGui_ImplDX12_NewFrame();
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
-  ImGui::ShowDemoWindow();  // Show demo window! :)
+  // ImGui::ShowDemoWindow();  // Show demo window! :)
+
+  {
+    ImGui::Begin("Camera details");
+    ImGui::Text(m_Scene.camera->DebugString().c_str());
+    ImGui::End();
+  }
 }
 
 void Renderer::Render()

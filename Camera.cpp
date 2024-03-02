@@ -95,3 +95,12 @@ void Camera::ProcessKeyboard()
     translate.y += speed;
   }
 }
+
+std::string Camera::DebugString()
+{
+  char buff[512] = {0};
+  sprintf_s(buff, "x: %f y: %f z: %f\nyaw: %f\npitch: %f", translate.x,
+            translate.y, translate.z, yaw, pitch);
+
+  return std::string(buff);
+}
