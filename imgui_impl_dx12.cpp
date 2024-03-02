@@ -509,54 +509,6 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
   memset(&psoDesc, 0, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
-  psoDesc.NodeMask = 1;
-  psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  psoDesc.pRootSignature = bd->pRootSignature;
-  psoDesc.SampleMask = UINT_MAX;
-  psoDesc.NumRenderTargets = 1;
-  psoDesc.RTVFormats[0] = bd->RTVFormat;
-  psoDesc.SampleDesc.Count = 1;
-  psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-
-  std::vector<uint8_t> vertexShaderBlob;
-  std::vector<uint8_t> pixelShaderBlob;
-
-  // Pipeline State
-  {
-    WCHAR assetsPath[512];
-    GetAssetsPath(assetsPath, _countof(assetsPath));
-    std::wstring basePath = assetsPath;
-    std::wstring vertexShaderPath = basePath + L"ImguiVS.cso";
-    std::wstring pixelShaderPath = basePath + L"ImguiPS.cso";
-
-    // Vertex Shader
-    vertexShaderBlob = ReadData(vertexShaderPath.c_str());
-    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
-                                          vertexShaderBlob.size()};
-    
-    // Pixel Shader
-    pixelShaderBlob = ReadData(pixelShaderPath.c_str());
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                         pixelShaderBlob.size()};
-
-    // Create the input layout
-    static D3D12_INPUT_ELEMENT_DESC local_layout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         (UINT)offsetof(ImDrawVert, pos),
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         (UINT)offsetof(ImDrawVert, uv),
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0,
-         (UINT)offsetof(ImDrawVert, col),
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-
-    psoDesc.InputLayout.NumElements = _countof(local_layout);
-    psoDesc.InputLayout.pInputElementDescs = local_layout;
-    psoDesc.VS = vertexShader;
-    psoDesc.PS = pixelShader;
-  }
 
   // Create the blending setup
   {
@@ -601,8 +553,54 @@ bool ImGui_ImplDX12_CreateDeviceObjects()
     desc.BackFace = desc.FrontFace;
   }
 
-  CHECK_HR(bd->pd3dDevice->CreateGraphicsPipelineState(
-      &psoDesc, IID_PPV_ARGS(&bd->pPipelineState)));
+  // Pipeline State
+  {
+    WCHAR assetsPath[512];
+    GetAssetsPath(assetsPath, _countof(assetsPath));
+    std::wstring basePath = assetsPath;
+
+    // Vertex Shader
+    auto vertexShaderPath = basePath + L"ImguiVS.cso";
+    auto vertexShaderBlob = ReadData(vertexShaderPath.c_str());
+    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
+                                          vertexShaderBlob.size()};
+
+    // Pixel Shader
+    auto pixelShaderPath = basePath + L"ImguiPS.cso";
+    auto pixelShaderBlob = ReadData(pixelShaderPath.c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
+
+    // Create the input layout
+    static D3D12_INPUT_ELEMENT_DESC local_layout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
+         (UINT)offsetof(ImDrawVert, pos),
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
+         (UINT)offsetof(ImDrawVert, uv),
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0,
+         (UINT)offsetof(ImDrawVert, col),
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    };
+
+    psoDesc.InputLayout.NumElements = _countof(local_layout);
+    psoDesc.InputLayout.pInputElementDescs = local_layout;
+    psoDesc.VS = vertexShader;
+    psoDesc.PS = pixelShader;
+
+    psoDesc.NodeMask = 1;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.pRootSignature = bd->pRootSignature;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = bd->RTVFormat;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+    CHECK_HR(bd->pd3dDevice->CreateGraphicsPipelineState(
+        &psoDesc, IID_PPV_ARGS(&bd->pPipelineState)));
+  }
 
   ImGui_ImplDX12_CreateFontsTexture();
 
