@@ -163,11 +163,9 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data,
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-    if (bd->pd3dDevice->CreateCommittedResource(
-            &props, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&fr->VertexBuffer)) < 0)
-      return;
+    CHECK_HR(bd->pd3dDevice->CreateCommittedResource(
+        &props, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&fr->VertexBuffer)));
   }
   if (fr->IndexBuffer == nullptr ||
       fr->IndexBufferSize < draw_data->TotalIdxCount) {
@@ -192,11 +190,9 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data,
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-    if (bd->pd3dDevice->CreateCommittedResource(
-            &props, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&fr->IndexBuffer)) < 0)
-      return;
+    CHECK_HR(bd->pd3dDevice->CreateCommittedResource(
+        &props, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&fr->IndexBuffer)));
   }
 
   // Upload vertex/index data into a single contiguous GPU buffer
