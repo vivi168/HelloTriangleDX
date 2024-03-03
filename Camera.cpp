@@ -6,6 +6,10 @@
 
 using namespace DirectX;
 
+constexpr float epsilon = std::numeric_limits<float>::epsilon();
+constexpr float upper = XM_PIDIV2 - epsilon;
+constexpr float lower = -XM_PIDIV2 + epsilon;
+
 Camera::Camera()
 {
   yaw = -XM_PIDIV2;
@@ -58,10 +62,6 @@ void Camera::ProcessKeyboard()
     yaw -= sensitivity;
   }
 
-  constexpr float epsilon = std::numeric_limits<float>::epsilon();
-  constexpr float upper = XM_PIDIV2 - epsilon;
-  constexpr float lower = -XM_PIDIV2 + epsilon;
-
   if (pitch > upper)
     pitch = upper;
   else if (pitch < lower)
@@ -96,11 +96,9 @@ void Camera::ProcessKeyboard()
   }
 }
 
-std::string Camera::DebugString()
+void Camera::DebugWindow()
 {
-  char buff[512] = {0};
-  sprintf_s(buff, "x: %f y: %f z: %f\nyaw: %f\npitch: %f", translate.x,
-            translate.y, translate.z, yaw, pitch);
-
-  return std::string(buff);
+  ImGui::Text("x: %f y: %f z: %f\nyaw: %f", translate.x, translate.y,
+              translate.z, yaw);
+  ImGui::SliderFloat("pitch", &pitch, lower, upper);
 }

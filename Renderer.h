@@ -129,8 +129,6 @@ public:
     m_Scene.nodes.push_back({model, cbIndex});
   }
 
-  void ToggleRaster() { m_Raster = !m_Raster; }
-
 private:
   void InitD3D();
   void InitFrameResources();

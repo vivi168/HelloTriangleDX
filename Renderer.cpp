@@ -686,7 +686,13 @@ void Renderer::Update(float time)
 
   {
     ImGui::Begin("Camera details");
-    ImGui::Text(m_Scene.camera->DebugString().c_str());
+    m_Scene.camera->DebugWindow();
+    ImGui::End();
+  }
+
+  {
+    ImGui::Begin("Ray tracing");
+    ImGui::Checkbox("Raster", &m_Raster);
     ImGui::End();
   }
 }
@@ -751,8 +757,13 @@ void Renderer::Render()
       D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
-  const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-  m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+  if (m_Raster) {
+    const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+    m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+  } else {
+    const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
+    m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+  }
 
   m_CommandList->SetPipelineState(m_PipelineStateObject.Get());
 

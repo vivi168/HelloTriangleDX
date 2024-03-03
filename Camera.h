@@ -8,7 +8,7 @@ public:
   void ProcessKeyboard();
   DirectX::XMMATRIX LookAt();
 
-  std::string DebugString();
+  void DebugWindow();
 
 private:
   float yaw, pitch;
