@@ -66,6 +66,21 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
   ShowWindow(m_hwnd, nCmdShow);
 
+  {
+    auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
+    auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
+
+    std::vector<float> noiseOutput(32 * 32);
+    fnSimplex->GenUniformGrid2D(noiseOutput.data(), 0, 0, 32, 32, 0.05f, 1337);
+
+    for (int j = 0; j < 32; j++) {
+      for (int i = 0; i < 32; i++) {
+        printf("%f ", noiseOutput[i + 32 * j]);
+      }
+      printf("\n");
+    }
+  }
+
   Camera camera;
   camera.Translate(0.f, 0.f, 10.f);
 
