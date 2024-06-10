@@ -75,6 +75,9 @@
     <ClInclude Include="D3D12MemoryAllocator\include\D3D12MemAlloc.h">
       <Filter>Header Files\D3D12MemoryAllocator</Filter>
     </ClInclude>
+    <ClInclude Include="Terrain.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -122,6 +125,9 @@
     <ClCompile Include="D3D12MemoryAllocator\src\D3D12MemAlloc.cpp">
       <Filter>Source Files\D3D12MemoryAllocator</Filter>
     </ClCompile>
+    <ClCompile Include="Terrain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="VS.hlsl">
@@ -134,6 +140,12 @@
       <Filter>Assets\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="ImguiPS.hlsl">
+      <Filter>Assets\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="TerrainVS.hlsl">
+      <Filter>Assets\Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="TerrainPS.hlsl">
       <Filter>Assets\Shaders</Filter>
     </FxCompile>
   </ItemGroup>

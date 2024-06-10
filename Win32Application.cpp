@@ -2,6 +2,7 @@
 #include "Win32Application.h"
 #include "Renderer.h"
 #include "Input.h"
+#include "Terrain.h"
 
 #define CATCH_PRINT_ERROR(extraCatchCode)         \
   catch (const std::exception& ex)                \
@@ -66,40 +67,31 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
   ShowWindow(m_hwnd, nCmdShow);
 
-  {
-    auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
-    auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
+  Chunk t;
 
-    std::vector<float> noiseOutput(32 * 32);
-    fnSimplex->GenUniformGrid2D(noiseOutput.data(), 0, 0, 32, 32, 0.05f, 1337);
-
-    for (int j = 0; j < 32; j++) {
-      for (int i = 0; i < 32; i++) {
-        printf("%f ", noiseOutput[i + 32 * j]);
-      }
-      printf("\n");
-    }
-  }
 
   Camera camera;
   camera.Translate(0.f, 0.f, 10.f);
 
   pSample->SetSceneCamera(&camera);
 
-  Mesh3D treeMesh, cubeMesh, houseMesh;
+  Mesh3D treeMesh, cubeMesh, houseMesh, terrainMesh;
   treeMesh.Read("assets/tree.objb");
-  cubeMesh.Read("assets/cube.objb");
+  cubeMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/house.objb");
+  terrainMesh = t.Mesh();
 
-  Model3D bigTree, smallTree, cube, house;
+  Model3D bigTree, smallTree, cube, house, terrain;
 
   bigTree.mesh = &treeMesh;
   smallTree.mesh = &treeMesh;
   cube.mesh = &cubeMesh;
   house.mesh = &houseMesh;
+  terrain.mesh = &terrainMesh;
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-2.f, 0.f, 0.f);
+  cube.Scale(5.f);
   cube.Translate(5.f, 0.f, 0.f);
   house.Translate(50.f, 0.f, 20.f);
 
@@ -107,6 +99,7 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
   pSample->AppendToScene(&smallTree);
   pSample->AppendToScene(&cube);
   pSample->AppendToScene(&house);
+  pSample->AppendToScene(&terrain);
 
   pSample->LoadAssets();
 

@@ -133,6 +133,7 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data,
   // FIXME: I'm assuming that this only gets called once per frame!
   // If not, we can't just re-allocate the IB or VB, we'll have to do a proper
   // allocator.
+  // TODO: Use D3D12MemoryAllocator ?
   ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
   bd->frameIndex = frameIndex;
   ImGui_ImplDX12_RenderBuffers* fr =
@@ -167,6 +168,7 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data,
         &props, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr, IID_PPV_ARGS(&fr->VertexBuffer)));
   }
+
   if (fr->IndexBuffer == nullptr ||
       fr->IndexBufferSize < draw_data->TotalIdxCount) {
     SafeRelease(fr->IndexBuffer);

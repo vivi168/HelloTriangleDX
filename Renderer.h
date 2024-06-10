@@ -181,6 +181,7 @@ private:
   UINT m_width;
   UINT m_height;
   float m_aspectRatio;
+  bool m_Raster = true;
 
   std::wstring m_title;
   std::wstring m_assetsPath;
@@ -204,7 +205,6 @@ private:
   // a command list we can record commands into, then execute them to render the
   // frame
   ComPtr<ID3D12GraphicsCommandList> m_CommandList;
-  ComPtr<ID3D12PipelineState> m_PipelineStateObject;
 
   // Synchronization objects.
   // an object that is locked while our command list is being executed by the
@@ -230,9 +230,12 @@ private:
   D3D12MA::Allocation* m_DepthStencilAllocation;
   ComPtr<ID3D12DescriptorHeap> m_DepthStencilDescriptorHeap;
 
+  // PSO
+  std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> m_PipelineStateObjects;
   ComPtr<ID3D12RootSignature> m_RootSignature;
 
-  bool m_Raster = true;
+
+
 
   struct PerFrameCB0_ALL {
     XMFLOAT4 Color;

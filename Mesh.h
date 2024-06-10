@@ -13,16 +13,12 @@ struct Vertex {
   DirectX::XMFLOAT2 uv;
 };
 
-struct Texture;  // GPU data
-
 struct Subset {
   uint32_t start, count;
   TEXTURENAME name;
 
-  Texture* texture = nullptr;
+  struct Texture* texture = nullptr;  // GPU data
 };
-
-struct Geometry;  // GPU data
 
 struct Mesh3D {
   struct Header {
@@ -36,7 +32,7 @@ struct Mesh3D {
   std::vector<Subset> subsets;
 
   std::string name;
-  Geometry* geometry = nullptr;
+  struct Geometry* geometry = nullptr;  // GPU data
 
   // TODO: automatically read textures as well
   void Read(std::string filename);

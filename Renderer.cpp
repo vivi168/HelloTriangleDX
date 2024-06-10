@@ -400,65 +400,40 @@ void Renderer::InitFrameResources()
 
   // Root Signature
   {
+    // Descriptor ranges
+    CD3DX12_DESCRIPTOR_RANGE descriptorRanges[2] = {};
+    descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
+    descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
+
     // Root parameters
-    D3D12_DESCRIPTOR_RANGE cbDescriptorRange;
-    cbDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbDescriptorRange.NumDescriptors = 1;
-    cbDescriptorRange.BaseShaderRegister = 0;
-    cbDescriptorRange.RegisterSpace = 0;
-    cbDescriptorRange.OffsetInDescriptorsFromTableStart = 0;
-
-    D3D12_DESCRIPTOR_RANGE textureDescRange;
-    textureDescRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    textureDescRange.NumDescriptors = 1;
-    textureDescRange.BaseShaderRegister = 0;
-    textureDescRange.RegisterSpace = 0;
-    textureDescRange.OffsetInDescriptorsFromTableStart = 0;
-
+    // Applications should sort entries in the root signature from most
+    // frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[3] = {};
-    rootParameters[0].InitAsDescriptorTable(1, &cbDescriptorRange);
-    rootParameters[1].InitAsConstantBufferView(1);
-    rootParameters[2].InitAsDescriptorTable(1, &textureDescRange);
+    rootParameters[0].InitAsDescriptorTable(1, &descriptorRanges[0]);
+    rootParameters[1].InitAsConstantBufferView(1);  // b1
+    rootParameters[2].InitAsDescriptorTable(1, &descriptorRanges[1]);
 
     // Static sampler
-    D3D12_STATIC_SAMPLER_DESC sampler = {};
-    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    sampler.MipLODBias = 0;
-    sampler.MaxAnisotropy = 0;
-    sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-    sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-    sampler.MinLOD = 0.0f;
-    sampler.MaxLOD = D3D12_FLOAT32_MAX;
-    sampler.ShaderRegister = 0;
-    sampler.RegisterSpace = 0;
-    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
+    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
 
     // Root Signature
-    D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = _countof(rootParameters);
-    rootSignatureDesc.pParameters = rootParameters;
-    rootSignatureDesc.NumStaticSamplers = 1;
-    rootSignatureDesc.pStaticSamplers = &sampler;
-    rootSignatureDesc.Flags =
+    D3D12_ROOT_SIGNATURE_FLAGS flags =
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+        3, rootParameters, 1, staticSamplers, flags);
 
-    ComPtr<ID3DBlob> signatureBlob;
     ID3DBlob* signatureBlobPtr;
-    CHECK_HR(D3D12SerializeRootSignature(&rootSignatureDesc,
-                                         D3D_ROOT_SIGNATURE_VERSION_1,
-                                         &signatureBlobPtr, nullptr));
-    signatureBlob.Attach(signatureBlobPtr);
+    CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
+                                                  &signatureBlobPtr, nullptr));
 
     ID3D12RootSignature* rootSignature = nullptr;
-    CHECK_HR(m_Device->CreateRootSignature(0, signatureBlob->GetBufferPointer(),
-                                           signatureBlob->GetBufferSize(),
-                                           IID_PPV_ARGS(&rootSignature)));
+    CHECK_HR(m_Device->CreateRootSignature(
+        0, signatureBlobPtr->GetBufferPointer(),
+        signatureBlobPtr->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
     m_RootSignature.Attach(rootSignature);
   }
 
@@ -548,7 +523,7 @@ void Renderer::InitFrameResources()
     }
   }
 
-  // Pipeline State
+  // Pipeline State for static objects
   {
     // Vertex Shader
     auto vertexShaderBlob = ReadData(GetAssetFullPath(L"VS.cso").c_str());
@@ -611,7 +586,62 @@ void Renderer::InitFrameResources()
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(m_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    m_PipelineStateObject.Attach(pipelineStateObject);
+    m_PipelineStateObjects["basic"].Attach(pipelineStateObject);
+  }
+
+  // Pipeline state for terrain
+  {
+    // Vertex Shader
+    auto vertexShaderBlob =
+        ReadData(GetAssetFullPath(L"TerrainVS.cso").c_str());
+    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
+                                          vertexShaderBlob.size()};
+
+    // Pixel Shader
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"TerrainPS.cso").c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
+
+    // create input layout
+    // The input layout is used by the Input Assembler so that it knows how to
+    // read the vertex data bound to it.
+    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout.NumElements = _countof(inputLayout);
+    psoDesc.InputLayout.pInputElementDescs = inputLayout;
+    psoDesc.pRootSignature = m_RootSignature.Get();
+    psoDesc.VS = vertexShader;
+    psoDesc.PS = pixelShader;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+    psoDesc.SampleDesc.Count = 1;  // must be the same sample description as the
+                                   // swapchain and depth/stencil buffer
+    psoDesc.SampleDesc.Quality = 0;
+    // sample mask has to do with multi-sampling. 0xffffffff means point
+    // sampling is done
+    psoDesc.SampleMask = 0xffffffff;
+    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
+    SetDefaultBlendDesc(psoDesc.BlendState);
+    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
+    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+
+    // create the pso
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(m_Device->CreateGraphicsPipelineState(
+        &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    m_PipelineStateObjects["terrain"].Attach(pipelineStateObject);
   }
 }
 
@@ -765,7 +795,7 @@ void Renderer::Render()
     m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  m_CommandList->SetPipelineState(m_PipelineStateObject.Get());
+  m_CommandList->SetPipelineState(m_PipelineStateObjects["basic"].Get());
 
   m_CommandList->SetGraphicsRootSignature(m_RootSignature.Get());
 
@@ -876,7 +906,7 @@ void Renderer::Cleanup()
     geom->Unload();
   }
 
-  m_PipelineStateObject.Reset();
+  m_PipelineStateObjects["basic"].Reset();
   m_RootSignature.Reset();
 
   CloseHandle(m_FenceEvent);
@@ -1171,7 +1201,8 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
     // we can give resource heaps a name so when we debug with the graphics
     // debugger we know what resource we are looking at
     geom->m_IndexBuffer->SetName(L"Index Buffer Resource Heap");
-    geom->m_IndexBufferAllocation->SetName(L"Index Buffer Resource Heap");
+    geom->m_IndexBufferAllocation->SetName(
+        L"Index Buffer Resource Heap Allocation");
 
     // create upload heap to upload index buffer
     D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
@@ -1200,7 +1231,7 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
 
     CHECK_HR(iBufferUploadHeap->SetName(L"Index Buffer Upload Resource Heap"));
     geom->iBufferUploadHeapAllocation->SetName(
-        L"Index Buffer Upload Resource Heap");
+        L"Index Buffer Upload Resource Heap Allocation");
 
     // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
@@ -1265,18 +1296,9 @@ Texture* Renderer::CreateTexture(std::string name)
       nullptr,  // pOptimizedClearValue
       &tex->m_TextureAllocation, IID_PPV_ARGS(&tex->m_Texture)));
 
-  // TODO: helper function/better way ?
-  int size_needed = MultiByteToWideChar(
-      CP_UTF8, 0, name.c_str(), static_cast<int>(name.length()), NULL, 0);
-  LPWSTR wide_string = new WCHAR[size_needed + 1];
-  MultiByteToWideChar(CP_UTF8, 0, name.c_str(), static_cast<int>(name.length()),
-                      wide_string, size_needed);
-  wide_string[size_needed] = 0;  // null terminate the wide string
-
-  tex->m_Texture->SetName(wide_string);
-  tex->m_TextureAllocation->SetName(L"texture");
-
-  delete[] wide_string;
+  std::wstring wName = ConvertToWstring(name);
+  tex->m_Texture->SetName(wName.c_str());
+  tex->m_TextureAllocation->SetName(wName.c_str());
 
   UINT64 textureUploadBufferSize;
   m_Device->GetCopyableFootprints(&textureDesc,

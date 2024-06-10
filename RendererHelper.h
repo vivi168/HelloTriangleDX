@@ -266,3 +266,16 @@ static void SetDefaultDepthStencilDesc(D3D12_DEPTH_STENCIL_DESC& outDesc)
   outDesc.FrontFace = defaultStencilOp;
   outDesc.BackFace = defaultStencilOp;
 }
+
+static std::wstring ConvertToWstring(std::string in)
+{
+  size_t newsize = std::strlen(in.c_str()) + 1;
+  wchar_t* wcstring = new wchar_t[newsize];
+  mbstowcs_s(nullptr, wcstring, newsize, in.c_str(), _TRUNCATE);
+
+  std::wstring out(wcstring);
+  delete[] wcstring;
+
+  std::wcout << L"wide string:" << out << "\n";
+  return out;
+}
