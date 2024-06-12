@@ -4,6 +4,7 @@
 #include "D3D12MemAlloc.h"
 #include "Mesh.h"
 #include "Camera.h"
+#include "Terrain.h"
 
 #include <list>
 #include <unordered_map>
@@ -231,11 +232,9 @@ private:
   ComPtr<ID3D12DescriptorHeap> m_DepthStencilDescriptorHeap;
 
   // PSO
-  std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> m_PipelineStateObjects;
+  enum class PSO { Basic, Terrain };
+  std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> m_PipelineStateObjects;
   ComPtr<ID3D12RootSignature> m_RootSignature;
-
-
-
 
   struct PerFrameCB0_ALL {
     XMFLOAT4 Color;
@@ -266,6 +265,7 @@ private:
     };
 
     std::list<SceneNode> nodes;
+    Terrain* terrain;
     Camera* camera;
   } m_Scene;
 

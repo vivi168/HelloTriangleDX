@@ -16,6 +16,7 @@ public:
 private:
   void InitHeightmap();
 
+  int cx, cy;
   DirectX::XMFLOAT3 translate;
   std::array<std::array<float, CHUNK_SIZE + 1>, CHUNK_SIZE + 1> m_Heightmap;
   Mesh3D mesh;

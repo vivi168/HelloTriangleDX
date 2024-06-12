@@ -354,18 +354,10 @@ void Renderer::InitFrameResources()
     D3D12MA::ALLOCATION_DESC depthStencilAllocDesc = {};
     depthStencilAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
-    D3D12_RESOURCE_DESC depthStencilResourceDesc = {};
-    depthStencilResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    depthStencilResourceDesc.Alignment = 0;
-    depthStencilResourceDesc.Width = m_width;
-    depthStencilResourceDesc.Height = m_height;
-    depthStencilResourceDesc.DepthOrArraySize = 1;
+    D3D12_RESOURCE_DESC depthStencilResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, m_width, m_height);
     depthStencilResourceDesc.MipLevels = 1;
-    depthStencilResourceDesc.Format = DEPTH_STENCIL_FORMAT;
-    depthStencilResourceDesc.SampleDesc.Count = 1;
-    depthStencilResourceDesc.SampleDesc.Quality = 0;
-    depthStencilResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
     CHECK_HR(m_Allocator->CreateResource(
         &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue,
@@ -443,22 +435,10 @@ void Renderer::InitFrameResources()
     D3D12MA::ALLOCATION_DESC constantBufferUploadAllocDesc = {};
     constantBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    D3D12_RESOURCE_DESC constantBufferResourceDesc = {};
-    constantBufferResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    constantBufferResourceDesc.Alignment = 0;
-    constantBufferResourceDesc.Width = 1024 * 64;
-    constantBufferResourceDesc.Height = 1;
-    constantBufferResourceDesc.DepthOrArraySize = 1;
-    constantBufferResourceDesc.MipLevels = 1;
-    constantBufferResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    constantBufferResourceDesc.SampleDesc.Count = 1;
-    constantBufferResourceDesc.SampleDesc.Quality = 0;
-    constantBufferResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    constantBufferResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
       CHECK_HR(m_Allocator->CreateResource(
-          &constantBufferUploadAllocDesc, &constantBufferResourceDesc,
+          &constantBufferUploadAllocDesc,
+          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
           D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
           &m_ConstantBufferUploadAllocation[i],
           IID_PPV_ARGS(&m_ConstantBufferUploadHeap[i])));
@@ -486,25 +466,12 @@ void Renderer::InitFrameResources()
     D3D12MA::ALLOCATION_DESC cbPerObjectUploadAllocDesc = {};
     cbPerObjectUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    D3D12_RESOURCE_DESC cbPerObjectUploadResourceDesc = {};
-    cbPerObjectUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    cbPerObjectUploadResourceDesc.Alignment = 0;
-    cbPerObjectUploadResourceDesc.Width = 1024 * 64;
-    cbPerObjectUploadResourceDesc.Height = 1;
-    cbPerObjectUploadResourceDesc.DepthOrArraySize = 1;
-    cbPerObjectUploadResourceDesc.MipLevels = 1;
-    cbPerObjectUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    cbPerObjectUploadResourceDesc.SampleDesc.Count = 1;
-    cbPerObjectUploadResourceDesc.SampleDesc.Quality = 0;
-    cbPerObjectUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    cbPerObjectUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       CHECK_HR(m_Allocator->CreateResource(
           &cbPerObjectUploadAllocDesc,
           // size of the resource heap. Must be a multiple of 64KB for
           // single-textures and constant buffers
-          &cbPerObjectUploadResourceDesc,
+          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
           // will be data that is read from so we keep it in the generic read
           // state
           D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -586,7 +553,7 @@ void Renderer::InitFrameResources()
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(m_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    m_PipelineStateObjects["basic"].Attach(pipelineStateObject);
+    m_PipelineStateObjects[PSO::Basic].Attach(pipelineStateObject);
   }
 
   // Pipeline state for terrain
@@ -641,7 +608,7 @@ void Renderer::InitFrameResources()
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(m_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    m_PipelineStateObjects["terrain"].Attach(pipelineStateObject);
+    m_PipelineStateObjects[PSO::Terrain].Attach(pipelineStateObject);
   }
 }
 
@@ -795,7 +762,7 @@ void Renderer::Render()
     m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  m_CommandList->SetPipelineState(m_PipelineStateObjects["basic"].Get());
+  m_CommandList->SetPipelineState(m_PipelineStateObjects[PSO::Basic].Get());
 
   m_CommandList->SetGraphicsRootSignature(m_RootSignature.Get());
 
@@ -906,7 +873,7 @@ void Renderer::Cleanup()
     geom->Unload();
   }
 
-  m_PipelineStateObjects["basic"].Reset();
+  m_PipelineStateObjects[PSO::Basic].Reset();
   m_RootSignature.Reset();
 
   CloseHandle(m_FenceEvent);
@@ -1076,22 +1043,10 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
     // an upload heap
     D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
     vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-    D3D12_RESOURCE_DESC vertexBufferResourceDesc = {};
-    vertexBufferResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    vertexBufferResourceDesc.Alignment = 0;
-    vertexBufferResourceDesc.Width = vBufferSize;
-    vertexBufferResourceDesc.Height = 1;
-    vertexBufferResourceDesc.DepthOrArraySize = 1;
-    vertexBufferResourceDesc.MipLevels = 1;
-    vertexBufferResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    vertexBufferResourceDesc.SampleDesc.Count = 1;
-    vertexBufferResourceDesc.SampleDesc.Quality = 0;
-    vertexBufferResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    vertexBufferResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
     ID3D12Resource* vertexBufferPtr;
     CHECK_HR(m_Allocator->CreateResource(
-        &vertexBufferAllocDesc, &vertexBufferResourceDesc,
+        &vertexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
         // we will start this heap in the copy destination state since we will
         // copy data from the upload heap to this heap
         D3D12_RESOURCE_STATE_COPY_DEST,
@@ -1113,22 +1068,9 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
     D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
     vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    D3D12_RESOURCE_DESC vertexBufferUploadResourceDesc = {};
-    vertexBufferUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    vertexBufferUploadResourceDesc.Alignment = 0;
-    vertexBufferUploadResourceDesc.Width = vBufferSize;
-    vertexBufferUploadResourceDesc.Height = 1;
-    vertexBufferUploadResourceDesc.DepthOrArraySize = 1;
-    vertexBufferUploadResourceDesc.MipLevels = 1;
-    vertexBufferUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    vertexBufferUploadResourceDesc.SampleDesc.Count = 1;
-    vertexBufferUploadResourceDesc.SampleDesc.Quality = 0;
-    vertexBufferUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    vertexBufferUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     ComPtr<ID3D12Resource> vBufferUploadHeap;
     CHECK_HR(m_Allocator->CreateResource(
-        &vBufferUploadAllocDesc, &vertexBufferUploadResourceDesc,
+        &vBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
         // GPU will read from this buffer and copy its contents to the default
         // heap
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -1178,21 +1120,8 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
     D3D12MA::ALLOCATION_DESC indexBufferAllocDesc = {};
     indexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
-    D3D12_RESOURCE_DESC indexBufferResourceDesc = {};
-    indexBufferResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    indexBufferResourceDesc.Alignment = 0;
-    indexBufferResourceDesc.Width = iBufferSize;
-    indexBufferResourceDesc.Height = 1;
-    indexBufferResourceDesc.DepthOrArraySize = 1;
-    indexBufferResourceDesc.MipLevels = 1;
-    indexBufferResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    indexBufferResourceDesc.SampleDesc.Count = 1;
-    indexBufferResourceDesc.SampleDesc.Quality = 0;
-    indexBufferResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    indexBufferResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     CHECK_HR(m_Allocator->CreateResource(
-        &indexBufferAllocDesc, &indexBufferResourceDesc,
+        &indexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
         D3D12_RESOURCE_STATE_COPY_DEST,  // start in the copy destination state
         nullptr,  // optimized clear value must be null for this type of
                   // resource
@@ -1208,22 +1137,9 @@ Geometry* Renderer::CreateGeometry(Mesh3D* mesh)
     D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
     iBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    D3D12_RESOURCE_DESC indexBufferUploadResourceDesc = {};
-    indexBufferUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    indexBufferUploadResourceDesc.Alignment = 0;
-    indexBufferUploadResourceDesc.Width = iBufferSize;
-    indexBufferUploadResourceDesc.Height = 1;
-    indexBufferUploadResourceDesc.DepthOrArraySize = 1;
-    indexBufferUploadResourceDesc.MipLevels = 1;
-    indexBufferUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-    indexBufferUploadResourceDesc.SampleDesc.Count = 1;
-    indexBufferUploadResourceDesc.SampleDesc.Quality = 0;
-    indexBufferUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    indexBufferUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     ComPtr<ID3D12Resource> iBufferUploadHeap;
     CHECK_HR(m_Allocator->CreateResource(
-        &iBufferUploadAllocDesc, &indexBufferUploadResourceDesc,
+        &iBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
         // GPU will read from this buffer and copy its contents to the default
         // heap
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -1275,19 +1191,9 @@ Texture* Renderer::CreateTexture(std::string name)
 
   tex->texIndex = ++Texture::texCount;
 
-  D3D12_RESOURCE_DESC textureDesc;
-  textureDesc = {};
-  textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  textureDesc.Alignment = 0;
-  textureDesc.Width = tex->Width();
-  textureDesc.Height = tex->Height();
-  textureDesc.DepthOrArraySize = 1;
+  D3D12_RESOURCE_DESC textureDesc =
+      CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
   textureDesc.MipLevels = 1;
-  textureDesc.Format = tex->Format();
-  textureDesc.SampleDesc.Count = 1;
-  textureDesc.SampleDesc.Quality = 0;
-  textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-  textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
   D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
   textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
@@ -1313,22 +1219,10 @@ Texture* Renderer::CreateTexture(std::string name)
   D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
   textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-  D3D12_RESOURCE_DESC textureUploadResourceDesc = {};
-  textureUploadResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  textureUploadResourceDesc.Alignment = 0;
-  textureUploadResourceDesc.Width = textureUploadBufferSize;
-  textureUploadResourceDesc.Height = 1;
-  textureUploadResourceDesc.DepthOrArraySize = 1;
-  textureUploadResourceDesc.MipLevels = 1;
-  textureUploadResourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-  textureUploadResourceDesc.SampleDesc.Count = 1;
-  textureUploadResourceDesc.SampleDesc.Quality = 0;
-  textureUploadResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  textureUploadResourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
   ComPtr<ID3D12Resource> textureUpload;
   CHECK_HR(m_Allocator->CreateResource(
-      &textureUploadAllocDesc, &textureUploadResourceDesc,
+      &textureUploadAllocDesc,
+      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize),
       D3D12_RESOURCE_STATE_GENERIC_READ,
       nullptr,  // pOptimizedClearValue
       &tex->textureUploadAllocation, IID_PPV_ARGS(&textureUpload)));
