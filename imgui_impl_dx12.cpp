@@ -117,8 +117,10 @@ static void ImGui_ImplDX12_SetupRenderState(ImDrawData* draw_data,
 template <typename T>
 static inline void SafeRelease(T*& res)
 {
-  if (res) res->Release();
-  res = nullptr;
+  if (res) {
+    res->Release();
+    res = nullptr;
+  }
 }
 
 // Render function
