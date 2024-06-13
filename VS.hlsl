@@ -12,5 +12,6 @@ VS_OUTPUT main(VS_INPUT input)
     
   output.color = input.color;
   output.texCoord = input.texCoord;
+  output.normal = input.normal;
   return output;
 }

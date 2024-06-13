@@ -159,7 +159,7 @@ class Mesh:
                     nx = data['nx']
                     ny = data['ny']
                     nz = data['nz']
-                    normals.append(Vec3(nx, ny, nz))
+                    normals.append(Vec3(nx, -ny, -nz))
 
                 elif line.startswith('usemtl'):
                     data = parse.search('usemtl {:S}', line)

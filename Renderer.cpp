@@ -354,7 +354,8 @@ void Renderer::InitFrameResources()
     D3D12MA::ALLOCATION_DESC depthStencilAllocDesc = {};
     depthStencilAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
-    D3D12_RESOURCE_DESC depthStencilResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, m_width, m_height);
+    D3D12_RESOURCE_DESC depthStencilResourceDesc =
+        CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, m_width, m_height);
     depthStencilResourceDesc.MipLevels = 1;
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
@@ -600,6 +601,7 @@ void Renderer::InitFrameResources()
     // sampling is done
     psoDesc.SampleMask = 0xffffffff;
     SetDefaultRasterizerDesc(psoDesc.RasterizerState);
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
     SetDefaultBlendDesc(psoDesc.BlendState);
     psoDesc.NumRenderTargets = 1;  // we are only binding one render target
     SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
@@ -762,7 +764,6 @@ void Renderer::Render()
     m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  m_CommandList->SetPipelineState(m_PipelineStateObjects[PSO::Basic].Get());
 
   m_CommandList->SetGraphicsRootSignature(m_RootSignature.Get());
 
@@ -782,6 +783,8 @@ void Renderer::Render()
 
   D3D12_RECT scissorRect{0, 0, m_width, m_height};
   m_CommandList->RSSetScissorRects(1, &scissorRect);
+
+  m_CommandList->SetPipelineState(m_PipelineStateObjects[PSO::Basic].Get());
 
   for (const auto node : m_Scene.nodes) {
     auto mesh = node.model->mesh;

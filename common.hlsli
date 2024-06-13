@@ -16,6 +16,7 @@ struct VS_INPUT_TERRAIN
 struct VS_OUTPUT
 {
   float4 pos : SV_POSITION;
+  float3 normal : NORMAL;
   float4 color : COLOR;
   float2 texCoord : TEXCOORD;
 };

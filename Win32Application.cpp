@@ -69,37 +69,44 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
   Chunk t;
 
-
   Camera camera;
   camera.Translate(0.f, 0.f, 10.f);
 
   pSample->SetSceneCamera(&camera);
 
-  Mesh3D treeMesh, cubeMesh, houseMesh, terrainMesh;
+  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh;
   treeMesh.Read("assets/tree.objb");
-  cubeMesh.Read("assets/yuka.objb");
+  yukaMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/house.objb");
-  terrainMesh = t.Mesh();
+  terrainMesh.Read("assets/terrain.objb");
+  cubeMesh.Read("assets/unit_cube.objb");
+  cylinderMesh.Read("assets/cylinder.objb");
 
-  Model3D bigTree, smallTree, cube, house, terrain;
+  Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain;
 
   bigTree.mesh = &treeMesh;
   smallTree.mesh = &treeMesh;
-  cube.mesh = &cubeMesh;
+  yuka.mesh = &yukaMesh;
   house.mesh = &houseMesh;
   terrain.mesh = &terrainMesh;
+  cube.mesh = &cubeMesh;
+  cylinder.mesh = &cylinderMesh;
 
   smallTree.Scale(0.5f);
-  smallTree.Translate(-2.f, 0.f, 0.f);
-  cube.Scale(5.f);
-  cube.Translate(5.f, 0.f, 0.f);
+  smallTree.Translate(-7.f, 0.f, 0.f);
+  bigTree.Translate(-7.f, 0.0f, 14.f);
+  yuka.Scale(5.f);
+  yuka.Translate(15.f, 0.f, 15.f);
   house.Translate(50.f, 0.f, 20.f);
+  cube.Translate(13.f, 0.f, 37.f);
 
   pSample->AppendToScene(&bigTree);
   pSample->AppendToScene(&smallTree);
-  pSample->AppendToScene(&cube);
+  pSample->AppendToScene(&yuka);
   pSample->AppendToScene(&house);
   pSample->AppendToScene(&terrain);
+  pSample->AppendToScene(&cube);
+  pSample->AppendToScene(&cylinder);
 
   pSample->LoadAssets();
 
@@ -125,8 +132,8 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
         }
       }
 
-      bigTree.Rotate(0.f, m_Time, 0.f);
-      smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
+      // bigTree.Rotate(0.f, m_Time, 0.f);
+      // smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
 
       pSample->Update(m_Time);
       pSample->Render();
