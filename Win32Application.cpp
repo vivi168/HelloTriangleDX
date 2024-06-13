@@ -110,6 +110,17 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
   pSample->LoadAssets();
 
+  float playerX, playerY, playerZ;
+  float playerDirection = 0.0f;
+  float playerRotSpeed = 0.02f;
+  float playerSpeed = 20.0f;
+
+  playerX = 0.f;
+  playerY = 0.f;
+  playerZ = 0.f;
+
+  cylinder.Translate(playerX, playerY, playerZ);
+
   MSG msg;
   for (;;) {
     if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -129,6 +140,28 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
         if (Input::IsPressed(Input::KB::Escape)) {
           PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+        }
+
+        {
+          float forwardX = cosf(playerDirection);
+          float forwardZ = sinf(playerDirection);
+
+          if (Input::IsHeld(Input::KB::I)) {
+            playerX += playerSpeed * forwardX * m_TimeDelta;
+            playerZ += playerSpeed * forwardZ * m_TimeDelta;
+          } else if (Input::IsHeld(Input::KB::K)) {
+            playerX -= playerSpeed * forwardX * m_TimeDelta;
+            playerZ -= playerSpeed * forwardZ * m_TimeDelta;
+          }
+          if (Input::IsHeld(Input::KB::J)) {
+            playerDirection += playerRotSpeed;
+          }
+          if (Input::IsHeld(Input::KB::L)) {
+            playerDirection -= playerRotSpeed;
+          }
+
+          cylinder.Translate(playerX, playerY, playerZ);
+          cylinder.Rotate(0.0f, -playerDirection, 0.f);
         }
       }
 

@@ -58,6 +58,18 @@ void SetNewKeyState(WPARAM key, bool state)
     case 'D':
       inputState.newKeyState[KB::D] = state;
       break;
+    case 'I':
+      inputState.newKeyState[KB::I] = state;
+      break;
+    case 'J':
+      inputState.newKeyState[KB::J] = state;
+      break;
+    case 'K':
+      inputState.newKeyState[KB::K] = state;
+      break;
+    case 'L':
+      inputState.newKeyState[KB::L] = state;
+      break;
     case VK_UP:
       inputState.newKeyState[KB::Up] = state;
       break;

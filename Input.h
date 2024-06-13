@@ -2,7 +2,7 @@
 
 namespace Input
 {
-enum class KB { Q, W, E, A, S, D, Up, Left, Down, Right, Escape };
+enum class KB { Q, W, E, A, S, D, I, J, K, L, Up, Left, Down, Right, Escape };
 
 void Update();
 void OnKeyUp(WPARAM key);
