@@ -1,4 +1,4 @@
-# Export as Z forward, -Y up
+# Export as -Z forward, Y up
 # usemtl format -> usemtl image.bmp
 import numpy as np
 import parse
@@ -77,7 +77,7 @@ class Triangle:
         self.vertIndices = vertIndices
 
     def pack(self):
-        return struct.pack('<HHH', self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
+        return struct.pack('<HHH', self.vertIndices[0], self.vertIndices[2], self.vertIndices[1])
 
     def __str__(self):
         return '{} {} {}'.format(
@@ -148,7 +148,7 @@ class Mesh:
                     px = data['px']
                     py = data['py']
                     pz = data['pz']
-                    positions.append(Vec3(px, -py, -pz))
+                    positions.append(Vec3(px, py, -pz))
 
                 elif line.startswith('vt '):
                     data = parse.search('vt {tu:g} {tv:g}', line)
@@ -159,7 +159,7 @@ class Mesh:
                     nx = data['nx']
                     ny = data['ny']
                     nz = data['nz']
-                    normals.append(Vec3(nx, -ny, -nz))
+                    normals.append(Vec3(nx, ny, -nz))
 
                 elif line.startswith('usemtl'):
                     data = parse.search('usemtl {:S}', line)

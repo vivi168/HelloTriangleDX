@@ -41,10 +41,7 @@ DirectX::XMMATRIX Model3D::WorldMatrix()
   XMMATRIX rotY = XMMatrixRotationY(rotate.y);
   XMMATRIX rotZ = XMMatrixRotationZ(rotate.z);
 
-  XMMATRIX rotXY = XMMatrixMultiply(rotX, rotY);
-  XMMATRIX rotXYZ = XMMatrixMultiply(rotXY, rotZ);
+  XMMATRIX rotXYZ = rotX * rotY * rotZ;
 
-  XMMATRIX scaleRot = XMMatrixMultiply(scaleMatrix, rotXYZ);
-
-  return XMMatrixMultiply(scaleRot, transMatrix);
+  return rotXYZ * scaleMatrix * transMatrix;
 }

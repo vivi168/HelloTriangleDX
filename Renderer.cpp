@@ -664,13 +664,12 @@ void Renderer::Update(float time)
         45.f * (XM_PI / 180.f), m_aspectRatio, 0.1f, 1000.f);
 
     XMMATRIX view = m_Scene.camera->LookAt();
-    XMMATRIX viewProjection = XMMatrixMultiply(view, projection);
+    XMMATRIX viewProjection = view * projection;
 
     for (auto node : m_Scene.nodes) {
       PerObjectCB1_VS cb;
 
-      XMMATRIX worldViewProjection =
-          XMMatrixMultiplyTranspose(node.model->WorldMatrix(), viewProjection);
+      XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
       XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
 
       memcpy((uint8_t*)m_CbPerObjectAddress[m_FrameIndex] + node.cbIndex, &cb,

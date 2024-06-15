@@ -8,8 +8,8 @@ cbuffer ObjectCb : register(b1)
 VS_OUTPUT main(VS_INPUT input)
 {
   VS_OUTPUT output;
-  output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
-    
+  output.pos = mul(WorldViewProj, float4(input.pos, 1.0f));
+
   output.color = input.color;
   output.texCoord = input.texCoord;
   output.normal = input.normal;

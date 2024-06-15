@@ -14,6 +14,8 @@ private:
   float yaw, pitch;
   float speed, sensitivity;
 
+  static const DirectX::XMVECTOR worldUp;
+
   DirectX::XMFLOAT3 translate;
   DirectX::XMFLOAT3 right, forward;
 };

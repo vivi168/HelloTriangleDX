@@ -10,9 +10,11 @@ constexpr float epsilon = std::numeric_limits<float>::epsilon();
 constexpr float upper = XM_PIDIV2 - epsilon;
 constexpr float lower = -XM_PIDIV2 + epsilon;
 
+const XMVECTOR Camera::worldUp = XMVectorSet(0.f, 1.f, 0.f, 0.f);
+
 Camera::Camera()
 {
-  yaw = -XM_PIDIV2;
+  yaw = XM_PIDIV2;
   pitch = 0;
   speed = 1.0f;
   sensitivity = 0.01f;
@@ -28,21 +30,17 @@ XMMATRIX Camera::LookAt()
   const XMVECTOR f = XMVectorSet(cosf(yaw) * cosf(pitch), sinf(pitch),
                                  sinf(yaw) * cosf(pitch), 0.f);
 
-  const XMVECTOR worldUp = XMVectorSet(0.f, 1.f, 0.f, 0.f);
-
   XMVECTOR front = XMVector3Normalize(f);
 
-  XMVECTOR r = XMVector3Normalize(XMVector3Cross(front, worldUp));
+  XMVECTOR r = XMVector3Normalize(XMVector3Cross(worldUp, front));
   XMStoreFloat3(&right, r);
 
-  XMVECTOR fw = XMVector3Normalize(XMVector3Cross(worldUp, r));
+  XMVECTOR fw = XMVector3Normalize(XMVector3Cross(r, worldUp));
   XMStoreFloat3(&forward, fw);
 
-  XMVECTOR u = XMVector3Normalize(XMVector3Cross(r, front));
+  XMVECTOR position = XMLoadFloat3(&translate);
 
-  XMVECTOR p = XMLoadFloat3(&translate);
-
-  return XMMatrixLookAtLH(p, XMVectorAdd(p, front), u);
+  return XMMatrixLookAtLH(position, XMVectorAdd(position, front), worldUp);
 }
 
 void Camera::Translate(float x, float y, float z) { translate = {x, y, z}; }
@@ -78,13 +76,13 @@ void Camera::ProcessKeyboard()
   }
 
   if (Input::IsHeld(Input::KB::A)) {
-    translate.x += right.x * speed;
-    translate.z += right.z * speed;
+    translate.x -= right.x * speed;
+    translate.z -= right.z * speed;
   }
 
   if (Input::IsHeld(Input::KB::D)) {
-    translate.x -= right.x * speed;
-    translate.z -= right.z * speed;
+    translate.x += right.x * speed;
+    translate.z += right.z * speed;
   }
 
   if (Input::IsHeld(Input::KB::Q)) {

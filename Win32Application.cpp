@@ -79,7 +79,8 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
   yukaMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/house.objb");
   terrainMesh.Read("assets/terrain.objb");
-  cubeMesh.Read("assets/unit_cube.objb");
+  //terrainMesh = t.Mesh();
+  cubeMesh.Read("assets/cube.objb");
   cylinderMesh.Read("assets/cylinder.objb");
 
   Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain;
@@ -98,7 +99,9 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
   house.Translate(50.f, 0.f, 20.f);
-  cube.Translate(13.f, 0.f, 37.f);
+  house.Rotate(90 * XM_PI / 180.f, 0.f, 0.f);
+  cube.Translate(0.f, 50.f, 0.f);
+  cube.Scale(5.f);
 
   pSample->AppendToScene(&bigTree);
   pSample->AppendToScene(&smallTree);
