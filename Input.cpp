@@ -82,6 +82,9 @@ void SetNewKeyState(WPARAM key, bool state)
     case VK_RIGHT:
       inputState.newKeyState[KB::Right] = state;
       break;
+    case VK_SPACE:
+      inputState.newKeyState[KB::Space] = state;
+      break;
     case VK_ESCAPE:
       inputState.newKeyState[KB::Escape] = state;
       break;

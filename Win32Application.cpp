@@ -3,6 +3,7 @@
 #include "Renderer.h"
 #include "Input.h"
 #include "Terrain.h"
+#include "Collider.h"
 
 #define CATCH_PRINT_ERROR(extraCatchCode)         \
   catch (const std::exception& ex)                \
@@ -114,8 +115,12 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
 
   pSample->LoadAssets();
 
+  Collider collider;
+  collider.AppendStaticModel(&terrain);
+  collider.AppendStaticModel(&yuka);
+
   float playerX, playerY, playerZ;
-  float playerDirection = 0.0f;
+  float playerDirection = XM_PIDIV2;
   float playerRotSpeed = 0.02f;
   float playerSpeed = 20.0f;
 
@@ -164,6 +169,9 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
             playerDirection -= playerRotSpeed;
           }
 
+          if (Input::IsPressed(Input::KB::Space))
+            camera.Target(playerX, playerY, playerZ);
+
           cylinder.Translate(playerX, playerY, playerZ);
           cylinder.Rotate(0.0f, -playerDirection, 0.f);
         }
@@ -173,6 +181,22 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
       // smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
 
       pSample->Update(m_Time);
+
+      {
+        ImGui::Begin("Player");
+        ImGui::Text("x: %f y: %f z: %f\ndir: %f", playerX, playerY,
+                    playerZ, playerDirection);
+
+        float height = 0.0f;
+        collider.FindFloor({playerX, playerY, playerZ}, &height);
+
+        ImGui::Text("floor height: %f", height);
+
+        playerY = height;
+
+        ImGui::End();
+      }
+
       pSample->Render();
     }
   }
