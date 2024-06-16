@@ -45,6 +45,18 @@ XMMATRIX Camera::LookAt()
 
 void Camera::Translate(float x, float y, float z) { translate = {x, y, z}; }
 
+void Camera::Target(float x, float y, float z)
+{
+  XMVECTOR p = XMLoadFloat3(&translate);
+  XMVECTOR t = XMVectorSet(x, y, z, 0.0f);
+  XMVECTOR d = XMVector3Normalize(t - p);
+  XMFLOAT3 dir;
+  XMStoreFloat3(&dir, d);
+
+  yaw = atan2f(dir.z, dir.x);
+  pitch = asinf(dir.y);
+}
+
 void Camera::ProcessKeyboard()
 {
   if (Input::IsHeld(Input::KB::Up)) {

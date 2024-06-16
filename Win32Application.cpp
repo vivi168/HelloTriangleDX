@@ -70,7 +70,8 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
   Chunk t;
 
   Camera camera;
-  camera.Translate(0.f, 0.f, 10.f);
+  camera.Translate(-100.f, 75.f, 130.f);
+  camera.Target(0.f, 0.f, 0.f);
 
   pSample->SetSceneCamera(&camera);
 

@@ -5,6 +5,7 @@ class Camera
 public:
   Camera();
   void Translate(float x, float y, float z);
+  void Target(float x, float y, float z);
   void ProcessKeyboard();
   DirectX::XMMATRIX LookAt();
 
