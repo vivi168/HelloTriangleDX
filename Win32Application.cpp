@@ -5,7 +5,10 @@
 #include "Terrain.h"
 #include "Collider.h"
 
+using namespace DirectX;
+
 static const wchar_t* const CLASS_NAME = L"D3D12MemAllocSample";
+static const wchar_t* const WINDOW_TITLE = L"D3D12 Memory Allocator Sample";
 
 HWND Win32Application::m_hwnd = nullptr;
 UINT64 Win32Application::m_TimeOffset;
@@ -28,6 +31,8 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   ATOM classR = RegisterClassEx(&windowClass);
   assert(classR);
+
+  Renderer::InitWindow(1280, 720, WINDOW_TITLE);
 
   DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
   RECT windowRect = {0, 0, static_cast<LONG>(Renderer::GetWidth()),

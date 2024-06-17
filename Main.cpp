@@ -2,8 +2,6 @@
 #include "Win32Application.h"
 #include "Renderer.h"
 
-static const wchar_t* const WINDOW_TITLE = L"D3D12 Memory Allocator Sample";
-
 static void PrintHelp()
 {
   wprintf(
@@ -79,7 +77,6 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     return (int)ExitCode::GPUList;
   }
 
-  Renderer::InitWindow(1280, 720, WINDOW_TITLE);
   Renderer::InitAdapter(dxgiUsage.get(),
                         g_CommandLineParameters.m_GPUSelection);
   return Win32Application::Run(hInstance, nCmdShow);
