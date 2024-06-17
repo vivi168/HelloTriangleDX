@@ -243,6 +243,8 @@ private:
 
   struct PerObjectCB1_VS {
     XMFLOAT4X4 WorldViewProj;
+    XMFLOAT4X4 WorldMatrix;
+    XMFLOAT4X4 NormalMatrix;
   };
 
   const size_t ConstantBufferPerObjectAlignedSize =

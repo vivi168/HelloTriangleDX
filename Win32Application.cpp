@@ -101,7 +101,6 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
   house.Translate(50.f, 0.f, 20.f);
-  house.Rotate(90 * XM_PI / 180.f, 0.f, 0.f);
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
 
@@ -177,8 +176,8 @@ int Win32Application::Run(Renderer* pSample, HINSTANCE hInstance, int nCmdShow)
         }
       }
 
-      // bigTree.Rotate(0.f, m_Time, 0.f);
-      // smallTree.Rotate(m_Time * 2.f, m_Time, 0.f);
+      house.Rotate(m_Time*.5f, 0.f, 0.f);
+      cube.Rotate(m_Time * .5f, 0.f, 0.f);
 
       pSample->Update(m_Time);
 

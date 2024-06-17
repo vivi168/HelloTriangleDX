@@ -671,6 +671,11 @@ void Renderer::Update(float time)
 
       XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
       XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
+      XMStoreFloat4x4(&cb.WorldMatrix, node.model->WorldMatrix());
+
+      XMMATRIX normalMatrix =
+          XMMatrixTranspose(XMMatrixInverse(nullptr, node.model->WorldMatrix()));
+      XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
       memcpy((uint8_t*)m_CbPerObjectAddress[m_FrameIndex] + node.cbIndex, &cb,
              sizeof(cb));
