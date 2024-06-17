@@ -280,8 +280,7 @@ static D3D12MA::Allocation* g_ObjectCbUploadHeapAllocations[FRAME_BUFFER_COUNT];
 static ComPtr<ID3D12Resource> g_ObjectCbUploadHeaps[FRAME_BUFFER_COUNT];
 static void* g_ObjectCbAddress[FRAME_BUFFER_COUNT];
 
-static ComPtr<ID3D12DescriptorHeap> g_MainDescriptorHeap[FRAME_BUFFER_COUNT];
-static ID3D12DescriptorHeap* g_pMainDescriptorHeap[FRAME_BUFFER_COUNT];
+static ID3D12DescriptorHeap* g_MainDescriptorHeap[FRAME_BUFFER_COUNT];
 static ComPtr<ID3D12Resource> g_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 static D3D12MA::Allocation*
     g_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
@@ -479,7 +478,7 @@ void Renderer::Render()
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
   ID3D12DescriptorHeap* descriptorHeaps[] = {
-      g_MainDescriptorHeap[g_FrameIndex].Get()};
+      g_MainDescriptorHeap[g_FrameIndex]};
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
   D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart =
@@ -598,7 +597,8 @@ void Renderer::Cleanup()
     g_ObjectCbUploadHeaps[i].Reset();
     g_ObjectCbUploadHeapAllocations[i]->Release();
     g_ObjectCbUploadHeapAllocations[i] = nullptr;
-    g_MainDescriptorHeap[i].Reset();
+    g_MainDescriptorHeap[i]->Release();
+    g_MainDescriptorHeap[i] = nullptr;
     g_ConstantBufferUploadHeap[i].Reset();
     g_ConstantBufferUploadAllocation[i]->Release();
     g_ConstantBufferUploadAllocation[i] = nullptr;
@@ -901,13 +901,11 @@ static void InitFrameResources()
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     CHECK_HR(g_Device->CreateDescriptorHeap(
         &heapDesc, IID_PPV_ARGS(&g_MainDescriptorHeap[i])));
-
-    g_pMainDescriptorHeap[i] = g_MainDescriptorHeap[i].Get();
   }
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_Init(g_Device.Get(), FRAME_BUFFER_COUNT,
-                      DXGI_FORMAT_R8G8B8A8_UNORM, g_pMainDescriptorHeap);
+                      DXGI_FORMAT_R8G8B8A8_UNORM, g_MainDescriptorHeap);
 
   // Root Signature
   {
