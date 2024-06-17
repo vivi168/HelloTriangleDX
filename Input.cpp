@@ -37,7 +37,7 @@ void Update()
   }
 }
 
-void SetNewKeyState(WPARAM key, bool state)
+static void SetNewKeyState(WPARAM key, bool state)
 {
   switch (key) {
     case 'Q':

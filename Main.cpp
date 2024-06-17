@@ -79,9 +79,10 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     return (int)ExitCode::GPUList;
   }
 
-  Renderer sample(1280, 720, WINDOW_TITLE);
-  sample.InitAdapter(dxgiUsage.get(), g_CommandLineParameters.m_GPUSelection);
-  return Win32Application::Run(&sample, hInstance, nCmdShow);
+  Renderer::InitWindow(1280, 720, WINDOW_TITLE);
+  Renderer::InitAdapter(dxgiUsage.get(),
+                        g_CommandLineParameters.m_GPUSelection);
+  return Win32Application::Run(hInstance, nCmdShow);
 }
 
 int main(int argc, char** argv)

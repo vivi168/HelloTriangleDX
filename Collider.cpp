@@ -8,7 +8,7 @@ Collider::Collider() { staticFloors.clear(); }
 
 void Collider::AppendStaticModel(Model3D* m)
 {
-  for (auto sub : m->mesh->subsets) {
+  for (auto &sub : m->mesh->subsets) {
     unsigned int offset = sub.start;
 
     for (int i = 0; i < sub.count; i += 3) {
