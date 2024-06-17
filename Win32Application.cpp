@@ -69,7 +69,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   Renderer::SetSceneCamera(&camera);
 
-  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh;
+  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh, stairsMesh;
   treeMesh.Read("assets/tree.objb");
   yukaMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/house.objb");
@@ -77,8 +77,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
   cylinderMesh.Read("assets/cylinder.objb");
+  stairsMesh.Read("assets/stairs.objb");
 
-  Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain;
+  Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs;
 
   bigTree.mesh = &treeMesh;
   smallTree.mesh = &treeMesh;
@@ -87,6 +88,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   terrain.mesh = &terrainMesh;
   cube.mesh = &cubeMesh;
   cylinder.mesh = &cylinderMesh;
+  stairs.mesh = &stairsMesh;
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);
@@ -94,6 +96,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
   house.Translate(50.f, 0.f, 20.f);
+  stairs.Translate(-50.f, 0.f, 20.f);
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
 
@@ -104,12 +107,14 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   Renderer::AppendToScene(&terrain);
   Renderer::AppendToScene(&cube);
   Renderer::AppendToScene(&cylinder);
+  Renderer::AppendToScene(&stairs);
 
   Renderer::LoadAssets();
 
   Collider collider;
   collider.AppendStaticModel(&terrain);
   collider.AppendStaticModel(&yuka);
+  collider.AppendStaticModel(&stairs);
 
   float playerX, playerY, playerZ;
   float playerDirection = XM_PIDIV2;
@@ -169,8 +174,10 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         }
       }
 
-      house.Rotate(m_Time * .5f, 0.f, 0.f);
       cube.Rotate(m_Time * .5f, 0.f, 0.f);
+      float height = -100.0f;
+      collider.FindFloor({playerX, playerY, playerZ}, &height);
+      playerY = height;
 
       Renderer::Update(m_Time);
 
@@ -179,12 +186,8 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         ImGui::Text("x: %f y: %f z: %f\ndir: %f", playerX, playerY, playerZ,
                     playerDirection);
 
-        float height = 0.0f;
-        collider.FindFloor({playerX, playerY, playerZ}, &height);
-
         ImGui::Text("floor height: %f", height);
 
-        playerY = height;
 
         ImGui::End();
       }
