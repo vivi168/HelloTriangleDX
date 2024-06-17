@@ -10,22 +10,6 @@
 
 using namespace DirectX;
 
-static const size_t FRAME_BUFFER_COUNT = 3;
-static const UINT PRESENT_SYNC_INTERVAL = 1;
-static const DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
-static const D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
-
-static const bool ENABLE_DEBUG_LAYER = true;
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
-
-static const UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
-
-static unsigned int g_CbNextIndex = 0;
-static unsigned int g_TexCount = 1;  // imgui texture is 0
-
-// ==========
-
 void DXGIUsage::Init()
 {
   CoInitialize(NULL);
@@ -99,46 +83,7 @@ ComPtr<IDXGIAdapter1> DXGIUsage::CreateAdapter(
   return adapter;
 }
 
-// ==========
-
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
-static void* const CUSTOM_ALLOCATION_PRIVATE_DATA =
-    (void*)(uintptr_t)0xDEADC0DE;
-
-static std::atomic<size_t> g_CpuAllocationCount{0};
-
-static void* CustomAllocate(size_t Size, size_t Alignment, void* pPrivateData)
-{
-  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
-
-  void* memory = _aligned_malloc(Size, Alignment);
-
-  if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
-    wprintf(L"Allocate Size=%llu Alignment=%llu -> %p\n", Size, Alignment,
-            memory);
-  }
-
-  g_CpuAllocationCount++;
-
-  return memory;
-}
-
-static void CustomFree(void* pMemory, void* pPrivateData)
-{
-  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
-
-  if (pMemory) {
-    g_CpuAllocationCount--;
-
-    if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
-      wprintf(L"Free %p\n", pMemory);
-    }
-
-    _aligned_free(pMemory);
-  }
-}
-
-// ==========
+// ========== Data types
 
 enum class PSO { Basic, Terrain };
 
@@ -236,12 +181,29 @@ struct ObjectCB1_VS {
   XMFLOAT4X4 NormalMatrix;
 };
 
-static const size_t ConstantBufferPerObjectAlignedSize =
+// ========== Constants
+
+static const bool ENABLE_DEBUG_LAYER = true;
+static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
+static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
+static void* const CUSTOM_ALLOCATION_PRIVATE_DATA =
+    (void*)(uintptr_t)0xDEADC0DE;
+
+static const size_t OBJECT_CB_ALIGNED_SIZE =
     AlignUp<size_t>(sizeof(ObjectCB1_VS), 256);
+static const size_t FRAME_BUFFER_COUNT = 3;
+
+static const UINT PRESENT_SYNC_INTERVAL = 1;
+static const UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
+
+static const DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
+static const D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
+
+// ========== Static functions declarations
 
 static void InitD3D();
 static void InitFrameResources();
-
 static void WaitForFrame(size_t frameIndex);
 static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
@@ -250,7 +212,10 @@ static void LoadMesh3D(Mesh3D* mesh);
 static Geometry* CreateGeometry(Mesh3D* mesh);
 static Texture* CreateTexture(std::string name);
 
-// ==========
+// ========== Global variables
+
+static unsigned int g_CbNextIndex = 0;
+static unsigned int g_TexCount = 1;  // imgui texture is 0
 
 static UINT g_Width;
 static UINT g_Height;
@@ -325,7 +290,9 @@ static void* g_ConstantBufferAddress[FRAME_BUFFER_COUNT];
 static std::unordered_map<std::string, std::unique_ptr<Geometry>> g_Geometries;
 static std::unordered_map<std::string, std::unique_ptr<Texture>> g_Textures;
 
-// ==========
+static std::atomic<size_t> g_CpuAllocationCount{0};
+
+// ========== Public functions
 
 void Renderer::InitWindow(UINT width, UINT height, std::wstring name)
 {
@@ -353,6 +320,366 @@ void Renderer::Init()
 {
   InitD3D();
   InitFrameResources();
+}
+
+void Renderer::LoadAssets()
+{
+  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
+
+  for (auto node : g_Scene.nodes) {
+    LoadMesh3D(node.model->mesh);
+  }
+
+  // End of initial command list
+  {
+    g_CommandList->Close();
+
+    // Now we execute the command list to upload the initial assets
+    // (triangle data)
+    ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+    g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists),
+                                        ppCommandLists);
+
+    // increment the fence value now, otherwise the buffer might not be uploaded
+    // by the time we start drawing
+    WaitGPUIdle(g_FrameIndex);
+
+    // TODO: need method + ensure not null
+    for (auto& [k, tex] : g_Textures) {
+      tex->textureUploadAllocation->Release();
+    }
+
+    // TODO: need method + ensure not null
+    for (auto& [k, geom] : g_Geometries) {
+      geom->vBufferUploadHeapAllocation->Release();
+      geom->iBufferUploadHeapAllocation->Release();
+    }
+  }
+}
+
+void Renderer::Update(float time)
+{
+  {
+    const float r = sin(0.5f * time * (XM_PI * 2.f)) * 0.5f + 0.5f;
+    FrameCB0_ALL cb;
+    cb.Color = XMFLOAT4(r, 1.f, 1.f, 1.f);
+    cb.time = time;
+    memcpy(g_ConstantBufferAddress[g_FrameIndex], &cb, sizeof(cb));
+  }
+
+  {
+    const XMMATRIX projection = XMMatrixPerspectiveFovLH(
+        45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
+
+    XMMATRIX view = g_Scene.camera->LookAt();
+    XMMATRIX viewProjection = view * projection;
+
+    for (auto node : g_Scene.nodes) {
+      ObjectCB1_VS cb;
+
+      XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
+      XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
+      XMStoreFloat4x4(&cb.WorldMatrix, node.model->WorldMatrix());
+
+      XMMATRIX normalMatrix = XMMatrixTranspose(
+          XMMatrixInverse(nullptr, node.model->WorldMatrix()));
+      XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
+
+      memcpy((uint8_t*)g_ObjectCbAddress[g_FrameIndex] + node.cbIndex, &cb,
+             sizeof(cb));
+    }
+  }
+
+  ImGui_ImplDX12_NewFrame();
+  ImGui_ImplWin32_NewFrame();
+  ImGui::NewFrame();
+  // ImGui::ShowDemoWindow();  // Show demo window! :)
+
+  {
+    ImGui::Begin("Camera details");
+    g_Scene.camera->DebugWindow();
+    ImGui::End();
+  }
+
+  {
+    ImGui::Begin("Ray tracing");
+    ImGui::Checkbox("Raster", &g_Raster);
+    ImGui::End();
+  }
+}
+
+void Renderer::Render()
+{
+  // swap the current rtv buffer index so we draw on the correct buffer
+  g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
+  // We have to wait for the gpu to finish with the command allocator before we
+  // reset it
+  WaitForFrame(g_FrameIndex);
+  // increment g_FenceValues for next frame
+  g_FenceValues[g_FrameIndex]++;
+
+  // we can only reset an allocator once the gpu is done with it. Resetting an
+  // allocator frees the memory that the command list was stored in
+  CHECK_HR(g_CommandAllocators[g_FrameIndex]->Reset());
+
+  // reset the command list. by resetting the command list we are putting it
+  // into a recording state so we can start recording commands into the command
+  // allocator. The command allocator that we reference here may have multiple
+  // command lists associated with it, but only one can be recording at any
+  // time. Make sure that any other command lists associated to this command
+  // allocator are in the closed state (not recording). Here you will pass an
+  // initial pipeline state object as the second parameter, but in this tutorial
+  // we are only clearing the rtv, and do not actually need anything but an
+  // initial default pipeline, which is what we get by setting the second
+  // parameter to NULL
+  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
+
+  // here we start recording commands into the g_CommandList (which all the
+  // commands will be stored in the g_CommandAllocators)
+
+  // transition the "g_FrameIndex" render target from the present state to the
+  // render target state so the command list draws to it starting from here
+  D3D12_RESOURCE_BARRIER presentToRenderTargetBarrier = {};
+  presentToRenderTargetBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  presentToRenderTargetBarrier.Transition.pResource =
+      g_RenderTargets[g_FrameIndex].Get();
+  presentToRenderTargetBarrier.Transition.StateBefore =
+      D3D12_RESOURCE_STATE_PRESENT;
+  presentToRenderTargetBarrier.Transition.StateAfter =
+      D3D12_RESOURCE_STATE_RENDER_TARGET;
+  presentToRenderTargetBarrier.Transition.Subresource =
+      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  g_CommandList->ResourceBarrier(1, &presentToRenderTargetBarrier);
+
+  // here we again get the handle to our current render target view so we can
+  // set it as the render target in the output merger stage of the pipeline
+  D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {
+      g_RtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr +
+      g_FrameIndex * g_RtvDescriptorSize};
+  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+  // set the render target for the output merger stage (the output of the
+  // pipeline)
+  g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+  g_CommandList->ClearDepthStencilView(
+      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+      D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+  // Clear the render target by using the ClearRenderTargetView command
+  if (g_Raster) {
+    const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+  } else {
+    const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
+    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+  }
+
+  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
+
+  ID3D12DescriptorHeap* descriptorHeaps[] = {
+      g_MainDescriptorHeap[g_FrameIndex].Get()};
+  g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
+
+  D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart =
+      g_MainDescriptorHeap[g_FrameIndex]->GetGPUDescriptorHandleForHeapStart();
+  const UINT cbvSrvDescriptorSize = g_Device->GetDescriptorHandleIncrementSize(
+      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+  g_CommandList->SetGraphicsRootDescriptorTable(0, cbvSrvHeapStart);
+
+  D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
+  g_CommandList->RSSetViewports(1, &viewport);
+
+  D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
+  g_CommandList->RSSetScissorRects(1, &scissorRect);
+
+  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
+
+  for (const auto node : g_Scene.nodes) {
+    auto mesh = node.model->mesh;
+    auto geom = mesh->geometry;
+    g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
+    g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
+    g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    g_CommandList->SetGraphicsRootConstantBufferView(
+        1, g_ObjectCbUploadHeaps[g_FrameIndex]->GetGPUVirtualAddress() +
+               node.cbIndex);
+
+    for (const auto& subset : mesh->subsets) {
+      CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(
+          cbvSrvHeapStart, subset.texture->texIndex, cbvSrvDescriptorSize);
+      g_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
+      g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
+    }
+  }
+
+  ImGui::Render();
+  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get(),
+                                g_FrameIndex);
+
+  // transition the "g_FrameIndex" render target from the render target state to
+  // the present state. If the debug layer is enabled, you will receive a
+  // warning if present is called on the render target when it's not in the
+  // present state
+  D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier = {};
+  renderTargetToPresentBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  renderTargetToPresentBarrier.Transition.pResource =
+      g_RenderTargets[g_FrameIndex].Get();
+  renderTargetToPresentBarrier.Transition.StateBefore =
+      D3D12_RESOURCE_STATE_RENDER_TARGET;
+  renderTargetToPresentBarrier.Transition.StateAfter =
+      D3D12_RESOURCE_STATE_PRESENT;
+  renderTargetToPresentBarrier.Transition.Subresource =
+      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  g_CommandList->ResourceBarrier(1, &renderTargetToPresentBarrier);
+
+  CHECK_HR(g_CommandList->Close());
+
+  // ==========
+
+  // create an array of command lists (only one command list here)
+  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+
+  // execute the array of command lists
+  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+  // this command goes in at the end of our command queue. we will know when our
+  // command queue has finished because the g_Fences value will be set to
+  // "g_FenceValues" from the GPU since the command queue is being executed on
+  // the GPU
+  CHECK_HR(g_CommandQueue->Signal(g_Fences[g_FrameIndex].Get(),
+                                  g_FenceValues[g_FrameIndex]));
+
+  // present the current backbuffer
+  CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
+}
+
+void Renderer::Cleanup()
+{
+  ImGui_ImplDX12_Shutdown();
+  ImGui_ImplWin32_Shutdown();
+  ImGui::DestroyContext();
+
+  // wait for the gpu to finish all frames
+  for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+    WaitForFrame(i);
+    CHECK_HR(g_CommandQueue->Wait(g_Fences[i].Get(), g_FenceValues[i]));
+  }
+
+  // get swapchain out of full screen before exiting
+  BOOL fs = false;
+  CHECK_HR(g_SwapChain->GetFullscreenState(&fs, NULL));
+
+  if (fs) g_SwapChain->SetFullscreenState(false, NULL);
+
+  WaitGPUIdle(0);
+
+  // TODO: need method + ensure not null
+  for (auto& [k, tex] : g_Textures) {
+    tex->Unload();
+  }
+
+  // TODO: need method + ensure not null
+  for (auto& [k, geom] : g_Geometries) {
+    geom->Unload();
+  }
+
+  g_PipelineStateObjects[PSO::Basic].Reset();
+  g_RootSignature.Reset();
+
+  CloseHandle(g_FenceEvent);
+  g_CommandList.Reset();
+  g_CommandQueue.Reset();
+
+  for (size_t i = FRAME_BUFFER_COUNT; i--;) {
+    g_ObjectCbUploadHeaps[i].Reset();
+    g_ObjectCbUploadHeapAllocations[i]->Release();
+    g_ObjectCbUploadHeapAllocations[i] = nullptr;
+    g_MainDescriptorHeap[i].Reset();
+    g_ConstantBufferUploadHeap[i].Reset();
+    g_ConstantBufferUploadAllocation[i]->Release();
+    g_ConstantBufferUploadAllocation[i] = nullptr;
+  }
+
+  g_DepthStencilDescriptorHeap.Reset();
+  g_DepthStencilBuffer.Reset();
+  g_DepthStencilAllocation->Release();
+  g_DepthStencilAllocation = nullptr;
+  g_RtvDescriptorHeap.Reset();
+
+  for (size_t i = FRAME_BUFFER_COUNT; i--;) {
+    g_RenderTargets[i].Reset();
+    g_CommandAllocators[i].Reset();
+    g_Fences[i].Reset();
+  }
+
+  g_Allocator.Reset();
+
+  if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
+    assert(g_CpuAllocationCount.load() == 0);
+  }
+
+  g_Device.Reset();
+  g_SwapChain.Reset();
+}
+
+void Renderer::PrintStatsString()
+{
+  WCHAR* statsString = NULL;
+  g_Allocator->BuildStatsString(&statsString, TRUE);
+  wprintf(L"%s\n", statsString);
+  g_Allocator->FreeStatsString(statsString);
+}
+
+UINT Renderer::GetWidth() { return g_Width; }
+
+UINT Renderer::GetHeight() { return g_Height; }
+
+const WCHAR* Renderer::GetTitle() { return g_Title.c_str(); }
+
+void Renderer::SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
+
+void Renderer::AppendToScene(Model3D* model)
+{
+  size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
+
+  g_Scene.nodes.push_back({model, cbIndex});
+}
+
+// ========== Static functions
+
+static void* CustomAllocate(size_t Size, size_t Alignment, void* pPrivateData)
+{
+  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
+
+  void* memory = _aligned_malloc(Size, Alignment);
+
+  if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
+    wprintf(L"Allocate Size=%llu Alignment=%llu -> %p\n", Size, Alignment,
+            memory);
+  }
+
+  g_CpuAllocationCount++;
+
+  return memory;
+}
+
+static void CustomFree(void* pMemory, void* pPrivateData)
+{
+  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
+
+  if (pMemory) {
+    g_CpuAllocationCount--;
+
+    if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
+      wprintf(L"Free %p\n", pMemory);
+    }
+
+    _aligned_free(pMemory);
+  }
 }
 
 static void InitD3D()
@@ -803,335 +1130,6 @@ static void InitFrameResources()
     g_PipelineStateObjects[PSO::Terrain].Attach(pipelineStateObject);
   }
 }
-
-void Renderer::LoadAssets()
-{
-  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
-
-  for (auto node : g_Scene.nodes) {
-    LoadMesh3D(node.model->mesh);
-  }
-
-  // End of initial command list
-  {
-    g_CommandList->Close();
-
-    // Now we execute the command list to upload the initial assets
-    // (triangle data)
-    ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
-    g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists),
-                                        ppCommandLists);
-
-    // increment the fence value now, otherwise the buffer might not be uploaded
-    // by the time we start drawing
-    WaitGPUIdle(g_FrameIndex);
-
-    // TODO: need method + ensure not null
-    for (auto& [k, tex] : g_Textures) {
-      tex->textureUploadAllocation->Release();
-    }
-
-    // TODO: need method + ensure not null
-    for (auto& [k, geom] : g_Geometries) {
-      geom->vBufferUploadHeapAllocation->Release();
-      geom->iBufferUploadHeapAllocation->Release();
-    }
-  }
-}
-
-void Renderer::Update(float time)
-{
-  {
-    const float r = sin(0.5f * time * (XM_PI * 2.f)) * 0.5f + 0.5f;
-    FrameCB0_ALL cb;
-    cb.Color = XMFLOAT4(r, 1.f, 1.f, 1.f);
-    cb.time = time;
-    memcpy(g_ConstantBufferAddress[g_FrameIndex], &cb, sizeof(cb));
-  }
-
-  {
-    const XMMATRIX projection = XMMatrixPerspectiveFovLH(
-        45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
-
-    XMMATRIX view = g_Scene.camera->LookAt();
-    XMMATRIX viewProjection = view * projection;
-
-    for (auto node : g_Scene.nodes) {
-      ObjectCB1_VS cb;
-
-      XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
-      XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
-      XMStoreFloat4x4(&cb.WorldMatrix, node.model->WorldMatrix());
-
-      XMMATRIX normalMatrix = XMMatrixTranspose(
-          XMMatrixInverse(nullptr, node.model->WorldMatrix()));
-      XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
-
-      memcpy((uint8_t*)g_ObjectCbAddress[g_FrameIndex] + node.cbIndex, &cb,
-             sizeof(cb));
-    }
-  }
-
-  ImGui_ImplDX12_NewFrame();
-  ImGui_ImplWin32_NewFrame();
-  ImGui::NewFrame();
-  // ImGui::ShowDemoWindow();  // Show demo window! :)
-
-  {
-    ImGui::Begin("Camera details");
-    g_Scene.camera->DebugWindow();
-    ImGui::End();
-  }
-
-  {
-    ImGui::Begin("Ray tracing");
-    ImGui::Checkbox("Raster", &g_Raster);
-    ImGui::End();
-  }
-}
-
-void Renderer::Render()
-{
-  // swap the current rtv buffer index so we draw on the correct buffer
-  g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
-  // We have to wait for the gpu to finish with the command allocator before we
-  // reset it
-  WaitForFrame(g_FrameIndex);
-  // increment g_FenceValues for next frame
-  g_FenceValues[g_FrameIndex]++;
-
-  // we can only reset an allocator once the gpu is done with it. Resetting an
-  // allocator frees the memory that the command list was stored in
-  CHECK_HR(g_CommandAllocators[g_FrameIndex]->Reset());
-
-  // reset the command list. by resetting the command list we are putting it
-  // into a recording state so we can start recording commands into the command
-  // allocator. The command allocator that we reference here may have multiple
-  // command lists associated with it, but only one can be recording at any
-  // time. Make sure that any other command lists associated to this command
-  // allocator are in the closed state (not recording). Here you will pass an
-  // initial pipeline state object as the second parameter, but in this tutorial
-  // we are only clearing the rtv, and do not actually need anything but an
-  // initial default pipeline, which is what we get by setting the second
-  // parameter to NULL
-  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
-
-  // here we start recording commands into the g_CommandList (which all the
-  // commands will be stored in the g_CommandAllocators)
-
-  // transition the "g_FrameIndex" render target from the present state to the
-  // render target state so the command list draws to it starting from here
-  D3D12_RESOURCE_BARRIER presentToRenderTargetBarrier = {};
-  presentToRenderTargetBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  presentToRenderTargetBarrier.Transition.pResource =
-      g_RenderTargets[g_FrameIndex].Get();
-  presentToRenderTargetBarrier.Transition.StateBefore =
-      D3D12_RESOURCE_STATE_PRESENT;
-  presentToRenderTargetBarrier.Transition.StateAfter =
-      D3D12_RESOURCE_STATE_RENDER_TARGET;
-  presentToRenderTargetBarrier.Transition.Subresource =
-      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-  g_CommandList->ResourceBarrier(1, &presentToRenderTargetBarrier);
-
-  // here we again get the handle to our current render target view so we can
-  // set it as the render target in the output merger stage of the pipeline
-  D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {
-      g_RtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-      g_FrameIndex * g_RtvDescriptorSize};
-  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-  // set the render target for the output merger stage (the output of the
-  // pipeline)
-  g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-  g_CommandList->ClearDepthStencilView(
-      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-      D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-  // Clear the render target by using the ClearRenderTargetView command
-  if (g_Raster) {
-    const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-  } else {
-    const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-  }
-
-  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
-
-  ID3D12DescriptorHeap* descriptorHeaps[] = {
-      g_MainDescriptorHeap[g_FrameIndex].Get()};
-  g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
-
-  D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart =
-      g_MainDescriptorHeap[g_FrameIndex]->GetGPUDescriptorHandleForHeapStart();
-  const UINT cbvSrvDescriptorSize = g_Device->GetDescriptorHandleIncrementSize(
-      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-  g_CommandList->SetGraphicsRootDescriptorTable(0, cbvSrvHeapStart);
-
-  D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
-  g_CommandList->RSSetViewports(1, &viewport);
-
-  D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
-  g_CommandList->RSSetScissorRects(1, &scissorRect);
-
-  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
-
-  for (const auto node : g_Scene.nodes) {
-    auto mesh = node.model->mesh;
-    auto geom = mesh->geometry;
-    g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
-    g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
-    g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    g_CommandList->SetGraphicsRootConstantBufferView(
-        1, g_ObjectCbUploadHeaps[g_FrameIndex]->GetGPUVirtualAddress() +
-               node.cbIndex);
-
-    for (const auto& subset : mesh->subsets) {
-      CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(
-          cbvSrvHeapStart, subset.texture->texIndex, cbvSrvDescriptorSize);
-      g_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
-      g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
-    }
-  }
-
-  ImGui::Render();
-  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get(),
-                                g_FrameIndex);
-
-  // transition the "g_FrameIndex" render target from the render target state to
-  // the present state. If the debug layer is enabled, you will receive a
-  // warning if present is called on the render target when it's not in the
-  // present state
-  D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier = {};
-  renderTargetToPresentBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  renderTargetToPresentBarrier.Transition.pResource =
-      g_RenderTargets[g_FrameIndex].Get();
-  renderTargetToPresentBarrier.Transition.StateBefore =
-      D3D12_RESOURCE_STATE_RENDER_TARGET;
-  renderTargetToPresentBarrier.Transition.StateAfter =
-      D3D12_RESOURCE_STATE_PRESENT;
-  renderTargetToPresentBarrier.Transition.Subresource =
-      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-  g_CommandList->ResourceBarrier(1, &renderTargetToPresentBarrier);
-
-  CHECK_HR(g_CommandList->Close());
-
-  // ==========
-
-  // create an array of command lists (only one command list here)
-  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
-
-  // execute the array of command lists
-  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-
-  // this command goes in at the end of our command queue. we will know when our
-  // command queue has finished because the g_Fences value will be set to
-  // "g_FenceValues" from the GPU since the command queue is being executed on
-  // the GPU
-  CHECK_HR(g_CommandQueue->Signal(g_Fences[g_FrameIndex].Get(),
-                                  g_FenceValues[g_FrameIndex]));
-
-  // present the current backbuffer
-  CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
-}
-
-void Renderer::Cleanup()
-{
-  ImGui_ImplDX12_Shutdown();
-  ImGui_ImplWin32_Shutdown();
-  ImGui::DestroyContext();
-
-  // wait for the gpu to finish all frames
-  for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    WaitForFrame(i);
-    CHECK_HR(g_CommandQueue->Wait(g_Fences[i].Get(), g_FenceValues[i]));
-  }
-
-  // get swapchain out of full screen before exiting
-  BOOL fs = false;
-  CHECK_HR(g_SwapChain->GetFullscreenState(&fs, NULL));
-
-  if (fs) g_SwapChain->SetFullscreenState(false, NULL);
-
-  WaitGPUIdle(0);
-
-  // TODO: need method + ensure not null
-  for (auto& [k, tex] : g_Textures) {
-    tex->Unload();
-  }
-
-  // TODO: need method + ensure not null
-  for (auto& [k, geom] : g_Geometries) {
-    geom->Unload();
-  }
-
-  g_PipelineStateObjects[PSO::Basic].Reset();
-  g_RootSignature.Reset();
-
-  CloseHandle(g_FenceEvent);
-  g_CommandList.Reset();
-  g_CommandQueue.Reset();
-
-  for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    g_ObjectCbUploadHeaps[i].Reset();
-    g_ObjectCbUploadHeapAllocations[i]->Release();
-    g_ObjectCbUploadHeapAllocations[i] = nullptr;
-    g_MainDescriptorHeap[i].Reset();
-    g_ConstantBufferUploadHeap[i].Reset();
-    g_ConstantBufferUploadAllocation[i]->Release();
-    g_ConstantBufferUploadAllocation[i] = nullptr;
-  }
-
-  g_DepthStencilDescriptorHeap.Reset();
-  g_DepthStencilBuffer.Reset();
-  g_DepthStencilAllocation->Release();
-  g_DepthStencilAllocation = nullptr;
-  g_RtvDescriptorHeap.Reset();
-
-  for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    g_RenderTargets[i].Reset();
-    g_CommandAllocators[i].Reset();
-    g_Fences[i].Reset();
-  }
-
-  g_Allocator.Reset();
-
-  if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
-    assert(g_CpuAllocationCount.load() == 0);
-  }
-
-  g_Device.Reset();
-  g_SwapChain.Reset();
-}
-
-void Renderer::PrintStatsString()
-{
-  WCHAR* statsString = NULL;
-  g_Allocator->BuildStatsString(&statsString, TRUE);
-  wprintf(L"%s\n", statsString);
-  g_Allocator->FreeStatsString(statsString);
-}
-
-UINT Renderer::GetWidth() { return g_Width; }
-
-UINT Renderer::GetHeight() { return g_Height; }
-
-const WCHAR* Renderer::GetTitle() { return g_Title.c_str(); }
-
-void Renderer::SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
-
-void Renderer::AppendToScene(Model3D* model)
-{
-  size_t cbIndex = ConstantBufferPerObjectAlignedSize * g_CbNextIndex++;
-
-  g_Scene.nodes.push_back({model, cbIndex});
-}
-
-// ==========
 
 // wait until gpu is finished with command list
 static void WaitForFrame(size_t frameIndex)
