@@ -21,7 +21,7 @@ class Collider
 public:
   Collider();
   void AppendStaticModel(Model3D* m);
-  Surface FindFloor(DirectX::XMFLOAT3 point, float* prevHeight);
+  Surface* FindFloor(DirectX::XMFLOAT3 point, float* prevHeight);
 
 private:
   std::list<Surface> staticFloors;

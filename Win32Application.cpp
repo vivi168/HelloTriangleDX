@@ -180,7 +180,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
       cube.Rotate(g_Time * .5f, 0.f, 0.f);
       float height = -100.0f;
-      collider.FindFloor({playerX, playerY, playerZ}, &height);
+      Surface* surf = collider.FindFloor({playerX, playerY, playerZ}, &height);
+
+      if (surf)
       playerY = height;
 
       Renderer::Update(g_Time);

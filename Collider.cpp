@@ -8,7 +8,7 @@ Collider::Collider() { staticFloors.clear(); }
 
 void Collider::AppendStaticModel(Model3D* m)
 {
-  for (auto &sub : m->mesh->subsets) {
+  for (auto& sub : m->mesh->subsets) {
     unsigned int offset = sub.start;
 
     for (int i = 0; i < sub.count; i += 3) {
@@ -59,8 +59,6 @@ void Collider::AppendStaticModel(Model3D* m)
         staticCeils.push_back(surf);
       else
         staticWalls.push_back(surf);
-
-      printf("ok\n");
     }
   }
 }
@@ -79,14 +77,14 @@ bool Surface::WithinBound(float x, float z)
   return true;
 }
 
-Surface Collider::FindFloor(DirectX::XMFLOAT3 point, float* prevHeight)
+Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float* prevHeight)
 {
-  Surface floor = {};
+  Surface* floor = nullptr;
 
   static constexpr float FLOOR_HITBOX = 1.0f;  // TODO adjust
   float y = point.y + FLOOR_HITBOX;
 
-  for (auto surf : staticFloors) {
+  for (auto& surf : staticFloors) {
     // skip floors above point
     if (y < surf.minY) continue;
 
@@ -101,9 +99,8 @@ Surface Collider::FindFloor(DirectX::XMFLOAT3 point, float* prevHeight)
     if (y < height) continue;
 
     *prevHeight = height;
-    floor = surf;
+    floor = &surf;
   }
 
-  // TODO what if no floor where found
   return floor;
 }
