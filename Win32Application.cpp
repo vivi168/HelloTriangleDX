@@ -10,11 +10,14 @@ using namespace DirectX;
 static const wchar_t* const CLASS_NAME = L"D3D12MemAllocSample";
 static const wchar_t* const WINDOW_TITLE = L"D3D12 Memory Allocator Sample";
 
-HWND Win32Application::m_hwnd = nullptr;
-UINT64 Win32Application::m_TimeOffset;
-UINT64 Win32Application::m_TimeValue;
-float Win32Application::m_Time;
-float Win32Application::m_TimeDelta;
+static HWND g_Hwnd = nullptr;
+static UINT64 g_TimeOffset;  // In ms.
+static UINT64 g_TimeValue;   // Time since g_TimeOffset, in ms.
+static float g_Time;         // g_TimeValue converted to float, in seconds.
+static float g_TimeDelta;
+
+static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam,
+                                   LPARAM lParam);
 
 int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 {
@@ -40,14 +43,14 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   AdjustWindowRect(&windowRect, style, FALSE);
 
   // Create the window and store a handle to it.
-  m_hwnd = CreateWindow(windowClass.lpszClassName, Renderer::GetTitle(), style,
+  g_Hwnd = CreateWindow(windowClass.lpszClassName, Renderer::GetTitle(), style,
                         CW_USEDEFAULT, CW_USEDEFAULT,
                         windowRect.right - windowRect.left,
                         windowRect.bottom - windowRect.top,
                         nullptr,  // We have no parent window.
                         nullptr,  // We aren't using menus.
                         hInstance, nullptr);
-  assert(m_hwnd);
+  assert(g_Hwnd);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -57,9 +60,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
 
   Renderer::Init();
-  m_TimeOffset = GetTickCount64();
+  g_TimeOffset = GetTickCount64();
 
-  ShowWindow(m_hwnd, nCmdShow);
+  ShowWindow(g_Hwnd, nCmdShow);
 
   Chunk t;
 
@@ -69,7 +72,8 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   Renderer::SetSceneCamera(&camera);
 
-  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh, stairsMesh;
+  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh,
+      stairsMesh;
   treeMesh.Read("assets/tree.objb");
   yukaMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/house.objb");
@@ -135,17 +139,17 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     } else {
-      const UINT64 newTimeValue = GetTickCount64() - m_TimeOffset;
-      m_TimeDelta = (float)(newTimeValue - m_TimeValue) * 0.001f;
-      m_TimeValue = newTimeValue;
-      m_Time = (float)newTimeValue * 0.001f;
+      const UINT64 newTimeValue = GetTickCount64() - g_TimeOffset;
+      g_TimeDelta = (float)(newTimeValue - g_TimeValue) * 0.001f;
+      g_TimeValue = newTimeValue;
+      g_Time = (float)newTimeValue * 0.001f;
 
       {
         Input::Update();
         camera.ProcessKeyboard();
 
         if (Input::IsPressed(Input::KB::Escape)) {
-          PostMessage(m_hwnd, WM_CLOSE, 0, 0);
+          PostMessage(g_Hwnd, WM_CLOSE, 0, 0);
         }
 
         {
@@ -153,11 +157,11 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
           float forwardZ = sinf(playerDirection);
 
           if (Input::IsHeld(Input::KB::I)) {
-            playerX += playerSpeed * forwardX * m_TimeDelta;
-            playerZ += playerSpeed * forwardZ * m_TimeDelta;
+            playerX += playerSpeed * forwardX * g_TimeDelta;
+            playerZ += playerSpeed * forwardZ * g_TimeDelta;
           } else if (Input::IsHeld(Input::KB::K)) {
-            playerX -= playerSpeed * forwardX * m_TimeDelta;
-            playerZ -= playerSpeed * forwardZ * m_TimeDelta;
+            playerX -= playerSpeed * forwardX * g_TimeDelta;
+            playerZ -= playerSpeed * forwardZ * g_TimeDelta;
           }
           if (Input::IsHeld(Input::KB::J)) {
             playerDirection += playerRotSpeed;
@@ -174,12 +178,12 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         }
       }
 
-      cube.Rotate(m_Time * .5f, 0.f, 0.f);
+      cube.Rotate(g_Time * .5f, 0.f, 0.f);
       float height = -100.0f;
       collider.FindFloor({playerX, playerY, playerZ}, &height);
       playerY = height;
 
-      Renderer::Update(m_Time);
+      Renderer::Update(g_Time);
 
       {
         ImGui::Begin("Player");
@@ -187,7 +191,6 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
                     playerDirection);
 
         ImGui::Text("floor height: %f", height);
-
 
         ImGui::End();
       }
@@ -198,13 +201,15 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   return (int)msg.wParam;
 }
 
+HWND Win32Application::GetHwnd() { return g_Hwnd; }
+
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd,
                                                              UINT msg,
                                                              WPARAM wParam,
                                                              LPARAM lParam);
 
-LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message,
-                                              WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam,
+                                   LPARAM lParam)
 {
   if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
     return true;
