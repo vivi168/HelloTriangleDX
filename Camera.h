@@ -6,6 +6,7 @@ public:
   Camera();
   void Translate(float x, float y, float z);
   void Target(float x, float y, float z);
+  void Orient(float p, float y);
   void ProcessKeyboard();
   DirectX::XMMATRIX LookAt();
 

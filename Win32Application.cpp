@@ -1,9 +1,9 @@
 #include "stdafx.h"
 #include "Win32Application.h"
 #include "Renderer.h"
-#include "Input.h"
 #include "Terrain.h"
-#include "Collider.h"
+#include "Input.h"
+#include "Game.h"
 
 using namespace DirectX;
 
@@ -66,70 +66,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   Chunk t;
 
-  Camera camera;
-  camera.Translate(-100.f, 75.f, 130.f);
-  camera.Target(0.f, 0.f, 0.f);
-
-  Renderer::SetSceneCamera(&camera);
-
-  Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh, terrainMesh,
-      stairsMesh;
-  treeMesh.Read("assets/tree.objb");
-  yukaMesh.Read("assets/yuka.objb");
-  houseMesh.Read("assets/house.objb");
-  terrainMesh.Read("assets/terrain.objb");
-  // terrainMesh = t.Mesh();
-  cubeMesh.Read("assets/cube.objb");
-  cylinderMesh.Read("assets/cylinder.objb");
-  stairsMesh.Read("assets/stairs.objb");
-
-  Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs;
-
-  bigTree.mesh = &treeMesh;
-  smallTree.mesh = &treeMesh;
-  yuka.mesh = &yukaMesh;
-  house.mesh = &houseMesh;
-  terrain.mesh = &terrainMesh;
-  cube.mesh = &cubeMesh;
-  cylinder.mesh = &cylinderMesh;
-  stairs.mesh = &stairsMesh;
-
-  smallTree.Scale(0.5f);
-  smallTree.Translate(-7.f, 0.f, 0.f);
-  bigTree.Translate(-7.f, 0.0f, 14.f);
-  yuka.Scale(5.f);
-  yuka.Translate(15.f, 0.f, 15.f);
-  house.Translate(50.f, 0.f, 20.f);
-  stairs.Translate(-50.f, 0.f, 20.f);
-  cube.Translate(0.f, 50.f, 0.f);
-  cube.Scale(5.f);
-
-  Renderer::AppendToScene(&bigTree);
-  Renderer::AppendToScene(&smallTree);
-  Renderer::AppendToScene(&yuka);
-  Renderer::AppendToScene(&house);
-  Renderer::AppendToScene(&terrain);
-  Renderer::AppendToScene(&cube);
-  Renderer::AppendToScene(&cylinder);
-  Renderer::AppendToScene(&stairs);
+  Game::Init();
 
   Renderer::LoadAssets();
-
-  Collider collider;
-  collider.AppendStaticModel(&terrain);
-  collider.AppendStaticModel(&yuka);
-  collider.AppendStaticModel(&stairs);
-
-  float playerX, playerY, playerZ;
-  float playerDirection = XM_PIDIV2;
-  float playerRotSpeed = 0.02f;
-  float playerSpeed = 20.0f;
-
-  playerX = 0.f;
-  playerY = 0.f;
-  playerZ = 0.f;
-
-  cylinder.Translate(playerX, playerY, playerZ);
 
   MSG msg;
   for (;;) {
@@ -146,58 +85,16 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
       {
         Input::Update();
-        camera.ProcessKeyboard();
 
         if (Input::IsPressed(Input::KB::Escape)) {
           PostMessage(g_Hwnd, WM_CLOSE, 0, 0);
         }
 
-        {
-          float forwardX = cosf(playerDirection);
-          float forwardZ = sinf(playerDirection);
-
-          if (Input::IsHeld(Input::KB::I)) {
-            playerX += playerSpeed * forwardX * g_TimeDelta;
-            playerZ += playerSpeed * forwardZ * g_TimeDelta;
-          } else if (Input::IsHeld(Input::KB::K)) {
-            playerX -= playerSpeed * forwardX * g_TimeDelta;
-            playerZ -= playerSpeed * forwardZ * g_TimeDelta;
-          }
-          if (Input::IsHeld(Input::KB::J)) {
-            playerDirection += playerRotSpeed;
-          }
-          if (Input::IsHeld(Input::KB::L)) {
-            playerDirection -= playerRotSpeed;
-          }
-
-          if (Input::IsPressed(Input::KB::Space))
-            camera.Target(playerX, playerY, playerZ);
-
-          cylinder.Translate(playerX, playerY, playerZ);
-          cylinder.Rotate(0.0f, -playerDirection, 0.f);
-        }
+        Game::Update(g_Time, g_TimeDelta);
+        Renderer::Update(g_Time);
+        Game::DebugWindow();
+        Renderer::Render();
       }
-
-      cube.Rotate(g_Time * .5f, 0.f, 0.f);
-      float height = -100.0f;
-      Surface* surf = collider.FindFloor({playerX, playerY, playerZ}, &height);
-
-      if (surf)
-      playerY = height;
-
-      Renderer::Update(g_Time);
-
-      {
-        ImGui::Begin("Player");
-        ImGui::Text("x: %f y: %f z: %f\ndir: %f", playerX, playerY, playerZ,
-                    playerDirection);
-
-        ImGui::Text("floor height: %f", height);
-
-        ImGui::End();
-      }
-
-      Renderer::Render();
     }
   }
   return (int)msg.wParam;

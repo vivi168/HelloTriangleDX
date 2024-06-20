@@ -358,6 +358,7 @@ void Renderer::LoadAssets()
 
 void Renderer::Update(float time)
 {
+  // Per frame constant buffer
   {
     const float r = sin(0.5f * time * (XM_PI * 2.f)) * 0.5f + 0.5f;
     FrameCB0_ALL cb;
@@ -366,6 +367,7 @@ void Renderer::Update(float time)
     memcpy(g_ConstantBufferAddress[g_FrameIndex], &cb, sizeof(cb));
   }
 
+  // Per object constant buffer
   {
     const XMMATRIX projection = XMMatrixPerspectiveFovLH(
         45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
@@ -389,15 +391,11 @@ void Renderer::Update(float time)
     }
   }
 
-  ImGui_ImplDX12_NewFrame();
-  ImGui_ImplWin32_NewFrame();
-  ImGui::NewFrame();
-  // ImGui::ShowDemoWindow();  // Show demo window! :)
-
+  // ImGui
   {
-    ImGui::Begin("Camera details");
-    g_Scene.camera->DebugWindow();
-    ImGui::End();
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
   }
 
   {

@@ -6,9 +6,9 @@
 
 using namespace DirectX;
 
-constexpr float epsilon = std::numeric_limits<float>::epsilon();
-constexpr float upper = XM_PIDIV2 - epsilon;
-constexpr float lower = -XM_PIDIV2 + epsilon;
+static constexpr float epsilon = std::numeric_limits<float>::epsilon();
+static constexpr float upper = XM_PIDIV2 - epsilon;
+static constexpr float lower = -XM_PIDIV2 + epsilon;
 
 const XMVECTOR Camera::worldUp = XMVectorSet(0.f, 1.f, 0.f, 0.f);
 
@@ -55,6 +55,12 @@ void Camera::Target(float x, float y, float z)
 
   yaw = atan2f(dir.z, dir.x);
   pitch = asinf(dir.y);
+}
+
+void Camera::Orient(float p, float y)
+{
+  //pitch = p;
+  yaw = y;
 }
 
 void Camera::ProcessKeyboard()
@@ -108,7 +114,9 @@ void Camera::ProcessKeyboard()
 
 void Camera::DebugWindow()
 {
+  ImGui::Begin("Camera details");
   ImGui::Text("x: %f y: %f z: %f\nyaw: %f", translate.x, translate.y,
               translate.z, yaw);
   ImGui::SliderFloat("pitch", &pitch, lower, upper);
+  ImGui::End();
 }
