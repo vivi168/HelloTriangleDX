@@ -35,7 +35,13 @@ static Player player;
 static const float PLAYER_ROT_SPEED = 2.f;
 static const float PLAYER_SPEED = 20.0f;
 
-static bool g_FreeLook = false;
+struct {
+  bool freeLook;
+  bool thirdPerson;
+  float height;
+  float thirdPersonDistance;
+  float thirdPersonPitch;
+} g_CameraSettings{false, false, 4.0f, 20.f, 0.35f};
 
 void Player::ProcessKeyboard(float dt)
 {
@@ -210,13 +216,35 @@ void Game::Init()
 
 void Game::Update(float time, float deltaTime)
 {
-  if (g_FreeLook)
+  if (g_CameraSettings.freeLook)
     camera.ProcessKeyboard(deltaTime);
   else {
     player.ProcessKeyboard(deltaTime);
     player.GroundStep();
-    camera.Follow(player.position, {0.f, 4.f, 0.f}, player.lookYaw,
-                  player.lookPitch);
+
+    XMFLOAT3 offset{0.f, g_CameraSettings.height, 0.f};
+    float pitch = player.lookPitch;
+    if (g_CameraSettings.thirdPerson) {
+      pitch = g_CameraSettings.thirdPersonPitch;
+
+      float distance = g_CameraSettings.thirdPersonDistance;
+      float verticalOffset = distance * sinf(pitch);
+      float horizontalDistance = distance * cosf(pitch);
+
+      float offsetX = -cosf(player.lookYaw) * horizontalDistance;
+      float offsetZ = -sinf(player.lookYaw) * horizontalDistance;
+      offset = {offsetX, verticalOffset + 2.0f,
+                offsetZ};
+
+
+      camera.Follow(player.position, offset);
+      camera.Target(player.position.x, player.position.y + 2.0f,
+                    player.position.z);
+
+    } else {
+      camera.Follow(player.position, offset);
+      camera.Orient(pitch, player.lookYaw);
+    }
   }
 
   cylinder.Translate(player.position.x, player.position.y, player.position.z);
@@ -237,7 +265,15 @@ void Game::DebugWindow()
     camera.DebugWindow();
 
     ImGui::Begin("Controls");
-    ImGui::Checkbox("Free look", &g_FreeLook);
+    ImGui::Checkbox("Free look", &g_CameraSettings.freeLook);
+    ImGui::Checkbox("Third person camera", &g_CameraSettings.thirdPerson);
+
+    ImGui::SliderFloat("height", &g_CameraSettings.height, 0, 100);
+    ImGui::SliderFloat("thirdPersonDistance",
+                       &g_CameraSettings.thirdPersonDistance, 0, 100);
+    ImGui::SliderFloat("thirdPersonPitch", &g_CameraSettings.thirdPersonPitch,
+                       -1.57, 1.57);
+
     ImGui::End();
   }
 }
