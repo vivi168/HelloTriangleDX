@@ -12,7 +12,7 @@ void Collider::AppendStaticModel(Model3D* m)
   for (auto& sub : m->mesh->subsets) {
     unsigned int offset = sub.start;
 
-    for (int i = 0; i < sub.count; i += 3) {
+    for (unsigned int i = 0; i < sub.count; i += 3) {
       Surface surf;
       XMVECTOR xmv1, xmv2, xmv3;
 
@@ -78,13 +78,12 @@ bool Surface::WithinBound(float x, float z)
   return true;
 }
 
-Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float& prevHeight)
+Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prevHeight)
 {
   Surface* floor = nullptr;
 
   prevHeight = -std::numeric_limits<float>::infinity();
-  static constexpr float FLOOR_BOTTOM_HITBOX = 1.0f;
-  float y = point.y + FLOOR_BOTTOM_HITBOX;
+  float y = point.y + offsetY;
 
   for (auto& surf : staticFloors) {
     // skip floors above point
@@ -107,11 +106,11 @@ Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float& prevHeight)
   return floor;
 }
 
-Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float& distance)
+Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY, float& distance)
 {
   Surface* wall = nullptr;
-  //XMVECTOR origin = XMLoadFloat3(&point);
-  //XMVECTOR direction = XMLoadFloat3(&dir);
+  XMVECTOR offset = XMVectorSet(0.0f, offsetY, 0.0f, 0.0f); 
+  origin += offset;
 
   distance = std::numeric_limits<float>::infinity();
   float hitDistance;

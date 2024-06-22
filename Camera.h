@@ -6,7 +6,8 @@ public:
   Camera();
   void Translate(float x, float y, float z);
   void Target(float x, float y, float z);
-  void Orient(float p, float y);
+  void Follow(DirectX::XMFLOAT3 position, DirectX::XMFLOAT3 offset, float yaw,
+              float pitch);
   void ProcessKeyboard(float dt);
   DirectX::XMMATRIX LookAt();
 

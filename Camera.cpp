@@ -46,10 +46,13 @@ void Camera::Target(float x, float y, float z)
   m_Pitch = asinf(dir.y);
 }
 
-void Camera::Orient(float p, float y)
+void Camera::Follow(XMFLOAT3 position, XMFLOAT3 offset, float yaw, float pitch)
 {
-  // m_Pitch = p;
-  m_Yaw = y;
+  XMVECTOR newPosition = XMLoadFloat3(&position) + XMLoadFloat3(&offset);
+  XMStoreFloat3(&m_Translate, newPosition);
+
+  m_Pitch = pitch;
+  m_Yaw = yaw;
 }
 
 void Camera::ProcessKeyboard(float dt)
