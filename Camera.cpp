@@ -14,109 +14,103 @@ const XMVECTOR Camera::worldUp = XMVectorSet(0.f, 1.f, 0.f, 0.f);
 
 Camera::Camera()
 {
-  yaw = XM_PIDIV2;
-  pitch = 0;
-  speed = 1.0f;
-  sensitivity = 0.01f;
+  m_Yaw = XM_PIDIV2;
+  m_Pitch = 0;
+  m_Speed = 20.0f;
+  m_Sensitivity = 2.f;
 
-  translate = {0, 0, 0};
-
-  forward = {0, 0, 0};
-  right = {0, 0, 0};
+  m_Translate = {0, 0, 0};
 }
 
 XMMATRIX Camera::LookAt()
 {
-  const XMVECTOR f = XMVectorSet(cosf(yaw) * cosf(pitch), sinf(pitch),
-                                 sinf(yaw) * cosf(pitch), 0.f);
-
-  XMVECTOR front = XMVector3Normalize(f);
-
-  XMVECTOR r = XMVector3Normalize(XMVector3Cross(worldUp, front));
-  XMStoreFloat3(&right, r);
-
-  XMVECTOR fw = XMVector3Normalize(XMVector3Cross(r, worldUp));
-  XMStoreFloat3(&forward, fw);
-
-  XMVECTOR position = XMLoadFloat3(&translate);
+  XMVECTOR front =
+      XMVector3Normalize(XMVectorSet(cosf(m_Yaw) * cosf(m_Pitch), sinf(m_Pitch),
+                                     sinf(m_Yaw) * cosf(m_Pitch), 0.f));
+  XMVECTOR position = XMLoadFloat3(&m_Translate);
 
   return XMMatrixLookAtLH(position, XMVectorAdd(position, front), worldUp);
 }
 
-void Camera::Translate(float x, float y, float z) { translate = {x, y, z}; }
+void Camera::Translate(float x, float y, float z) { m_Translate = {x, y, z}; }
 
 void Camera::Target(float x, float y, float z)
 {
-  XMVECTOR p = XMLoadFloat3(&translate);
+  XMVECTOR p = XMLoadFloat3(&m_Translate);
   XMVECTOR t = XMVectorSet(x, y, z, 0.0f);
   XMVECTOR d = XMVector3Normalize(t - p);
   XMFLOAT3 dir;
   XMStoreFloat3(&dir, d);
 
-  yaw = atan2f(dir.z, dir.x);
-  pitch = asinf(dir.y);
+  m_Yaw = atan2f(dir.z, dir.x);
+  m_Pitch = asinf(dir.y);
 }
 
 void Camera::Orient(float p, float y)
 {
-  //pitch = p;
-  yaw = y;
+  // m_Pitch = p;
+  m_Yaw = y;
 }
 
-void Camera::ProcessKeyboard()
+void Camera::ProcessKeyboard(float dt)
 {
   if (Input::IsHeld(Input::KB::Up)) {
-    pitch += sensitivity;
+    m_Pitch += m_Sensitivity * dt;
   }
   if (Input::IsHeld(Input::KB::Down)) {
-    pitch -= sensitivity;
+    m_Pitch -= m_Sensitivity * dt;
   }
   if (Input::IsHeld(Input::KB::Left)) {
-    yaw += sensitivity;
+    m_Yaw += m_Sensitivity * dt;
   }
   if (Input::IsHeld(Input::KB::Right)) {
-    yaw -= sensitivity;
+    m_Yaw -= m_Sensitivity * dt;
   }
 
-  if (pitch > upper)
-    pitch = upper;
-  else if (pitch < lower)
-    pitch = lower;
+  if (m_Pitch > upper)
+    m_Pitch = upper;
+  else if (m_Pitch < lower)
+    m_Pitch = lower;
+
+  float forwardX = cosf(m_Yaw);
+  float forwardZ = sinf(m_Yaw);
+  float rightX = sinf(m_Yaw);
+  float rightZ = -cosf(m_Yaw);
 
   if (Input::IsHeld(Input::KB::W)) {
-    translate.x += forward.x * speed;
-    translate.z += forward.z * speed;
+    m_Translate.x += forwardX * m_Speed * dt;
+    m_Translate.z += forwardZ * m_Speed * dt;
   }
 
   if (Input::IsHeld(Input::KB::S)) {
-    translate.x -= forward.x * speed;
-    translate.z -= forward.z * speed;
+    m_Translate.x -= forwardX * m_Speed * dt;
+    m_Translate.z -= forwardZ * m_Speed * dt;
   }
 
   if (Input::IsHeld(Input::KB::A)) {
-    translate.x -= right.x * speed;
-    translate.z -= right.z * speed;
+    m_Translate.x -= rightX * m_Speed * dt;
+    m_Translate.z -= rightZ * m_Speed * dt;
   }
 
   if (Input::IsHeld(Input::KB::D)) {
-    translate.x += right.x * speed;
-    translate.z += right.z * speed;
+    m_Translate.x += rightX * m_Speed * dt;
+    m_Translate.z += rightZ * m_Speed * dt;
   }
 
   if (Input::IsHeld(Input::KB::Q)) {
-    translate.y -= speed;
+    m_Translate.y -= m_Speed * dt;
   }
 
   if (Input::IsHeld(Input::KB::E)) {
-    translate.y += speed;
+    m_Translate.y += m_Speed * dt;
   }
 }
 
 void Camera::DebugWindow()
 {
   ImGui::Begin("Camera details");
-  ImGui::Text("x: %f y: %f z: %f\nyaw: %f", translate.x, translate.y,
-              translate.z, yaw);
-  ImGui::SliderFloat("pitch", &pitch, lower, upper);
+  ImGui::Text("x: %f y: %f z: %f\nyaw: %f", m_Translate.x, m_Translate.y,
+              m_Translate.z, m_Yaw);
+  ImGui::SliderFloat("pitch", &m_Pitch, lower, upper);
   ImGui::End();
 }

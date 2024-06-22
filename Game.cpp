@@ -112,7 +112,7 @@ void Game::Init()
 
 void Game::Update(float time, float deltaTime)
 {
-   camera.ProcessKeyboard();
+  camera.ProcessKeyboard(deltaTime);
 
   float forwardX = cosf(playerDirection);
   float forwardZ = sinf(playerDirection);
