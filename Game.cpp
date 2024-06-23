@@ -15,12 +15,13 @@ struct Player {
 
   Surface* floor = nullptr;
 
-  enum class State { Unknown, Grounded, Falling, Jumping, Swimming };
+  enum class State { Unknown, Standing, Walking, Falling, Jumping, Swimming };
 
+  State currentState;
+
+  Player();
   void ProcessKeyboard(float dt);
-  void LookAhead(float yaw);
-  void Move(float x, float y, float z);
-  State GroundStep();
+  void Update();
 };
 
 static Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
@@ -34,6 +35,7 @@ static Player player;
 
 static const float PLAYER_ROT_SPEED = 2.f;
 static const float PLAYER_SPEED = 20.0f;
+static const float FALLING_SPEED = 30.0f;
 
 struct {
   bool freeLook;
@@ -43,6 +45,17 @@ struct {
   float thirdPersonPitch;
 } g_CameraSettings{false, false, 4.0f, 20.f, 0.35f};
 
+Player::Player()
+{
+  lookYaw = XM_PIDIV2;
+  lookPitch = 0.0f;
+
+  position = {0.f, 0.f, 0.f};
+  velocity = {0.f, 0.f, 0.f};
+
+  currentState = State::Standing;
+}
+
 void Player::ProcessKeyboard(float dt)
 {
   if (Input::IsHeld(Input::KB::Up)) {
@@ -51,10 +64,10 @@ void Player::ProcessKeyboard(float dt)
   if (Input::IsHeld(Input::KB::Down)) {
     lookPitch -= PLAYER_ROT_SPEED * dt;
   }
-  if (Input::IsHeld(Input::KB::Left)) {
+  if (Input::IsHeld(Input::KB::A)) {
     lookYaw += PLAYER_ROT_SPEED * dt;
   }
-  if (Input::IsHeld(Input::KB::Right)) {
+  if (Input::IsHeld(Input::KB::D)) {
     lookYaw -= PLAYER_ROT_SPEED * dt;
   }
 
@@ -74,52 +87,53 @@ void Player::ProcessKeyboard(float dt)
 
   velocity = {0.f, 0.f, 0.f};
 
+  if (currentState == State::Falling) {
+    velocity.y = -FALLING_SPEED * dt;
+    return;
+  } else {
+    currentState = State::Standing;
+  }
+
   if (Input::IsHeld(Input::KB::W)) {
     velocity.x = forwardX * PLAYER_SPEED * dt;
     velocity.z = forwardZ * PLAYER_SPEED * dt;
+    currentState = State::Walking;
   }
 
   if (Input::IsHeld(Input::KB::S)) {
     velocity.x = -forwardX * PLAYER_SPEED * dt;
     velocity.z = -forwardZ * PLAYER_SPEED * dt;
+    currentState = State::Walking;
   }
 
-  if (Input::IsHeld(Input::KB::A)) {
+  if (Input::IsHeld(Input::KB::Left)) {
     velocity.x = -rightX * PLAYER_SPEED * dt;
     velocity.z = -rightZ * PLAYER_SPEED * dt;
+    currentState = State::Walking;
   }
 
-  if (Input::IsHeld(Input::KB::D)) {
+  if (Input::IsHeld(Input::KB::Right)) {
     velocity.x = rightX * PLAYER_SPEED * dt;
     velocity.z = rightZ * PLAYER_SPEED * dt;
+    currentState = State::Walking;
   }
 }
 
-void Player::Move(float x, float y, float z) { position = {x, y, z}; }
-void Player::LookAhead(float yaw)
+void Player::Update()
 {
-  lookYaw = yaw;
-  lookPitch = 0.0f;
-}
-
-Player::State Player::GroundStep()
-{
-  // TODO
-  XMFLOAT3 intendedPos{};
-  State result = State::Unknown;
-
-  // intendedPos.x = position.x + floor->normal.y * velocity.x;
-  // intendedPos.z = position.z + floor->normal.y * velocity.z;
-  // intendedPos.y = position.y;
+  float velMod = 1.0f;
+  if (floor)
+    velMod = floor->normal.y;  // the steeper the slope the slower the speed
 
   XMVECTOR playerStart = XMLoadFloat3(&position);
-  XMVECTOR playerVel = XMLoadFloat3(&velocity);
+  XMVECTOR playerVel = XMLoadFloat3(&velocity) * velMod;
   XMVECTOR playerEnd = playerStart + playerVel;
   XMVECTOR direction = XMVector3Normalize(playerVel);
+  float velMag = XMVectorGetX(XMVector3Length(playerVel));
 
   Surface* wall = nullptr;
   float distance;
-  if (!XMVector3Equal(playerEnd, playerStart))
+  if (velMag > 0.f)
     wall = collider.FindWall(playerStart, direction, 2.0f, distance);
 
   XMStoreFloat3(&position, playerEnd);
@@ -143,29 +157,25 @@ Player::State Player::GroundStep()
   }
 
   float height;
-  Surface* floor = collider.FindFloor(position, 2.0f, height);
-  // assert(floor);  // should not happen
+  floor = collider.FindFloor(position, 2.0f, height);
+  assert(floor);  // should not happen
 
-  if (position.y - height > 3.0f) {
-    printf("falling\n");
-    // TODO: falling (adjust value)
+  if (position.y - height > 2.5f) {
+    currentState = State::Falling;
+  } else {
+    position.y = height;
+    velocity.y = 0.0f;
+    currentState = velMag > 0.f ? State::Walking : State::Standing;
   }
-
-  position.y = height;
-
-  return result;
 }
 
 void Game::Init()
 {
-  player.Move(0.f, 0.f, 0.f);
-  player.LookAhead(XM_PIDIV2);
-
   Renderer::SetSceneCamera(&camera);
 
   treeMesh.Read("assets/tree.objb");
   yukaMesh.Read("assets/yuka.objb");
-  houseMesh.Read("assets/house.objb");
+  houseMesh.Read("assets/tower.objb");
   terrainMesh.Read("assets/terrain.objb");
   // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
@@ -190,7 +200,7 @@ void Game::Init()
   bigTree.Translate(-7.f, 0.0f, 14.f);
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
-  house.Translate(10.f, 0.f, 50.f);
+  house.Translate(20.f, 0.f, 50.f);
   stairs.Translate(-50.f, 0.f, 20.f);
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
@@ -220,7 +230,7 @@ void Game::Update(float time, float deltaTime)
     camera.ProcessKeyboard(deltaTime);
   else {
     player.ProcessKeyboard(deltaTime);
-    player.GroundStep();
+    player.Update();
 
     XMFLOAT3 offset{0.f, g_CameraSettings.height, 0.f};
     float pitch = player.lookPitch;
@@ -233,14 +243,11 @@ void Game::Update(float time, float deltaTime)
 
       float offsetX = -cosf(player.lookYaw) * horizontalDistance;
       float offsetZ = -sinf(player.lookYaw) * horizontalDistance;
-      offset = {offsetX, verticalOffset + 2.0f,
-                offsetZ};
-
+      offset = {offsetX, verticalOffset + 2.0f, offsetZ};
 
       camera.Follow(player.position, offset);
-      camera.Target(player.position.x, player.position.y + 2.0f,
+      camera.Target(player.position.x, player.position.y + 4.0f,
                     player.position.z);
-
     } else {
       camera.Follow(player.position, offset);
       camera.Orient(pitch, player.lookYaw);
@@ -256,8 +263,15 @@ void Game::DebugWindow()
 {
   {
     ImGui::Begin("Player");
-    ImGui::Text("x: %f y: %f z: %f\ndir: %f", player.position.x,
+    ImGui::Text("position x: %f y: %f z: %f\ndir: %f", player.position.x,
                 player.position.y, player.position.z, player.lookYaw);
+
+    ImGui::Text("velocity x: %f y: %f z: %f", player.velocity.x,
+                player.velocity.y, player.velocity.z);
+    // ImGui::Text("floor normY %f", player.floor->normal.y);
+
+    ImGui::Text("State: %d", player.currentState);
+    ImGui::Text("Is Held: %d", Input::IsHeld(Input::KB::S));
     ImGui::End();
   }
 

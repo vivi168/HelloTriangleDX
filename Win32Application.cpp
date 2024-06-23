@@ -83,6 +83,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
       g_TimeValue = newTimeValue;
       g_Time = (float)newTimeValue * 0.001f;
 
+      if (g_TimeDelta > 0.f)
       {
         Input::Update();
 
