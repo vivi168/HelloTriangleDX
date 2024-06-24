@@ -21,13 +21,32 @@ class Collider
 public:
   Collider();
   void AppendStaticModel(Model3D* m);
+  void AppendDynamicModel(Model3D* m);
   Surface* FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prevHeight);
   Surface* FindWall(DirectX::XMVECTOR point, DirectX::XMVECTOR direction,
                     float offsetY, float& distance);
 
+  void RefreshDynamicModels();
+
 private:
-  std::list<Surface> staticFloors;
-  std::list<Surface> staticWalls;
-  std::list<Surface> staticCeils;
-  // std::list<Surface> dynamicSurfaces;
+  struct SurfaceGroup {
+    std::list<Surface> floors;
+    std::list<Surface> walls;
+    std::list<Surface> ceilings;
+
+    void Clear()
+    {
+      floors.clear();
+      walls.clear();
+      ceilings.clear();
+    }
+  };
+
+  void CreateSurfacesFromModel(SurfaceGroup* group, Model3D* m);
+  void FindFloorInList(std::list<Surface>& list, DirectX::XMFLOAT3 point, float offsetY, float& prevHeight);
+  Surface* FindWallInList(std::list<Surface>& list, DirectX::XMVECTOR point, DirectX::XMVECTOR direction,
+                    float offsetY, float& distance);
+
+  SurfaceGroup staticSurfaces;
+  std::list<std::pair<Model3D*, SurfaceGroup>> dynamicSurfaces;
 };

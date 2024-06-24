@@ -37,6 +37,8 @@ static const float PLAYER_ROT_SPEED = 2.f;
 static const float PLAYER_SPEED = 20.0f;
 static const float FALLING_SPEED = 30.0f;
 
+static float plateformY = 0.0f;
+
 struct {
   bool freeLook;
   bool thirdPerson;
@@ -64,10 +66,10 @@ void Player::ProcessKeyboard(float dt)
   if (Input::IsHeld(Input::KB::Down)) {
     lookPitch -= PLAYER_ROT_SPEED * dt;
   }
-  if (Input::IsHeld(Input::KB::A)) {
+  if (Input::IsHeld(Input::KB::Left)) {
     lookYaw += PLAYER_ROT_SPEED * dt;
   }
-  if (Input::IsHeld(Input::KB::D)) {
+  if (Input::IsHeld(Input::KB::Right)) {
     lookYaw -= PLAYER_ROT_SPEED * dt;
   }
 
@@ -90,32 +92,26 @@ void Player::ProcessKeyboard(float dt)
   if (currentState == State::Falling) {
     velocity.y = -FALLING_SPEED * dt;
     return;
-  } else {
-    currentState = State::Standing;
   }
 
   if (Input::IsHeld(Input::KB::W)) {
     velocity.x = forwardX * PLAYER_SPEED * dt;
     velocity.z = forwardZ * PLAYER_SPEED * dt;
-    currentState = State::Walking;
   }
 
   if (Input::IsHeld(Input::KB::S)) {
     velocity.x = -forwardX * PLAYER_SPEED * dt;
     velocity.z = -forwardZ * PLAYER_SPEED * dt;
-    currentState = State::Walking;
   }
 
-  if (Input::IsHeld(Input::KB::Left)) {
+  if (Input::IsHeld(Input::KB::A)) {
     velocity.x = -rightX * PLAYER_SPEED * dt;
     velocity.z = -rightZ * PLAYER_SPEED * dt;
-    currentState = State::Walking;
   }
 
-  if (Input::IsHeld(Input::KB::Right)) {
+  if (Input::IsHeld(Input::KB::D)) {
     velocity.x = rightX * PLAYER_SPEED * dt;
     velocity.z = rightZ * PLAYER_SPEED * dt;
-    currentState = State::Walking;
   }
 }
 
@@ -129,7 +125,8 @@ void Player::Update()
   XMVECTOR playerVel = XMLoadFloat3(&velocity) * velMod;
   XMVECTOR playerEnd = playerStart + playerVel;
   XMVECTOR direction = XMVector3Normalize(playerVel);
-  float velMag = XMVectorGetX(XMVector3Length(playerVel));
+  float velMag;
+  XMStoreFloat(&velMag, XMVector3Length(playerVel));
 
   Surface* wall = nullptr;
   float distance;
@@ -139,7 +136,8 @@ void Player::Update()
   XMStoreFloat3(&position, playerEnd);
 
   if (wall) {
-    float distanceMoved = XMVectorGetX(XMVector3Length(playerVel));
+    float distanceMoved;
+    XMStoreFloat(&distanceMoved, XMVector3Length(playerVel));
     distance -= 1.1f;  // player radius
     if (distanceMoved > distance) {
       XMVECTOR wallNormal = XMLoadFloat3(&wall->normal);
@@ -179,7 +177,7 @@ void Game::Init()
   terrainMesh.Read("assets/terrain.objb");
   // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
-  unitCubeMesh.Read("assets/unit_cube.objb");
+  unitCubeMesh.Read("assets/plateform.objb");
   cylinderMesh.Read("assets/cylinder.objb");
   stairsMesh.Read("assets/stairs.objb");
   fieldMesh.Read("assets/bf.objb");
@@ -205,7 +203,7 @@ void Game::Init()
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
 
-  unitCube.Translate(10.f, 0.0f, -10.f);
+  unitCube.Translate(10.f, plateformY, -10.f);
 
   Renderer::AppendToScene(&bigTree);
   Renderer::AppendToScene(&smallTree);
@@ -221,11 +219,34 @@ void Game::Init()
   collider.AppendStaticModel(&house);
   collider.AppendStaticModel(&yuka);
   collider.AppendStaticModel(&stairs);
-  collider.AppendStaticModel(&unitCube);
+
+  collider.AppendDynamicModel(&unitCube);
 }
 
 void Game::Update(float time, float deltaTime)
 {
+  // Dynamic models update
+  {
+    unitCube.dirty = false;
+
+    if (Input::IsHeld(Input::KB::I)) {
+      plateformY += 5 * deltaTime;
+
+      // collider.RefreshDynamicModels();
+      // collider.AppendDynamicModel(&unitCube);
+      unitCube.Translate(10.f, plateformY, -10.f);
+    }
+    else if (Input::IsHeld(Input::KB::K)) {
+      plateformY -= 5 * deltaTime;
+
+      // collider.RefreshDynamicModels();
+      // collider.AppendDynamicModel(&unitCube);
+      unitCube.Translate(10.f, plateformY, -10.f);
+    }
+
+    collider.RefreshDynamicModels();
+  }
+
   if (g_CameraSettings.freeLook)
     camera.ProcessKeyboard(deltaTime);
   else {
@@ -253,6 +274,9 @@ void Game::Update(float time, float deltaTime)
       camera.Orient(pitch, player.lookYaw);
     }
   }
+
+
+
 
   cylinder.Translate(player.position.x, player.position.y, player.position.z);
   cylinder.Rotate(0.0f, -player.lookYaw - XM_PIDIV2, 0.f);

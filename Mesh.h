@@ -52,11 +52,12 @@ struct Model3D {
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 rotate;
   DirectX::XMFLOAT3 translate;
+  bool dirty;
 
   Model3D();
   DirectX::XMMATRIX WorldMatrix();
 
-  void Scale(float s) { scale = {s, s, s}; }
-  void Rotate(float x, float y, float z) { rotate = {x, y, z}; }
-  void Translate(float x, float y, float z) { translate = {x, y, z}; }
+  void Scale(float s);
+  void Rotate(float x, float y, float z);
+  void Translate(float x, float y, float z);
 };

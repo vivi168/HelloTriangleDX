@@ -25,7 +25,7 @@ void Mesh3D::Read(std::string filename)
 }
 
 Model3D::Model3D()
-    : scale(1.f, 1.f, 1.f), rotate(0.f, 0.f, 0.f), translate(0.f, 0.f, 0.f)
+    : scale(1.f, 1.f, 1.f), rotate(0.f, 0.f, 0.f), translate(0.f, 0.f, 0.f), dirty(false)
 {
 }
 
@@ -44,4 +44,22 @@ DirectX::XMMATRIX Model3D::WorldMatrix()
   XMMATRIX rotXYZ = rotX * rotY * rotZ;
 
   return rotXYZ * scaleMatrix * transMatrix;
+}
+
+void Model3D::Scale(float s)
+{
+  scale = {s, s, s};
+  dirty = true;
+}
+
+void Model3D::Rotate(float x, float y, float z)
+{
+  rotate = {x, y, z};
+  dirty = true;
+}
+
+void Model3D::Translate(float x, float y, float z)
+{
+  translate = {x, y, z};
+  dirty = true;
 }

@@ -5,9 +5,32 @@
 
 using namespace DirectX;
 
-Collider::Collider() { staticFloors.clear(); }
+Collider::Collider() { }
 
 void Collider::AppendStaticModel(Model3D* m)
+{
+  CreateSurfacesFromModel(&staticSurfaces, m);
+}
+
+void Collider::AppendDynamicModel(Model3D* m)
+{
+  SurfaceGroup sg;
+
+  CreateSurfacesFromModel(&sg, m);
+  dynamicSurfaces.push_back(std::make_pair(m, sg));
+}
+
+void Collider::RefreshDynamicModels()
+{
+  for (auto &[m, sg] : dynamicSurfaces) {
+    if (!m->dirty) continue;
+
+    sg.Clear();
+    CreateSurfacesFromModel(&sg, m);
+  }
+}
+
+void Collider::CreateSurfacesFromModel(SurfaceGroup* surfGroup, Model3D* m)
 {
   for (auto& sub : m->mesh->subsets) {
     unsigned int offset = sub.start;
@@ -47,7 +70,7 @@ void Collider::AppendStaticModel(Model3D* m)
         normal = XMVector3Normalize(XMVector3Cross(u, v));
         XMStoreFloat3(&surf.normal, normal);
 
-        surf.originOffset = XMVectorGetX(-XMVector3Dot(normal, xmv1));
+        XMStoreFloat(&surf.originOffset, -XMVector3Dot(normal, xmv1));
       }
 
       static constexpr float VERTICAL_BUFFER = 0.5f;
@@ -55,11 +78,11 @@ void Collider::AppendStaticModel(Model3D* m)
       surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y}) + VERTICAL_BUFFER;
 
       if (surf.normal.y > 0.25)
-        staticFloors.push_back(surf);
+        surfGroup->floors.push_back(surf);
       else if (surf.normal.y < -0.25)
-        staticCeils.push_back(surf);
+        surfGroup->ceilings.push_back(surf);
       else
-        staticWalls.push_back(surf);
+        surfGroup->walls.push_back(surf);
     }
   }
 }
@@ -81,11 +104,35 @@ bool Surface::WithinBound(float x, float z)
 Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prevHeight)
 {
   Surface* floor = nullptr;
+  Surface* dynFloor = nullptr;
 
   prevHeight = -std::numeric_limits<float>::infinity();
+
+  float dynHeight = prevHeight;
   float y = point.y + offsetY;
 
-  for (auto& surf : staticFloors) {
+  for (auto& [a, surf] : dynamicSurfaces) {
+    for (auto& surf : surf.floors) {
+      // TODO: DRY!!!
+      // skip floors above point
+      if (y < surf.minY) continue;
+
+      if (!surf.WithinBound(point.x, point.z)) continue;
+
+      float height = surf.HeightAt(point.x, point.z);
+
+      // skip floor lower than previous highest floor
+      if (height <= dynHeight) continue;
+
+      // skip if not inside floor hitbox
+      if (y < height) continue;
+
+      dynHeight = height;
+      dynFloor = &surf;
+    }
+  }
+
+  for (auto& surf : staticSurfaces.floors) {
     // skip floors above point
     if (y < surf.minY) continue;
 
@@ -103,19 +150,24 @@ Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prev
     floor = &surf;
   }
 
+  if (dynFloor && dynHeight > prevHeight) {
+    prevHeight = dynHeight;
+    return dynFloor;
+  }
+
   return floor;
 }
 
 Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY, float& distance)
 {
   Surface* wall = nullptr;
-  XMVECTOR offset = XMVectorSet(0.0f, offsetY, 0.0f, 0.0f); 
+  XMVECTOR offset = XMVectorSet(0.0f, offsetY, 0.0f, 0.0f);
   origin += offset;
 
   distance = std::numeric_limits<float>::infinity();
   float hitDistance;
 
-  for (auto& surf : staticWalls) {
+  for (auto& surf : staticSurfaces.walls) {
     if (XMVectorGetY(origin) < surf.minY || XMVectorGetY(origin) > surf.maxY)
       continue;
 
