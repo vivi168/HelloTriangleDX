@@ -52,7 +52,7 @@ struct Model3D {
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 rotate;
   DirectX::XMFLOAT3 translate;
-  bool dirty;
+  bool dirty; // world position changed
 
   Model3D();
   DirectX::XMMATRIX WorldMatrix();
@@ -60,4 +60,5 @@ struct Model3D {
   void Scale(float s);
   void Rotate(float x, float y, float z);
   void Translate(float x, float y, float z);
+  void Clean() { dirty = false;  }
 };

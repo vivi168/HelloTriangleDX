@@ -375,7 +375,7 @@ void Renderer::Update(float time)
     XMMATRIX view = g_Scene.camera->LookAt();
     XMMATRIX viewProjection = view * projection;
 
-    for (auto node : g_Scene.nodes) {
+    for (auto& node : g_Scene.nodes) {
       ObjectCB1_VS cb;
 
       XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;

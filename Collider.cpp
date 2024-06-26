@@ -5,28 +5,27 @@
 
 using namespace DirectX;
 
-Collider::Collider() { }
+Collider::Collider() {}
 
-void Collider::AppendStaticModel(Model3D* m)
-{
-  CreateSurfacesFromModel(&staticSurfaces, m);
-}
-
-void Collider::AppendDynamicModel(Model3D* m)
+void Collider::AppendModel(Model3D* m)
 {
   SurfaceGroup sg;
 
   CreateSurfacesFromModel(&sg, m);
-  dynamicSurfaces.push_back(std::make_pair(m, sg));
+  m_Surfaces.push_back(std::make_pair(m, sg));
+
+  m->Clean();
 }
 
 void Collider::RefreshDynamicModels()
 {
-  for (auto &[m, sg] : dynamicSurfaces) {
+  for (auto& [m, sg] : m_Surfaces) {
     if (!m->dirty) continue;
 
     sg.Clear();
     CreateSurfacesFromModel(&sg, m);
+
+    m->Clean();
   }
 }
 
@@ -73,9 +72,8 @@ void Collider::CreateSurfacesFromModel(SurfaceGroup* surfGroup, Model3D* m)
         XMStoreFloat(&surf.originOffset, -XMVector3Dot(normal, xmv1));
       }
 
-      static constexpr float VERTICAL_BUFFER = 0.5f;
-      surf.minY = std::min({surf.v1.y, surf.v2.y, surf.v3.y}) - VERTICAL_BUFFER;
-      surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y}) + VERTICAL_BUFFER;
+      surf.minY = std::min({surf.v1.y, surf.v2.y, surf.v3.y});
+      surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y});
 
       if (surf.normal.y > 0.25)
         surfGroup->floors.push_back(surf);
@@ -101,19 +99,15 @@ bool Surface::WithinBound(float x, float z)
   return true;
 }
 
-Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prevHeight)
+Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY,
+                             float& prevHeight)
 {
   Surface* floor = nullptr;
-  Surface* dynFloor = nullptr;
-
   prevHeight = -std::numeric_limits<float>::infinity();
-
-  float dynHeight = prevHeight;
   float y = point.y + offsetY;
 
-  for (auto& [a, surf] : dynamicSurfaces) {
-    for (auto& surf : surf.floors) {
-      // TODO: DRY!!!
+  for (auto& [m, surfs] : m_Surfaces) {
+    for (auto& surf : surfs.floors) {
       // skip floors above point
       if (y < surf.minY) continue;
 
@@ -122,43 +116,21 @@ Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY, float& prev
       float height = surf.HeightAt(point.x, point.z);
 
       // skip floor lower than previous highest floor
-      if (height <= dynHeight) continue;
+      if (height <= prevHeight) continue;
 
       // skip if not inside floor hitbox
       if (y < height) continue;
 
-      dynHeight = height;
-      dynFloor = &surf;
+      prevHeight = height;
+      floor = &surf;
     }
-  }
-
-  for (auto& surf : staticSurfaces.floors) {
-    // skip floors above point
-    if (y < surf.minY) continue;
-
-    if (!surf.WithinBound(point.x, point.z)) continue;
-
-    float height = surf.HeightAt(point.x, point.z);
-
-    // skip floor lower than previous highest floor
-    if (height <= prevHeight) continue;
-
-    // skip if not inside floor hitbox
-    if (y < height) continue;
-
-    prevHeight = height;
-    floor = &surf;
-  }
-
-  if (dynFloor && dynHeight > prevHeight) {
-    prevHeight = dynHeight;
-    return dynFloor;
   }
 
   return floor;
 }
 
-Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY, float& distance)
+Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY,
+                            float& distance)
 {
   Surface* wall = nullptr;
   XMVECTOR offset = XMVectorSet(0.0f, offsetY, 0.0f, 0.0f);
@@ -167,20 +139,23 @@ Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY, 
   distance = std::numeric_limits<float>::infinity();
   float hitDistance;
 
-  for (auto& surf : staticSurfaces.walls) {
-    if (XMVectorGetY(origin) < surf.minY || XMVectorGetY(origin) > surf.maxY)
-      continue;
+  for (auto& [m, surf] : m_Surfaces) {
+    for (auto& surf : surf.walls) {
+      if (XMVectorGetY(origin) < surf.minY || XMVectorGetY(origin) > surf.maxY)
+        continue;
 
-    XMVECTOR p1 = XMLoadFloat3(&surf.v1);
-    XMVECTOR p2 = XMLoadFloat3(&surf.v2);
-    XMVECTOR p3 = XMLoadFloat3(&surf.v3);
+      XMVECTOR p1 = XMLoadFloat3(&surf.v1);
+      XMVECTOR p2 = XMLoadFloat3(&surf.v2);
+      XMVECTOR p3 = XMLoadFloat3(&surf.v3);
 
-    if (!TriangleTests::Intersects(origin, direction, p1, p2, p3, hitDistance))
-      continue;
+      if (!TriangleTests::Intersects(origin, direction, p1, p2, p3,
+                                     hitDistance))
+        continue;
 
-    if (hitDistance < distance) {
-      distance = hitDistance;
-      wall = &surf;
+      if (hitDistance < distance) {
+        distance = hitDistance;
+        wall = &surf;
+      }
     }
   }
 

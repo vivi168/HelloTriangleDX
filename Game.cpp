@@ -12,8 +12,7 @@ struct Player {
   XMFLOAT3 position;
   XMFLOAT3 velocity;
   float lookYaw, lookPitch;
-
-  Surface* floor = nullptr;
+  float floorNormalY;
 
   enum class State { Unknown, Standing, Walking, Falling, Jumping, Swimming };
 
@@ -38,6 +37,7 @@ static const float PLAYER_SPEED = 20.0f;
 static const float FALLING_SPEED = 30.0f;
 
 static float plateformY = 0.0f;
+static float plateformPitch = 0.0f;
 
 struct {
   bool freeLook;
@@ -51,6 +51,7 @@ Player::Player()
 {
   lookYaw = XM_PIDIV2;
   lookPitch = 0.0f;
+  floorNormalY = 1.0f;
 
   position = {0.f, 0.f, 0.f};
   velocity = {0.f, 0.f, 0.f};
@@ -117,12 +118,9 @@ void Player::ProcessKeyboard(float dt)
 
 void Player::Update()
 {
-  float velMod = 1.0f;
-  if (floor)
-    velMod = floor->normal.y;  // the steeper the slope the slower the speed
-
   XMVECTOR playerStart = XMLoadFloat3(&position);
-  XMVECTOR playerVel = XMLoadFloat3(&velocity) * velMod;
+  // the steeper the slope the slower the speed
+  XMVECTOR playerVel = XMLoadFloat3(&velocity) * floorNormalY;
   XMVECTOR playerEnd = playerStart + playerVel;
   XMVECTOR direction = XMVector3Normalize(playerVel);
   float velMag;
@@ -155,8 +153,9 @@ void Player::Update()
   }
 
   float height;
-  floor = collider.FindFloor(position, 2.0f, height);
+  Surface* floor = collider.FindFloor(position, 2.0f, height);
   assert(floor);  // should not happen
+  floorNormalY = floor->normal.y;
 
   if (position.y - height > 2.5f) {
     currentState = State::Falling;
@@ -204,6 +203,7 @@ void Game::Init()
   cube.Scale(5.f);
 
   unitCube.Translate(10.f, plateformY, -10.f);
+  unitCube.Rotate(plateformPitch, 0.f, 0.f);
 
   Renderer::AppendToScene(&bigTree);
   Renderer::AppendToScene(&smallTree);
@@ -215,35 +215,38 @@ void Game::Init()
   Renderer::AppendToScene(&stairs);
   Renderer::AppendToScene(&unitCube);
 
-  collider.AppendStaticModel(&terrain);
-  collider.AppendStaticModel(&house);
-  collider.AppendStaticModel(&yuka);
-  collider.AppendStaticModel(&stairs);
+  // static
+  collider.AppendModel(&terrain);
+  collider.AppendModel(&house);
+  collider.AppendModel(&yuka);
+  collider.AppendModel(&stairs);
 
-  collider.AppendDynamicModel(&unitCube);
+  // dynamic
+  collider.AppendModel(&unitCube);
+  collider.AppendModel(&cube);
 }
 
 void Game::Update(float time, float deltaTime)
 {
   // Dynamic models update
   {
-    unitCube.dirty = false;
-
     if (Input::IsHeld(Input::KB::I)) {
-      plateformY += 5 * deltaTime;
-
-      // collider.RefreshDynamicModels();
-      // collider.AppendDynamicModel(&unitCube);
+      plateformY += 10 * deltaTime;
       unitCube.Translate(10.f, plateformY, -10.f);
-    }
-    else if (Input::IsHeld(Input::KB::K)) {
-      plateformY -= 5 * deltaTime;
-
-      // collider.RefreshDynamicModels();
-      // collider.AppendDynamicModel(&unitCube);
+    } else if (Input::IsHeld(Input::KB::K)) {
+      plateformY -= 10 * deltaTime;
       unitCube.Translate(10.f, plateformY, -10.f);
     }
 
+    if (Input::IsHeld(Input::KB::J)) {
+      plateformPitch += 0.25 * deltaTime;
+      unitCube.Rotate(plateformPitch, 0.f, 0.f);
+    } else if (Input::IsHeld(Input::KB::L)) {
+      plateformPitch -= 0.25 * deltaTime;
+      unitCube.Rotate(plateformPitch, 0.f, 0.f);
+    }
+
+    cube.Rotate(time * .25f, 0.f, 0.f);
     collider.RefreshDynamicModels();
   }
 
@@ -275,12 +278,8 @@ void Game::Update(float time, float deltaTime)
     }
   }
 
-
-
-
   cylinder.Translate(player.position.x, player.position.y, player.position.z);
   cylinder.Rotate(0.0f, -player.lookYaw - XM_PIDIV2, 0.f);
-  cube.Rotate(time * .5f, 0.f, 0.f);
 }
 
 void Game::DebugWindow()
