@@ -28,11 +28,14 @@ public:
   void RefreshDynamicModels();
 
 private:
-  struct SurfaceGroup {
+  struct ColliderNode {
     std::list<Surface> floors;
     std::list<Surface> walls;
     std::list<Surface> ceilings;
 
+    Model3D* model;
+
+    void CreateSurfacesFromModel();
     void Clear()
     {
       floors.clear();
@@ -41,10 +44,10 @@ private:
     }
   };
 
-  void CreateSurfacesFromModel(SurfaceGroup* group, Model3D* m);
+  //void CreateSurfacesFromModel(ColliderNode* node, Model3D* m);
   void FindFloorInList(std::list<Surface>& list, DirectX::XMFLOAT3 point, float offsetY, float& prevHeight);
   Surface* FindWallInList(std::list<Surface>& list, DirectX::XMVECTOR point, DirectX::XMVECTOR direction,
                     float offsetY, float& distance);
 
-  std::list<std::pair<Model3D*, SurfaceGroup>> m_Surfaces;
+  std::list<ColliderNode> m_ColliderNodes;
 };

@@ -9,29 +9,28 @@ Collider::Collider() {}
 
 void Collider::AppendModel(Model3D* m)
 {
-  SurfaceGroup sg;
+  ColliderNode node;
 
-  CreateSurfacesFromModel(&sg, m);
-  m_Surfaces.push_back(std::make_pair(m, sg));
-
-  m->Clean();
+  node.model = m;
+  node.CreateSurfacesFromModel();
+  m_ColliderNodes.push_back(node);
 }
 
 void Collider::RefreshDynamicModels()
 {
-  for (auto& [m, sg] : m_Surfaces) {
-    if (!m->dirty) continue;
+  for (auto& node : m_ColliderNodes) {
+    if (!node.model->dirty) continue;
 
-    sg.Clear();
-    CreateSurfacesFromModel(&sg, m);
-
-    m->Clean();
+    node.CreateSurfacesFromModel();
   }
 }
 
-void Collider::CreateSurfacesFromModel(SurfaceGroup* surfGroup, Model3D* m)
+void Collider::ColliderNode::CreateSurfacesFromModel()
 {
-  for (auto& sub : m->mesh->subsets) {
+  Clear();
+  model->Clean();
+
+  for (auto& sub : model->mesh->subsets) {
     unsigned int offset = sub.start;
 
     for (unsigned int i = 0; i < sub.count; i += 3) {
@@ -40,24 +39,24 @@ void Collider::CreateSurfacesFromModel(SurfaceGroup* surfGroup, Model3D* m)
 
       // copy positions
       {
-        int i1 = m->mesh->indices[i + offset];
-        int i2 = m->mesh->indices[i + 1 + offset];
-        int i3 = m->mesh->indices[i + 2 + offset];
+        int i1 = model->mesh->indices[i + offset];
+        int i2 = model->mesh->indices[i + 1 + offset];
+        int i3 = model->mesh->indices[i + 2 + offset];
 
-        Vertex v1 = m->mesh->vertices[i1];
-        Vertex v2 = m->mesh->vertices[i2];
-        Vertex v3 = m->mesh->vertices[i3];
+        Vertex v1 = model->mesh->vertices[i1];
+        Vertex v2 = model->mesh->vertices[i2];
+        Vertex v3 = model->mesh->vertices[i3];
 
         xmv1 = XMVectorSet(v1.position.x, v1.position.y, v1.position.z, 1.0f);
-        xmv1 = XMVector4Transform(xmv1, m->WorldMatrix());
+        xmv1 = XMVector4Transform(xmv1, model->WorldMatrix());
         XMStoreFloat3(&surf.v1, xmv1);
 
         xmv2 = XMVectorSet(v2.position.x, v2.position.y, v2.position.z, 1.0f);
-        xmv2 = XMVector4Transform(xmv2, m->WorldMatrix());
+        xmv2 = XMVector4Transform(xmv2, model->WorldMatrix());
         XMStoreFloat3(&surf.v2, xmv2);
 
         xmv3 = XMVectorSet(v3.position.x, v3.position.y, v3.position.z, 1.0f);
-        xmv3 = XMVector4Transform(xmv3, m->WorldMatrix());
+        xmv3 = XMVector4Transform(xmv3, model->WorldMatrix());
         XMStoreFloat3(&surf.v3, xmv3);
       }
 
@@ -76,11 +75,11 @@ void Collider::CreateSurfacesFromModel(SurfaceGroup* surfGroup, Model3D* m)
       surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y});
 
       if (surf.normal.y > 0.25)
-        surfGroup->floors.push_back(surf);
+        floors.push_back(surf);
       else if (surf.normal.y < -0.25)
-        surfGroup->ceilings.push_back(surf);
+        ceilings.push_back(surf);
       else
-        surfGroup->walls.push_back(surf);
+        walls.push_back(surf);
     }
   }
 }
@@ -106,8 +105,8 @@ Surface* Collider::FindFloor(DirectX::XMFLOAT3 point, float offsetY,
   prevHeight = -std::numeric_limits<float>::infinity();
   float y = point.y + offsetY;
 
-  for (auto& [m, surfs] : m_Surfaces) {
-    for (auto& surf : surfs.floors) {
+  for (auto& node : m_ColliderNodes) {
+    for (auto& surf : node.floors) {
       // skip floors above point
       if (y < surf.minY) continue;
 
@@ -139,8 +138,8 @@ Surface* Collider::FindWall(XMVECTOR origin, XMVECTOR direction, float offsetY,
   distance = std::numeric_limits<float>::infinity();
   float hitDistance;
 
-  for (auto& [m, surf] : m_Surfaces) {
-    for (auto& surf : surf.walls) {
+  for (auto& node : m_ColliderNodes) {
+    for (auto& surf : node.walls) {
       if (XMVectorGetY(origin) < surf.minY || XMVectorGetY(origin) > surf.maxY)
         continue;
 
