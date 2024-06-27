@@ -44,10 +44,5 @@ private:
     }
   };
 
-  //void CreateSurfacesFromModel(ColliderNode* node, Model3D* m);
-  void FindFloorInList(std::list<Surface>& list, DirectX::XMFLOAT3 point, float offsetY, float& prevHeight);
-  Surface* FindWallInList(std::list<Surface>& list, DirectX::XMVECTOR point, DirectX::XMVECTOR direction,
-                    float offsetY, float& distance);
-
   std::list<ColliderNode> m_ColliderNodes;
 };
