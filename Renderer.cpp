@@ -286,8 +286,8 @@ static D3D12MA::Allocation*
     g_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 static void* g_ConstantBufferAddress[FRAME_BUFFER_COUNT];
 
-static std::unordered_map<std::string, std::unique_ptr<Geometry>> g_Geometries;
-static std::unordered_map<std::string, std::unique_ptr<Texture>> g_Textures;
+static std::unordered_map<std::string, Geometry> g_Geometries;
+static std::unordered_map<std::string, Texture> g_Textures;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
 
@@ -345,13 +345,13 @@ void Renderer::LoadAssets()
 
     // TODO: need method + ensure not null
     for (auto& [k, tex] : g_Textures) {
-      tex->textureUploadAllocation->Release();
+      tex.textureUploadAllocation->Release();
     }
 
     // TODO: need method + ensure not null
     for (auto& [k, geom] : g_Geometries) {
-      geom->vBufferUploadHeapAllocation->Release();
-      geom->iBufferUploadHeapAllocation->Release();
+      geom.vBufferUploadHeapAllocation->Release();
+      geom.iBufferUploadHeapAllocation->Release();
     }
   }
 }
@@ -576,15 +576,16 @@ void Renderer::Cleanup()
 
   // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
-    tex->Unload();
+    tex.Unload();
   }
 
   // TODO: need method + ensure not null
   for (auto& [k, geom] : g_Geometries) {
-    geom->Unload();
+    geom.Unload();
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
+  g_PipelineStateObjects[PSO::Terrain].Reset();
   g_RootSignature.Reset();
 
   CloseHandle(g_FenceEvent);
@@ -1248,7 +1249,7 @@ static void LoadMesh3D(Mesh3D* mesh)
     mesh->geometry = CreateGeometry(mesh);
   } else {
     printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
-    mesh->geometry = geomNeedle->second.get();
+    mesh->geometry = &geomNeedle->second;
   }
 
   for (auto& subset : mesh->subsets) {
@@ -1261,7 +1262,7 @@ static void LoadMesh3D(Mesh3D* mesh)
       subset.texture = CreateTexture(fullName);
       printf("CREATE TEXTURE %s\n", fullName.c_str());
     } else {
-      subset.texture = needle->second.get();
+      subset.texture = &needle->second;
       printf("TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
     }
   }
@@ -1269,7 +1270,7 @@ static void LoadMesh3D(Mesh3D* mesh)
 
 static Geometry* CreateGeometry(Mesh3D* mesh)
 {
-  std::unique_ptr<Geometry> geom = std::make_unique<Geometry>();
+  Geometry geom;
 
   // Vertex Buffer
   {
@@ -1290,14 +1291,14 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
         D3D12_RESOURCE_STATE_COPY_DEST,
         nullptr,  // optimized clear value must be null for this type of
                   // resource. used for render targets and depth/stencil buffers
-        &geom->m_VertexBufferAllocation, IID_PPV_ARGS(&vertexBufferPtr)));
+        &geom.m_VertexBufferAllocation, IID_PPV_ARGS(&vertexBufferPtr)));
 
-    geom->m_VertexBuffer.Attach(vertexBufferPtr);
+    geom.m_VertexBuffer.Attach(vertexBufferPtr);
 
     // we can give resource heaps a name so when we debug with the graphics
     // debugger we know what resource we are looking at
-    geom->m_VertexBuffer->SetName(L"Vertex Buffer Resource Heap");
-    geom->m_VertexBufferAllocation->SetName(L"Vertex Buffer Resource Heap");
+    geom.m_VertexBuffer->SetName(L"Vertex Buffer Resource Heap");
+    geom.m_VertexBufferAllocation->SetName(L"Vertex Buffer Resource Heap");
 
     // create upload heap
     // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
@@ -1312,10 +1313,10 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
         // GPU will read from this buffer and copy its contents to the default
         // heap
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-        &geom->vBufferUploadHeapAllocation, IID_PPV_ARGS(&vBufferUploadHeap)));
+        &geom.vBufferUploadHeapAllocation, IID_PPV_ARGS(&vBufferUploadHeap)));
 
     vBufferUploadHeap->SetName(L"Vertex Buffer Upload Resource Heap");
-    geom->vBufferUploadHeapAllocation->SetName(
+    geom.vBufferUploadHeapAllocation->SetName(
         L"Vertex Buffer Upload Resource Heap");
 
     // store vertex buffer in upload heap
@@ -1327,7 +1328,7 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
     UINT64 r =
-        UpdateSubresources(g_CommandList.Get(), geom->m_VertexBuffer.Get(),
+        UpdateSubresources(g_CommandList.Get(), geom.m_VertexBuffer.Get(),
                            vBufferUploadHeap.Get(), 0, 0, 1, &vertexData);
     assert(r);
 
@@ -1335,7 +1336,7 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // buffer state
     D3D12_RESOURCE_BARRIER vbBarrier = {};
     vbBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    vbBarrier.Transition.pResource = geom->m_VertexBuffer.Get();
+    vbBarrier.Transition.pResource = geom.m_VertexBuffer.Get();
     vbBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
     vbBarrier.Transition.StateAfter =
         D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
@@ -1343,10 +1344,10 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     g_CommandList->ResourceBarrier(1, &vbBarrier);
 
     // create a vertex buffer
-    geom->m_VertexBufferView.BufferLocation =
-        geom->m_VertexBuffer->GetGPUVirtualAddress();
-    geom->m_VertexBufferView.StrideInBytes = sizeof(Vertex);
-    geom->m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
+    geom.m_VertexBufferView.BufferLocation =
+        geom.m_VertexBuffer->GetGPUVirtualAddress();
+    geom.m_VertexBufferView.StrideInBytes = sizeof(Vertex);
+    geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
   }
 
   // Index Buffer
@@ -1363,12 +1364,12 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
         D3D12_RESOURCE_STATE_COPY_DEST,  // start in the copy destination state
         nullptr,  // optimized clear value must be null for this type of
                   // resource
-        &geom->m_IndexBufferAllocation, IID_PPV_ARGS(&geom->m_IndexBuffer)));
+        &geom.m_IndexBufferAllocation, IID_PPV_ARGS(&geom.m_IndexBuffer)));
 
     // we can give resource heaps a name so when we debug with the graphics
     // debugger we know what resource we are looking at
-    geom->m_IndexBuffer->SetName(L"Index Buffer Resource Heap");
-    geom->m_IndexBufferAllocation->SetName(
+    geom.m_IndexBuffer->SetName(L"Index Buffer Resource Heap");
+    geom.m_IndexBufferAllocation->SetName(
         L"Index Buffer Resource Heap Allocation");
 
     // create upload heap to upload index buffer
@@ -1381,10 +1382,10 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
         // GPU will read from this buffer and copy its contents to the default
         // heap
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-        &geom->iBufferUploadHeapAllocation, IID_PPV_ARGS(&iBufferUploadHeap)));
+        &geom.iBufferUploadHeapAllocation, IID_PPV_ARGS(&iBufferUploadHeap)));
 
     CHECK_HR(iBufferUploadHeap->SetName(L"Index Buffer Upload Resource Heap"));
-    geom->iBufferUploadHeapAllocation->SetName(
+    geom.iBufferUploadHeapAllocation->SetName(
         L"Index Buffer Upload Resource Heap Allocation");
 
     // store index buffer in upload heap
@@ -1396,7 +1397,7 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
     UINT64 r =
-        UpdateSubresources(g_CommandList.Get(), geom->m_IndexBuffer.Get(),
+        UpdateSubresources(g_CommandList.Get(), geom.m_IndexBuffer.Get(),
                            iBufferUploadHeap.Get(), 0, 0, 1, &indexData);
     assert(r);
 
@@ -1404,33 +1405,33 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // buffer state
     D3D12_RESOURCE_BARRIER ibBarrier = {};
     ibBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    ibBarrier.Transition.pResource = geom->m_IndexBuffer.Get();
+    ibBarrier.Transition.pResource = geom.m_IndexBuffer.Get();
     ibBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
     ibBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_INDEX_BUFFER;
     ibBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     g_CommandList->ResourceBarrier(1, &ibBarrier);
 
     // create a index buffer view
-    geom->m_IndexBufferView.BufferLocation =
-        geom->m_IndexBuffer->GetGPUVirtualAddress();
-    geom->m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
-    geom->m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
+    geom.m_IndexBufferView.BufferLocation =
+        geom.m_IndexBuffer->GetGPUVirtualAddress();
+    geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
+    geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
   }
 
-  g_Geometries[mesh->name] = std::move(geom);
+  g_Geometries[mesh->name] = geom;
 
-  return g_Geometries[mesh->name].get();
+  return &g_Geometries[mesh->name];
 }
 
 static Texture* CreateTexture(std::string name)
 {
-  std::unique_ptr<Texture> tex = std::make_unique<Texture>();
-  tex->Read(name);
+  Texture tex;
+  tex.Read(name);
 
-  tex->texIndex = ++g_TexCount;
+  tex.texIndex = ++g_TexCount;
 
   D3D12_RESOURCE_DESC textureDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
+      CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
   textureDesc.MipLevels = 1;
 
   D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
@@ -1438,11 +1439,11 @@ static Texture* CreateTexture(std::string name)
   CHECK_HR(g_Allocator->CreateResource(
       &textureAllocDesc, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST,
       nullptr,  // pOptimizedClearValue
-      &tex->m_TextureAllocation, IID_PPV_ARGS(&tex->m_Texture)));
+      &tex.m_TextureAllocation, IID_PPV_ARGS(&tex.m_Texture)));
 
   std::wstring wName = ConvertToWstring(name);
-  tex->m_Texture->SetName(wName.c_str());
-  tex->m_TextureAllocation->SetName(wName.c_str());
+  tex.m_Texture->SetName(wName.c_str());
+  tex.m_TextureAllocation->SetName(wName.c_str());
 
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
@@ -1463,22 +1464,22 @@ static Texture* CreateTexture(std::string name)
       &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize),
       D3D12_RESOURCE_STATE_GENERIC_READ,
       nullptr,  // pOptimizedClearValue
-      &tex->textureUploadAllocation, IID_PPV_ARGS(&textureUpload)));
+      &tex.textureUploadAllocation, IID_PPV_ARGS(&textureUpload)));
 
   textureUpload->SetName(L"textureUpload");
-  tex->textureUploadAllocation->SetName(L"textureUpload");
+  tex.textureUploadAllocation->SetName(L"textureUpload");
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
-  textureSubresourceData.pData = tex->pixels.data();
-  textureSubresourceData.RowPitch = tex->BytesPerRow();
-  textureSubresourceData.SlicePitch = tex->ImageSize();
+  textureSubresourceData.pData = tex.pixels.data();
+  textureSubresourceData.RowPitch = tex.BytesPerRow();
+  textureSubresourceData.SlicePitch = tex.ImageSize();
 
-  UpdateSubresources(g_CommandList.Get(), tex->m_Texture.Get(),
+  UpdateSubresources(g_CommandList.Get(), tex.m_Texture.Get(),
                      textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
 
   D3D12_RESOURCE_BARRIER textureBarrier = {};
   textureBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  textureBarrier.Transition.pResource = tex->m_Texture.Get();
+  textureBarrier.Transition.pResource = tex.m_Texture.Get();
   textureBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
   textureBarrier.Transition.StateAfter =
       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1498,13 +1499,13 @@ static Texture* CreateTexture(std::string name)
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     CD3DX12_CPU_DESCRIPTOR_HANDLE descHandle(
         g_MainDescriptorHeap[i]->GetCPUDescriptorHandleForHeapStart(),
-        tex->texIndex, cbvSrvDescriptorSize);
+        tex.texIndex, cbvSrvDescriptorSize);
 
-    g_Device->CreateShaderResourceView(tex->m_Texture.Get(), &srvDesc,
+    g_Device->CreateShaderResourceView(tex.m_Texture.Get(), &srvDesc,
                                        descHandle);
   }
 
-  g_Textures[name] = std::move(tex);
+  g_Textures[name] = tex;
 
-  return g_Textures[name].get();
+  return &g_Textures[name];
 }
