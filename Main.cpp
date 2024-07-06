@@ -69,15 +69,15 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
   }
 
   // variable name should not same as class name
-  std::unique_ptr<DXGIUsage> dxgiUsage = std::make_unique<DXGIUsage>();
-  dxgiUsage->Init();
+  DXGIUsage dxgiUsage;
+  dxgiUsage.Init();
 
   if (g_CommandLineParameters.m_List) {
-    dxgiUsage->PrintAdapterList();
+    dxgiUsage.PrintAdapterList();
     return (int)ExitCode::GPUList;
   }
 
-  Renderer::InitAdapter(dxgiUsage.get(),
+  Renderer::InitAdapter(&dxgiUsage,
                         g_CommandLineParameters.m_GPUSelection);
   return Win32Application::Run(hInstance, nCmdShow);
 }
