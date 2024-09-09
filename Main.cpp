@@ -68,7 +68,6 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     return (int)ExitCode::Help;
   }
 
-  // variable name should not same as class name
   DXGIUsage dxgiUsage;
   dxgiUsage.Init();
 
@@ -77,8 +76,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     return (int)ExitCode::GPUList;
   }
 
-  Renderer::InitAdapter(&dxgiUsage,
-                        g_CommandLineParameters.m_GPUSelection);
+  IDXGIAdapter1* adapter =
+      dxgiUsage.CreateAdapter(g_CommandLineParameters.m_GPUSelection);
+  Renderer::InitAdapter(&dxgiUsage, adapter);
   return Win32Application::Run(hInstance, nCmdShow);
 }
 

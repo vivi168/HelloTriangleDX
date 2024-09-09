@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <wrl.h>
+#include <Shlwapi.h>
 
 // Note that while ComPtr is used to manage the lifetime of resources on the
 // CPU, it has no understanding of the lifetime of resources on the GPU. Apps
@@ -279,3 +280,80 @@ static std::wstring ConvertToWstring(std::string in)
   std::wcout << L"wide string:" << out << "\n";
   return out;
 }
+
+struct GPUSelection {
+  UINT32 Index = UINT32_MAX;
+  std::wstring Substring;
+};
+
+class DXGIUsage
+{
+public:
+  void Init() { CHECK_HR(CreateDXGIFactory1(IID_PPV_ARGS(&m_DXGIFactory))); }
+
+  IDXGIFactory4* GetDXGIFactory() const { return m_DXGIFactory; }
+
+  void PrintAdapterList() const
+  {
+    UINT index = 0;
+    IDXGIAdapter1* adapter;
+
+    while (m_DXGIFactory->EnumAdapters1(index, &adapter) !=
+           DXGI_ERROR_NOT_FOUND) {
+      DXGI_ADAPTER_DESC1 desc;
+      adapter->GetDesc1(&desc);
+
+      const bool isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+      const wchar_t* const suffix = isSoftware ? L" (SOFTWARE)" : L"";
+      wprintf(L"Adapter %u: %s%s\n", index, desc.Description, suffix);
+
+      index++;
+    }
+  }
+  // If failed, returns null pointer.
+  IDXGIAdapter1* CreateAdapter(const GPUSelection& gpuSelection) const
+  {
+    IDXGIAdapter1* adapter = NULL;
+
+    if (gpuSelection.Index != UINT32_MAX) {
+      // Cannot specify both index and name.
+      if (!gpuSelection.Substring.empty()) {
+        return NULL;
+      }
+
+      CHECK_HR(m_DXGIFactory->EnumAdapters1(gpuSelection.Index, &adapter));
+      return adapter;
+    }
+
+    if (!gpuSelection.Substring.empty()) {
+      IDXGIAdapter1* tmpAdapter;
+
+      for (UINT i = 0;
+           m_DXGIFactory->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND;
+           i++) {
+        DXGI_ADAPTER_DESC1 desc;
+        tmpAdapter->GetDesc1(&desc);
+
+        if (StrStrI(desc.Description, gpuSelection.Substring.c_str())) {
+          // Second matching adapter found - error.
+          if (adapter) {
+            return NULL;
+          }
+
+          // First matching adapter found.
+          adapter = tmpAdapter;
+        }
+      }
+
+      // Found or not, return it.
+      return adapter;
+    }
+
+    // Select first one.
+    m_DXGIFactory->EnumAdapters1(0, &adapter);
+    return adapter;
+  }
+
+private:
+  IDXGIFactory4* m_DXGIFactory;
+};

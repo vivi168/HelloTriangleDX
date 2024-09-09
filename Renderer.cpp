@@ -6,83 +6,7 @@
 #include "d3dx12_resource_helpers.h"
 #include "d3dx12_barriers.h"
 
-#include <Shlwapi.h>
-#include <atomic>
-
 using namespace DirectX;
-
-void DXGIUsage::Init()
-{
-  CoInitialize(NULL);
-
-  CHECK_HR(CreateDXGIFactory1(IID_PPV_ARGS(&m_DXGIFactory)));
-}
-
-void DXGIUsage::PrintAdapterList() const
-{
-  UINT index = 0;
-  ComPtr<IDXGIAdapter1> adapter;
-
-  while (m_DXGIFactory->EnumAdapters1(index, &adapter) !=
-         DXGI_ERROR_NOT_FOUND) {
-    DXGI_ADAPTER_DESC1 desc;
-    adapter->GetDesc1(&desc);
-
-    const bool isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
-    const wchar_t* const suffix = isSoftware ? L" (SOFTWARE)" : L"";
-    wprintf(L"Adapter %u: %s%s\n", index, desc.Description, suffix);
-
-    adapter.Reset();
-    index++;
-  }
-}
-
-ComPtr<IDXGIAdapter1> DXGIUsage::CreateAdapter(
-    const GPUSelection& GPUSelection) const
-{
-  ComPtr<IDXGIAdapter1> adapter;
-
-  if (GPUSelection.Index != UINT32_MAX) {
-    // Cannot specify both index and name.
-    if (!GPUSelection.Substring.empty()) {
-      return adapter;
-    }
-
-    CHECK_HR(m_DXGIFactory->EnumAdapters1(GPUSelection.Index, &adapter));
-    return adapter;
-  }
-
-  if (!GPUSelection.Substring.empty()) {
-    ComPtr<IDXGIAdapter1> tmpAdapter;
-
-    for (UINT i = 0;
-         m_DXGIFactory->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND;
-         i++) {
-      DXGI_ADAPTER_DESC1 desc;
-      tmpAdapter->GetDesc1(&desc);
-
-      if (StrStrI(desc.Description, GPUSelection.Substring.c_str())) {
-        // Second matching adapter found - error.
-        if (adapter) {
-          adapter.Reset();
-          return adapter;
-        }
-
-        // First matching adapter found.
-        adapter = std::move(tmpAdapter);
-      } else {
-        tmpAdapter.Reset();
-      }
-    }
-
-    // Found or not, return it.
-    return adapter;
-  }
-
-  // Select first one.
-  m_DXGIFactory->EnumAdapters1(0, &adapter);
-  return adapter;
-}
 
 // ========== Data types
 
@@ -305,13 +229,13 @@ void Renderer::InitWindow(UINT width, UINT height, std::wstring name)
   g_AspectRatio = static_cast<float>(width) / static_cast<float>(height);
 }
 
-void Renderer::InitAdapter(DXGIUsage* dxgiUsage, GPUSelection gpuSelection)
+void Renderer::InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
 {
   g_DXGIUsage = dxgiUsage;
   assert(g_DXGIUsage);
 
-  g_Adapter = g_DXGIUsage->CreateAdapter(gpuSelection);
-  CHECK_BOOL(g_Adapter);
+  g_Adapter = adapter;
+  assert(g_Adapter);
 
   CHECK_HR(g_Adapter->GetDesc1(&g_AdapterDesc));
 }
@@ -1384,7 +1308,7 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
     UINT64 r = UpdateSubresources(g_CommandList.Get(), geom.m_IndexBuffer.Get(),
-                           iBufferUploadHeap.Get(), 0, 0, 1, &indexData);
+                                  iBufferUploadHeap.Get(), 0, 0, 1, &indexData);
     assert(r);
 
     // transition the index buffer data from copy destination state to index
