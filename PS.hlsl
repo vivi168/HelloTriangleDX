@@ -16,7 +16,7 @@ float4 main(VS_OUTPUT input) : SV_TARGET
   
   float4 color2 = t0.Sample(s0, input.texCoord) * normalColor;
     
-  if (color2.a < 0.01)
+  if (color2.a == 0)
     discard;
 
   return color2;

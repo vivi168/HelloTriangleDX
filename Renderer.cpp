@@ -4,6 +4,7 @@
 #include "Renderer.h"
 #include "d3dx12_root_signature.h"
 #include "d3dx12_resource_helpers.h"
+#include "d3dx12_barriers.h"
 
 #include <Shlwapi.h>
 #include <atomic>
@@ -405,6 +406,10 @@ void Renderer::Update(float time)
   }
 }
 
+// TODO: render ColliderSurfaces
+// DrawIndexed
+// Need to add a new PSO
+// Add a PSO helper struct ?
 void Renderer::Render()
 {
   // swap the current rtv buffer index so we draw on the correct buffer
@@ -436,16 +441,9 @@ void Renderer::Render()
 
   // transition the "g_FrameIndex" render target from the present state to the
   // render target state so the command list draws to it starting from here
-  D3D12_RESOURCE_BARRIER presentToRenderTargetBarrier = {};
-  presentToRenderTargetBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  presentToRenderTargetBarrier.Transition.pResource =
-      g_RenderTargets[g_FrameIndex].Get();
-  presentToRenderTargetBarrier.Transition.StateBefore =
-      D3D12_RESOURCE_STATE_PRESENT;
-  presentToRenderTargetBarrier.Transition.StateAfter =
-      D3D12_RESOURCE_STATE_RENDER_TARGET;
-  presentToRenderTargetBarrier.Transition.Subresource =
-      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  auto presentToRenderTargetBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+      g_RenderTargets[g_FrameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT,
+      D3D12_RESOURCE_STATE_RENDER_TARGET);
   g_CommandList->ResourceBarrier(1, &presentToRenderTargetBarrier);
 
   // here we again get the handle to our current render target view so we can
@@ -521,16 +519,9 @@ void Renderer::Render()
   // the present state. If the debug layer is enabled, you will receive a
   // warning if present is called on the render target when it's not in the
   // present state
-  D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier = {};
-  renderTargetToPresentBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  renderTargetToPresentBarrier.Transition.pResource =
-      g_RenderTargets[g_FrameIndex].Get();
-  renderTargetToPresentBarrier.Transition.StateBefore =
-      D3D12_RESOURCE_STATE_RENDER_TARGET;
-  renderTargetToPresentBarrier.Transition.StateAfter =
-      D3D12_RESOURCE_STATE_PRESENT;
-  renderTargetToPresentBarrier.Transition.Subresource =
-      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  auto renderTargetToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+      g_RenderTargets[g_FrameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+      D3D12_RESOURCE_STATE_PRESENT);
   g_CommandList->ResourceBarrier(1, &renderTargetToPresentBarrier);
 
   CHECK_HR(g_CommandList->Close());
@@ -1334,14 +1325,10 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
 
     // transition the vertex buffer data from copy destination state to vertex
     // buffer state
-    D3D12_RESOURCE_BARRIER vbBarrier = {};
-    vbBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    vbBarrier.Transition.pResource = geom.m_VertexBuffer.Get();
-    vbBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-    vbBarrier.Transition.StateAfter =
-        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-    vbBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    g_CommandList->ResourceBarrier(1, &vbBarrier);
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        geom.m_VertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    g_CommandList->ResourceBarrier(1, &barrier);
 
     // create a vertex buffer
     geom.m_VertexBufferView.BufferLocation =
@@ -1396,20 +1383,16 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
 
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
-    UINT64 r =
-        UpdateSubresources(g_CommandList.Get(), geom.m_IndexBuffer.Get(),
+    UINT64 r = UpdateSubresources(g_CommandList.Get(), geom.m_IndexBuffer.Get(),
                            iBufferUploadHeap.Get(), 0, 0, 1, &indexData);
     assert(r);
 
     // transition the index buffer data from copy destination state to index
     // buffer state
-    D3D12_RESOURCE_BARRIER ibBarrier = {};
-    ibBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    ibBarrier.Transition.pResource = geom.m_IndexBuffer.Get();
-    ibBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-    ibBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_INDEX_BUFFER;
-    ibBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    g_CommandList->ResourceBarrier(1, &ibBarrier);
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        geom.m_IndexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    g_CommandList->ResourceBarrier(1, &barrier);
 
     // create a index buffer view
     geom.m_IndexBufferView.BufferLocation =
@@ -1477,15 +1460,10 @@ static Texture* CreateTexture(std::string name)
   UpdateSubresources(g_CommandList.Get(), tex.m_Texture.Get(),
                      textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
 
-  D3D12_RESOURCE_BARRIER textureBarrier = {};
-  textureBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  textureBarrier.Transition.pResource = tex.m_Texture.Get();
-  textureBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-  textureBarrier.Transition.StateAfter =
-      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-  textureBarrier.Transition.Subresource =
-      D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-  g_CommandList->ResourceBarrier(1, &textureBarrier);
+  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+      tex.m_Texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  g_CommandList->ResourceBarrier(1, &barrier);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
