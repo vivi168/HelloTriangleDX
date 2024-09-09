@@ -21,7 +21,7 @@ struct Subset {
 };
 
 struct Mesh3D {
-  struct Header {
+  struct {
     uint32_t numVerts;
     uint32_t numIndices;
     uint32_t numSubsets;

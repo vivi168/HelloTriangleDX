@@ -10,8 +10,6 @@ using namespace DirectX;
 
 // ========== Data types
 
-enum class PSO { Basic, Terrain };
-
 struct Geometry {
   ComPtr<ID3D12Resource> m_VertexBuffer;
   D3D12MA::Allocation* m_VertexBufferAllocation;
@@ -37,7 +35,7 @@ struct Geometry {
 };
 
 struct Texture {
-  struct Header {
+  struct {
     uint16_t width;
     uint16_t height;
   } header;
@@ -59,7 +57,7 @@ struct Texture {
 
     name = filename;
 
-    fread(&header, sizeof(Header), 1, fp);
+    fread(&header, sizeof(header), 1, fp);
     pixels.resize(ImageSize());
     fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
   }
@@ -83,6 +81,10 @@ struct Texture {
 
   uint64_t ImageSize() const { return Height() * BytesPerRow(); }
 };
+
+namespace Renderer
+{
+enum class PSO { Basic, Terrain, ColliderSurface };
 
 struct Scene {
   struct SceneNode {
@@ -218,7 +220,7 @@ static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
 
-void Renderer::InitWindow(UINT width, UINT height, std::wstring name)
+void InitWindow(UINT width, UINT height, std::wstring name)
 {
   WCHAR assetsPath[512];
   GetAssetsPath(assetsPath, _countof(assetsPath));
@@ -229,7 +231,7 @@ void Renderer::InitWindow(UINT width, UINT height, std::wstring name)
   g_AspectRatio = static_cast<float>(width) / static_cast<float>(height);
 }
 
-void Renderer::InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
+void InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
 {
   g_DXGIUsage = dxgiUsage;
   assert(g_DXGIUsage);
@@ -240,13 +242,13 @@ void Renderer::InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
   CHECK_HR(g_Adapter->GetDesc1(&g_AdapterDesc));
 }
 
-void Renderer::Init()
+void Init()
 {
   InitD3D();
   InitFrameResources();
 }
 
-void Renderer::LoadAssets()
+void LoadAssets()
 {
   CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
 
@@ -281,7 +283,7 @@ void Renderer::LoadAssets()
   }
 }
 
-void Renderer::Update(float time)
+void Update(float time)
 {
   // Per frame constant buffer
   {
@@ -334,7 +336,7 @@ void Renderer::Update(float time)
 // DrawIndexed
 // Need to add a new PSO
 // Add a PSO helper struct ?
-void Renderer::Render()
+void Render()
 {
   // swap the current rtv buffer index so we draw on the correct buffer
   g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
@@ -469,7 +471,7 @@ void Renderer::Render()
   CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
 }
 
-void Renderer::Cleanup()
+void Cleanup()
 {
   ImGui_ImplDX12_Shutdown();
   ImGui_ImplWin32_Shutdown();
@@ -540,7 +542,7 @@ void Renderer::Cleanup()
   g_SwapChain.Reset();
 }
 
-void Renderer::PrintStatsString()
+void PrintStatsString()
 {
   WCHAR* statsString = NULL;
   g_Allocator->BuildStatsString(&statsString, TRUE);
@@ -548,15 +550,15 @@ void Renderer::PrintStatsString()
   g_Allocator->FreeStatsString(statsString);
 }
 
-UINT Renderer::GetWidth() { return g_Width; }
+UINT GetWidth() { return g_Width; }
 
-UINT Renderer::GetHeight() { return g_Height; }
+UINT GetHeight() { return g_Height; }
 
-const WCHAR* Renderer::GetTitle() { return g_Title.c_str(); }
+const WCHAR* GetTitle() { return g_Title.c_str(); }
 
-void Renderer::SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
+void SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
 
-void Renderer::AppendToScene(Model3D* model)
+void AppendToScene(Model3D* model)
 {
   size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
 
@@ -1411,3 +1413,4 @@ static Texture* CreateTexture(std::string name)
 
   return &g_Textures[name];
 }
+}  // namespace Renderer

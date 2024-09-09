@@ -11,7 +11,7 @@ void Mesh3D::Read(std::string filename)
 
   name = filename;
 
-  fread(&header, sizeof(Header), 1, fp);
+  fread(&header, sizeof(header), 1, fp);
 
   vertices.resize(header.numVerts);
   indices.resize(header.numIndices);
