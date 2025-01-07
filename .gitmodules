@@ -1,12 +1,12 @@
 [submodule "imgui"]
-	path = imgui
+	path = third_party/imgui
 	url = https://github.com/ocornut/imgui
 [submodule "D3D12MemoryAllocator"]
-	path = D3D12MemoryAllocator
+	path = third_party/D3D12MemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator
 [submodule "DirectX-Headers"]
-	path = DirectX-Headers
+	path = third_party/DirectX-Headers
 	url = https://github.com/microsoft/DirectX-Headers
 [submodule "FastNoise2"]
-	path = FastNoise2
+	path = third_party/FastNoise2
 	url = https://github.com/Auburn/FastNoise2
