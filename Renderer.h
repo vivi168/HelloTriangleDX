@@ -1,12 +1,7 @@
 #pragma once
 
-#include "D3D12MemAlloc.h"
-#include "Mesh.h"
-#include "Camera.h"
-#include "Terrain.h"
-
-#include <list>
-#include <unordered_map>
+struct Camera;
+struct Model3D;
 
 namespace Renderer
 {

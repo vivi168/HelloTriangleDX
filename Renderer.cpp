@@ -1,10 +1,16 @@
 #include "stdafx.h"
 
-#include "Win32Application.h"
 #include "Renderer.h"
+#include "D3D12MemAlloc.h"
+#include "Win32Application.h"
+
 #include "d3dx12_root_signature.h"
 #include "d3dx12_resource_helpers.h"
 #include "d3dx12_barriers.h"
+
+#include "Camera.h"
+#include "Mesh.h"
+#include "Terrain.h"
 
 using namespace DirectX;
 
