@@ -13,6 +13,7 @@
 #include "Terrain.h"
 
 using namespace DirectX;
+using Microsoft::WRL::ComPtr;
 
 // ========== Data types
 

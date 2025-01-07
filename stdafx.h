@@ -20,6 +20,7 @@
 #include <fstream>
 #include <list>
 #include <vector>
+#include <unordered_map>
 #include <memory>
 #include <algorithm>
 #include <numeric>
