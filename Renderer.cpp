@@ -50,11 +50,12 @@ struct Texture {
   std::vector<uint8_t> pixels;
   std::string name;
 
-  ComPtr<ID3D12Resource> m_Texture;
-  D3D12MA::Allocation* m_TextureAllocation = nullptr;
+  ComPtr<ID3D12Resource> resource;
+  D3D12MA::Allocation* textureAllocation = nullptr;
   D3D12MA::Allocation* textureUploadAllocation = nullptr;
 
-  unsigned int texIndex;
+  D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
+  D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle;
 
   void Read(std::string filename)
   {
@@ -71,9 +72,9 @@ struct Texture {
 
   void Unload()
   {
-    m_Texture.Reset();
-    m_TextureAllocation->Release();
-    m_TextureAllocation = nullptr;
+    resource.Reset();
+    textureAllocation->Release();
+    textureAllocation = nullptr;
   }
 
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
@@ -115,56 +116,52 @@ struct ObjectCB1_VS {
   XMFLOAT4X4 NormalMatrix;
 };
 
-struct FrameContext {
-  ComPtr<ID3D12CommandAllocator> CommandAllocator;
-  UINT64 FenceValue;
-};
-
-// Simple free list based allocator
-struct ExampleDescriptorHeapAllocator {
-  ID3D12DescriptorHeap* Heap = nullptr;
-  D3D12_DESCRIPTOR_HEAP_TYPE HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-  D3D12_CPU_DESCRIPTOR_HANDLE HeapStartCpu;
-  D3D12_GPU_DESCRIPTOR_HANDLE HeapStartGpu;
-  UINT HeapHandleIncrement;
-  std::vector<int> FreeIndices;
-
+struct DescriptorHeapListAllocator {
   void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
   {
-    IM_ASSERT(Heap == nullptr && FreeIndices.empty());
-    Heap = heap;
+    IM_ASSERT(m_Heap == nullptr && m_FreeIndices.empty());
+    m_Heap = heap;
     D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
-    HeapType = desc.Type;
-    HeapStartCpu = Heap->GetCPUDescriptorHandleForHeapStart();
-    HeapStartGpu = Heap->GetGPUDescriptorHandleForHeapStart();
-    HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(HeapType);
-    FreeIndices.reserve((int)desc.NumDescriptors);
-    for (int n = desc.NumDescriptors; n > 0; n--) FreeIndices.push_back(n);
+    m_HeapType = desc.Type;
+    m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
+    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
+    m_HeapHandleIncrement =
+        device->GetDescriptorHandleIncrementSize(m_HeapType);
+    m_FreeIndices.reserve((int)desc.NumDescriptors);
+    for (int n = desc.NumDescriptors; n > 0; n--) m_FreeIndices.push_back(n);
   }
   void Destroy()
   {
-    Heap = nullptr;
-    FreeIndices.clear();
+    m_Heap = nullptr;
+    m_FreeIndices.clear();
   }
-  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle,
-             D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)
+  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
+             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
   {
-    assert(FreeIndices.size() > 0);
-    int idx = FreeIndices.back();
-    FreeIndices.pop_back();
-    out_cpu_desc_handle->ptr = HeapStartCpu.ptr + (idx * HeapHandleIncrement);
-    out_gpu_desc_handle->ptr = HeapStartGpu.ptr + (idx * HeapHandleIncrement);
+    assert(m_FreeIndices.size() > 0);
+    int idx = m_FreeIndices.back();
+    m_FreeIndices.pop_back();
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+    outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
   }
-  void Free(D3D12_CPU_DESCRIPTOR_HANDLE out_cpu_desc_handle,
-            D3D12_GPU_DESCRIPTOR_HANDLE out_gpu_desc_handle)
+  void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
+            D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
   {
-    int cpu_idx = (int)((out_cpu_desc_handle.ptr - HeapStartCpu.ptr) /
-                        HeapHandleIncrement);
-    int gpu_idx = (int)((out_gpu_desc_handle.ptr - HeapStartGpu.ptr) /
-                        HeapHandleIncrement);
+    int cpu_idx = (int)((cpuDescHandle.ptr - m_HeapStartCpu.ptr) /
+                        m_HeapHandleIncrement);
+    int gpu_idx = (int)((gpuDescHandle.ptr - m_HeapStartGpu.ptr) /
+                        m_HeapHandleIncrement);
     assert(cpu_idx == gpu_idx);
-    FreeIndices.push_back(cpu_idx);
+    m_FreeIndices.push_back(cpu_idx);
   }
+
+private:
+  ID3D12DescriptorHeap* m_Heap = nullptr;
+  D3D12_DESCRIPTOR_HEAP_TYPE m_HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
+  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
+  UINT m_HeapHandleIncrement;
+  std::vector<int> m_FreeIndices;
 };
 
 // ========== Constants
@@ -202,7 +199,6 @@ static Texture* CreateTexture(std::string name);
 // ========== Global variables
 
 static unsigned int g_CbNextIndex = 0;
-static unsigned int g_TexCount = 1;  // imgui texture is 0
 
 static UINT g_Width;
 static UINT g_Height;
@@ -258,7 +254,7 @@ static D3D12MA::Allocation* g_DepthStencilAllocation;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
 static ID3D12DescriptorHeap* g_SrvDescriptorHeap;
-static ExampleDescriptorHeapAllocator g_pd3dSrvDescHeapAlloc;
+static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
 
 // PSO
 
@@ -462,8 +458,6 @@ void Render()
 
   D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart =
       g_SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-  const UINT cbvSrvDescriptorSize = g_Device->GetDescriptorHandleIncrementSize(
-      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
   g_CommandList->SetGraphicsRootDescriptorTable(0, cbvSrvHeapStart);
 
@@ -487,9 +481,8 @@ void Render()
                node.cbIndex);
 
     for (const auto& subset : mesh->subsets) {
-      CD3DX12_GPU_DESCRIPTOR_HANDLE cbvSrvHandle(
-          cbvSrvHeapStart, subset.texture->texIndex, cbvSrvDescriptorSize);
-      g_CommandList->SetGraphicsRootDescriptorTable(2, cbvSrvHandle);
+      g_CommandList->SetGraphicsRootDescriptorTable(
+          2, subset.texture->srvGpuDescHandle);
       g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
     }
   }
@@ -887,7 +880,7 @@ static void InitFrameResources()
   CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc,
                                           IID_PPV_ARGS(&g_SrvDescriptorHeap)));
 
-  g_pd3dSrvDescHeapAlloc.Create(g_Device.Get(), g_SrvDescriptorHeap);
+  g_SrvDescHeapAlloc.Create(g_Device.Get(), g_SrvDescriptorHeap);
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
@@ -901,14 +894,14 @@ static void InitFrameResources()
   // descriptor, future versions will need to allocate more)
   initInfo.SrvDescriptorHeap = g_SrvDescriptorHeap;
   initInfo.SrvDescriptorAllocFn =
-      [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle,
-         D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle) {
-        return g_pd3dSrvDescHeapAlloc.Alloc(out_cpu_handle, out_gpu_handle);
+      [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
+         D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
+        return g_SrvDescHeapAlloc.Alloc(outCpuHandle, outGpuHandle);
       };
   initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
-                                    D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle,
-                                    D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) {
-    return g_pd3dSrvDescHeapAlloc.Free(cpu_handle, gpu_handle);
+                                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
+                                    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
+    return g_SrvDescHeapAlloc.Free(cpuHandle, gpuHandle);
   };
   ImGui_ImplDX12_Init(&initInfo);
 
@@ -1428,8 +1421,6 @@ static Texture* CreateTexture(std::string name)
   Texture tex;
   tex.Read(name);
 
-  tex.texIndex = ++g_TexCount;
-
   D3D12_RESOURCE_DESC textureDesc =
       CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
   textureDesc.MipLevels = 1;
@@ -1439,11 +1430,11 @@ static Texture* CreateTexture(std::string name)
   CHECK_HR(g_Allocator->CreateResource(
       &textureAllocDesc, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST,
       nullptr,  // pOptimizedClearValue
-      &tex.m_TextureAllocation, IID_PPV_ARGS(&tex.m_Texture)));
+      &tex.textureAllocation, IID_PPV_ARGS(&tex.resource)));
 
   std::wstring wName = ConvertToWstring(name);
-  tex.m_Texture->SetName(wName.c_str());
-  tex.m_TextureAllocation->SetName(wName.c_str());
+  tex.resource->SetName(wName.c_str());
+  tex.textureAllocation->SetName(wName.c_str());
 
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
@@ -1474,11 +1465,11 @@ static Texture* CreateTexture(std::string name)
   textureSubresourceData.RowPitch = tex.BytesPerRow();
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
-  UpdateSubresources(g_CommandList.Get(), tex.m_Texture.Get(),
+  UpdateSubresources(g_CommandList.Get(), tex.resource.Get(),
                      textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
 
   auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      tex.m_Texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+      tex.resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   g_CommandList->ResourceBarrier(1, &barrier);
 
@@ -1488,17 +1479,10 @@ static Texture* CreateTexture(std::string name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  const UINT cbvSrvDescriptorSize = g_Device->GetDescriptorHandleIncrementSize(
-      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle, &tex.srvGpuDescHandle);
 
-  {
-    CD3DX12_CPU_DESCRIPTOR_HANDLE descHandle(
-        g_SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), tex.texIndex,
-        cbvSrvDescriptorSize);
-
-    g_Device->CreateShaderResourceView(tex.m_Texture.Get(), &srvDesc,
-                                       descHandle);
-  }
+  g_Device->CreateShaderResourceView(tex.resource.Get(), &srvDesc,
+                                     tex.srvCpuDescHandle);
 
   g_Textures[name] = tex;
 
