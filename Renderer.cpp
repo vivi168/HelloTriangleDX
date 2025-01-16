@@ -147,10 +147,10 @@ struct DescriptorHeapListAllocator {
   void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
             D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
   {
-    int cpu_idx = (int)((cpuDescHandle.ptr - m_HeapStartCpu.ptr) /
-                        m_HeapHandleIncrement);
-    int gpu_idx = (int)((gpuDescHandle.ptr - m_HeapStartGpu.ptr) /
-                        m_HeapHandleIncrement);
+    int cpu_idx =
+        (int)((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
+    int gpu_idx =
+        (int)((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
     assert(cpu_idx == gpu_idx);
     m_FreeIndices.push_back(cpu_idx);
   }
@@ -270,6 +270,10 @@ static ComPtr<ID3D12Resource> g_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
 static D3D12MA::Allocation*
     g_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
 static void* g_ConstantBufferAddress[FRAME_BUFFER_COUNT];
+static D3D12_CPU_DESCRIPTOR_HANDLE
+    g_ConstantBufferSrvCpuDescHandle[FRAME_BUFFER_COUNT];
+static D3D12_GPU_DESCRIPTOR_HANDLE
+    g_ConstantBufferSrvGpuDescHandle[FRAME_BUFFER_COUNT];
 
 static std::unordered_map<std::string, Geometry> g_Geometries;
 static std::unordered_map<std::string, Texture> g_Textures;
@@ -456,10 +460,8 @@ void Render()
   ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap};
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-  D3D12_GPU_DESCRIPTOR_HANDLE cbvSrvHeapStart =
-      g_SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-
-  g_CommandList->SetGraphicsRootDescriptorTable(0, cbvSrvHeapStart);
+  g_CommandList->SetGraphicsRootDescriptorTable(
+      0, g_ConstantBufferSrvGpuDescHandle[g_FrameIndex]);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
@@ -542,6 +544,8 @@ void Cleanup()
 
   // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
+    // TODO: do this from Unload()
+    g_SrvDescHeapAlloc.Free(tex.srvCpuDescHandle, tex.srvGpuDescHandle);
     tex.Unload();
   }
 
@@ -969,8 +973,11 @@ static void InitFrameResources()
           g_ConstantBufferUploadHeap[i]->GetGPUVirtualAddress();
       cbvDesc.SizeInBytes = AlignUp<UINT>(sizeof(FrameCB0_ALL), 256);
 
-      g_Device->CreateConstantBufferView(
-          &cbvDesc, g_SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+      // TODO: Alloc Here?
+      g_SrvDescHeapAlloc.Alloc(&g_ConstantBufferSrvCpuDescHandle[i],
+                               &g_ConstantBufferSrvGpuDescHandle[i]);
+      g_Device->CreateConstantBufferView(&cbvDesc,
+                                         g_ConstantBufferSrvCpuDescHandle[i]);
 
       CHECK_HR(g_ConstantBufferUploadHeap[i]->Map(0, &EMPTY_RANGE,
                                                   &g_ConstantBufferAddress[i]));
