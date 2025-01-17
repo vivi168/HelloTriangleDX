@@ -116,10 +116,31 @@ struct ObjectCB1_VS {
   XMFLOAT4X4 NormalMatrix;
 };
 
+struct FrameContext {
+  ComPtr<ID3D12Resource> renderTarget;
+
+  ComPtr<ID3D12CommandAllocator> commandAllocator;
+  ComPtr<ID3D12Fence> fence;
+  UINT64 fenceValue;
+
+  // TODO: struct to hold these?
+  ComPtr<ID3D12Resource> objectCbUploadHeap;
+  D3D12MA::Allocation* objectCbUploadHeapAllocation;
+  void* objectCbAddress;
+
+  // TODO: struct to hold these?
+  ComPtr<ID3D12Resource> constantBufferUploadHeap;
+  D3D12MA::Allocation* constantBufferUploadAllocation;
+  void* constantBufferAddress;
+
+  D3D12_CPU_DESCRIPTOR_HANDLE constantBufferSrvCpuDescHandle;
+  D3D12_GPU_DESCRIPTOR_HANDLE constantBufferSrvGpuDescHandle;
+};
+
 struct DescriptorHeapListAllocator {
   void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
   {
-    IM_ASSERT(m_Heap == nullptr && m_FreeIndices.empty());
+    assert(m_Heap == nullptr && m_FreeIndices.empty());
     m_Heap = heap;
     D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
     m_HeapType = desc.Type;
@@ -188,7 +209,7 @@ static const D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 static void InitD3D();
 static void InitFrameResources();
-static void WaitForFrame(size_t frameIndex);
+static void WaitForFrame(FrameContext* ctx);
 static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
@@ -222,58 +243,27 @@ static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks;
 static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
 static ComPtr<ID3D12CommandQueue> g_CommandQueue;
-// we want enough allocators for each buffer * number of threads (we only have
-// one thread)
-static ComPtr<ID3D12CommandAllocator> g_CommandAllocators[FRAME_BUFFER_COUNT];
-// a command list we can record commands into, then execute them to render the
-// frame
 static ComPtr<ID3D12GraphicsCommandList> g_CommandList;
 
-// Synchronization objects.
-// an object that is locked while our command list is being executed by the
-// gpu. We need as many as we have allocators (more if we want to know when
-// the gpu is finished with an asset)
-static ComPtr<ID3D12Fence> g_Fences[FRAME_BUFFER_COUNT];
-// a handle to an event when our g_Fences is unlocked by the gpu
+static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
+static UINT g_FrameIndex;
 static HANDLE g_FenceEvent;
-// this value is incremented each frame. each g_Fences will have its own value
-static UINT64 g_FenceValues[FRAME_BUFFER_COUNT];
-static UINT g_FrameIndex;  // current rtv we are on
 
 // Resources
-// a descriptor heap to hold resources like the render targets
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
-// number of render targets equal to buffer count
-static ComPtr<ID3D12Resource> g_RenderTargets[FRAME_BUFFER_COUNT];
-// size of the rtv descriptor on the g_Device (all front and back buffers will
-// be the same size)
 static UINT g_RtvDescriptorSize;
 
 static ComPtr<ID3D12Resource> g_DepthStencilBuffer;
 static D3D12MA::Allocation* g_DepthStencilAllocation;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
-static ID3D12DescriptorHeap* g_SrvDescriptorHeap;
+static ID3D12DescriptorHeap* g_SrvDescriptorHeap;  // TODO: ComPtr?
 static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
 
 // PSO
-
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>>
     g_PipelineStateObjects;
 static ComPtr<ID3D12RootSignature> g_RootSignature;
-
-static D3D12MA::Allocation* g_ObjectCbUploadHeapAllocations[FRAME_BUFFER_COUNT];
-static ComPtr<ID3D12Resource> g_ObjectCbUploadHeaps[FRAME_BUFFER_COUNT];
-static void* g_ObjectCbAddress[FRAME_BUFFER_COUNT];
-
-static ComPtr<ID3D12Resource> g_ConstantBufferUploadHeap[FRAME_BUFFER_COUNT];
-static D3D12MA::Allocation*
-    g_ConstantBufferUploadAllocation[FRAME_BUFFER_COUNT];
-static void* g_ConstantBufferAddress[FRAME_BUFFER_COUNT];
-static D3D12_CPU_DESCRIPTOR_HANDLE
-    g_ConstantBufferSrvCpuDescHandle[FRAME_BUFFER_COUNT];
-static D3D12_GPU_DESCRIPTOR_HANDLE
-    g_ConstantBufferSrvGpuDescHandle[FRAME_BUFFER_COUNT];
 
 static std::unordered_map<std::string, Geometry> g_Geometries;
 static std::unordered_map<std::string, Texture> g_Textures;
@@ -308,7 +298,8 @@ void Init()
 
 void LoadAssets()
 {
-  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
+  auto cmdAllocator = g_FrameContext[g_FrameIndex].commandAllocator.Get();
+  CHECK_HR(g_CommandList->Reset(cmdAllocator, NULL));
 
   for (auto node : g_Scene.nodes) {
     LoadMesh3D(node.model->mesh);
@@ -343,13 +334,15 @@ void LoadAssets()
 
 void Update(float time)
 {
+  auto ctx = &g_FrameContext[g_FrameIndex];
+
   // Per frame constant buffer
   {
     const float r = sin(0.5f * time * (XM_PI * 2.f)) * 0.5f + 0.5f;
     FrameCB0_ALL cb;
     cb.Color = XMFLOAT4(r, 1.f, 1.f, 1.f);
     cb.time = time;
-    memcpy(g_ConstantBufferAddress[g_FrameIndex], &cb, sizeof(cb));
+    memcpy(ctx->constantBufferAddress, &cb, sizeof(cb));
   }
 
   // Per object constant buffer
@@ -371,8 +364,7 @@ void Update(float time)
           XMMatrixInverse(nullptr, node.model->WorldMatrix()));
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
-      memcpy((uint8_t*)g_ObjectCbAddress[g_FrameIndex] + node.cbIndex, &cb,
-             sizeof(cb));
+      memcpy((uint8_t*)ctx->objectCbAddress + node.cbIndex, &cb, sizeof(cb));
     }
   }
 
@@ -398,15 +390,18 @@ void Render()
 {
   // swap the current rtv buffer index so we draw on the correct buffer
   g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
+  auto ctx = &g_FrameContext[g_FrameIndex];
+
   // We have to wait for the gpu to finish with the command allocator before we
   // reset it
-  WaitForFrame(g_FrameIndex);
-  // increment g_FenceValues for next frame
-  g_FenceValues[g_FrameIndex]++;
+  WaitForFrame(ctx);
+
+  // increment fenceValue for next frame
+  ctx->fenceValue++;
 
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in
-  CHECK_HR(g_CommandAllocators[g_FrameIndex]->Reset());
+  CHECK_HR(ctx->commandAllocator->Reset());
 
   // reset the command list. by resetting the command list we are putting it
   // into a recording state so we can start recording commands into the command
@@ -418,7 +413,7 @@ void Render()
   // we are only clearing the rtv, and do not actually need anything but an
   // initial default pipeline, which is what we get by setting the second
   // parameter to NULL
-  CHECK_HR(g_CommandList->Reset(g_CommandAllocators[g_FrameIndex].Get(), NULL));
+  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
 
   // here we start recording commands into the g_CommandList (which all the
   // commands will be stored in the g_CommandAllocators)
@@ -426,7 +421,7 @@ void Render()
   // transition the "g_FrameIndex" render target from the present state to the
   // render target state so the command list draws to it starting from here
   auto presentToRenderTargetBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      g_RenderTargets[g_FrameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT,
+      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_PRESENT,
       D3D12_RESOURCE_STATE_RENDER_TARGET);
   g_CommandList->ResourceBarrier(1, &presentToRenderTargetBarrier);
 
@@ -461,7 +456,7 @@ void Render()
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
   g_CommandList->SetGraphicsRootDescriptorTable(
-      0, g_ConstantBufferSrvGpuDescHandle[g_FrameIndex]);
+      0, ctx->constantBufferSrvGpuDescHandle);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
@@ -479,8 +474,7 @@ void Render()
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     g_CommandList->SetGraphicsRootConstantBufferView(
-        1, g_ObjectCbUploadHeaps[g_FrameIndex]->GetGPUVirtualAddress() +
-               node.cbIndex);
+        1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
 
     for (const auto& subset : mesh->subsets) {
       g_CommandList->SetGraphicsRootDescriptorTable(
@@ -497,7 +491,7 @@ void Render()
   // warning if present is called on the render target when it's not in the
   // present state
   auto renderTargetToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      g_RenderTargets[g_FrameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
       D3D12_RESOURCE_STATE_PRESENT);
   g_CommandList->ResourceBarrier(1, &renderTargetToPresentBarrier);
 
@@ -512,11 +506,10 @@ void Render()
   g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   // this command goes in at the end of our command queue. we will know when our
-  // command queue has finished because the g_Fences value will be set to
-  // "g_FenceValues" from the GPU since the command queue is being executed on
+  // command queue has finished because the fence value will be set to
+  // "fenceValue" from the GPU since the command queue is being executed on
   // the GPU
-  CHECK_HR(g_CommandQueue->Signal(g_Fences[g_FrameIndex].Get(),
-                                  g_FenceValues[g_FrameIndex]));
+  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
 
   // present the current backbuffer
   CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
@@ -530,8 +523,10 @@ void Cleanup()
 
   // wait for the gpu to finish all frames
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    WaitForFrame(i);
-    CHECK_HR(g_CommandQueue->Wait(g_Fences[i].Get(), g_FenceValues[i]));
+    // TODO: Method from FrameContext
+    auto ctx = &g_FrameContext[i];
+    WaitForFrame(ctx);
+    CHECK_HR(g_CommandQueue->Wait(ctx->fence.Get(), ctx->fenceValue));
   }
 
   // get swapchain out of full screen before exiting
@@ -563,12 +558,13 @@ void Cleanup()
   g_CommandQueue.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    g_ObjectCbUploadHeaps[i].Reset();
-    g_ObjectCbUploadHeapAllocations[i]->Release();
-    g_ObjectCbUploadHeapAllocations[i] = nullptr;
-    g_ConstantBufferUploadHeap[i].Reset();
-    g_ConstantBufferUploadAllocation[i]->Release();
-    g_ConstantBufferUploadAllocation[i] = nullptr;
+    // TODO: Method from FrameContext
+    g_FrameContext[i].objectCbUploadHeap.Reset();
+    g_FrameContext[i].objectCbUploadHeapAllocation->Release();
+    g_FrameContext[i].objectCbUploadHeapAllocation = nullptr;
+    g_FrameContext[i].constantBufferUploadHeap.Reset();
+    g_FrameContext[i].constantBufferUploadAllocation->Release();
+    g_FrameContext[i].constantBufferUploadAllocation = nullptr;
   }
 
   g_SrvDescriptorHeap->Release();
@@ -580,9 +576,10 @@ void Cleanup()
   g_RtvDescriptorHeap.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    g_RenderTargets[i].Reset();
-    g_CommandAllocators[i].Reset();
-    g_Fences[i].Reset();
+    // TODO: Method from FrameContext
+    g_FrameContext[i].renderTarget.Reset();
+    g_FrameContext[i].commandAllocator.Reset();
+    g_FrameContext[i].fence.Reset();
   }
 
   g_Allocator.Reset();
@@ -718,13 +715,14 @@ static void InitD3D()
       ID3D12CommandAllocator* commandAllocator = nullptr;
       CHECK_HR(g_Device->CreateCommandAllocator(
           D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-      g_CommandAllocators[i].Attach(commandAllocator);
+      g_FrameContext[i].commandAllocator.Attach(commandAllocator);
     }
 
     // create the command list with the first allocator
-    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                         g_CommandAllocators[0].Get(), NULL,
-                                         IID_PPV_ARGS(&g_CommandList)));
+    CHECK_HR(
+        g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                    g_FrameContext[0].commandAllocator.Get(),
+                                    NULL, IID_PPV_ARGS(&g_CommandList)));
 
     // command lists are created in the recording state. our main loop will set
     // it up for recording again so close it now
@@ -737,8 +735,8 @@ static void InitD3D()
       ID3D12Fence* fence = nullptr;
       CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
                                      IID_PPV_ARGS(&fence)));
-      g_Fences[i].Attach(fence);
-      g_FenceValues[i] = 0;
+      g_FrameContext[i].fence.Attach(fence);
+      g_FrameContext[i].fenceValue = 0;
     }
 
     g_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -826,12 +824,12 @@ static void InitFrameResources()
       // position of our ID3D12Resource array
       ID3D12Resource* res = nullptr;
       CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
-      g_RenderTargets[i].Attach(res);
+      g_FrameContext[i].renderTarget.Attach(res);
 
       // the we "create" a render target view which binds the swap chain buffer
       // (ID3D12Resource[n]) to the rtv handle
-      g_Device->CreateRenderTargetView(g_RenderTargets[i].Get(), nullptr,
-                                       rtvHandle);
+      g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Get(),
+                                       nullptr, rtvHandle);
 
       // we increment the rtv handle by the rtv descriptor size we got above
       rtvHandle.ptr += g_RtvDescriptorSize;
@@ -958,38 +956,39 @@ static void InitFrameResources()
     allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      auto ctx = &g_FrameContext[i];
+
       CHECK_HR(g_Allocator->CreateResource(
           &allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
           D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-          &g_ConstantBufferUploadAllocation[i],
-          IID_PPV_ARGS(&g_ConstantBufferUploadHeap[i])));
-      g_ConstantBufferUploadHeap[i]->SetName(
-          L"Constant Buffer (per frame) Upload Resource Heap");
-      g_ConstantBufferUploadAllocation[i]->SetName(
-          L"Constant Buffer (per frame) Upload Resource Heap");
+          &ctx->constantBufferUploadAllocation,
+          IID_PPV_ARGS(&ctx->constantBufferUploadHeap)));
 
       D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
       cbvDesc.BufferLocation =
-          g_ConstantBufferUploadHeap[i]->GetGPUVirtualAddress();
+          ctx->constantBufferUploadHeap->GetGPUVirtualAddress();
       cbvDesc.SizeInBytes = AlignUp<UINT>(sizeof(FrameCB0_ALL), 256);
 
       // TODO: Alloc Here?
-      g_SrvDescHeapAlloc.Alloc(&g_ConstantBufferSrvCpuDescHandle[i],
-                               &g_ConstantBufferSrvGpuDescHandle[i]);
+      g_SrvDescHeapAlloc.Alloc(&ctx->constantBufferSrvCpuDescHandle,
+                               &ctx->constantBufferSrvGpuDescHandle);
       g_Device->CreateConstantBufferView(&cbvDesc,
-                                         g_ConstantBufferSrvCpuDescHandle[i]);
+                                         ctx->constantBufferSrvCpuDescHandle);
 
-      CHECK_HR(g_ConstantBufferUploadHeap[i]->Map(0, &EMPTY_RANGE,
-                                                  &g_ConstantBufferAddress[i]));
+      CHECK_HR(ctx->constantBufferUploadHeap->Map(0, &EMPTY_RANGE,
+                                                  &ctx->constantBufferAddress));
     }
   }
 
   // per object CB
+  // TODO: use a storage buffer instead?
   {
     D3D12MA::ALLOCATION_DESC allocDesc = {};
     allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      auto ctx = &g_FrameContext[i];
+
       CHECK_HR(g_Allocator->CreateResource(
           &allocDesc,
           // size of the resource heap. Must be a multiple of 64KB for
@@ -1000,16 +999,16 @@ static void InitFrameResources()
           D3D12_RESOURCE_STATE_GENERIC_READ,
           nullptr,  // we do not have use an optimized clear value for constant
                     // buffers
-          &g_ObjectCbUploadHeapAllocations[i],
-          IID_PPV_ARGS(&g_ObjectCbUploadHeaps[i])));
+          &ctx->objectCbUploadHeapAllocation,
+          IID_PPV_ARGS(&ctx->objectCbUploadHeap)));
 
       std::wstring name = L"Constant Buffer (per obj) Upload Resource Heap - " +
                           std::to_wstring(i);
-      g_ObjectCbUploadHeaps[i]->SetName(name.c_str());
-      g_ObjectCbUploadHeapAllocations[i]->SetName(name.c_str());
+      ctx->objectCbUploadHeap->SetName(name.c_str());
+      ctx->objectCbUploadHeapAllocation->SetName(name.c_str());
 
-      CHECK_HR(g_ObjectCbUploadHeaps[i]->Map(0, &EMPTY_RANGE,
-                                             &g_ObjectCbAddress[i]));
+      CHECK_HR(
+          ctx->objectCbUploadHeap->Map(0, &EMPTY_RANGE, &ctx->objectCbAddress));
     }
   }
 
@@ -1137,30 +1136,30 @@ static void InitFrameResources()
 }
 
 // wait until gpu is finished with command list
-static void WaitForFrame(size_t frameIndex)
+static void WaitForFrame(FrameContext* ctx)
 {
-  // if the current g_Fences value is still less than "g_FenceValues", then we
+  // if the current fence value is still less than "fenceValue", then we
   // know the GPU has not finished executing the command queue since it has
-  // not reached the "g_CommandQueue->Signal(g_Fences, g_FenceValues)" command
-  if (g_Fences[frameIndex]->GetCompletedValue() < g_FenceValues[frameIndex]) {
-    // we have the g_Fences create an event which is signaled once the
-    // g_Fences's current value is "g_FenceValues"
-    CHECK_HR(g_Fences[frameIndex]->SetEventOnCompletion(
-        g_FenceValues[frameIndex], g_FenceEvent));
+  // not reached the "g_CommandQueue->Signal(fence, fenceValue)" command
+  if (ctx->fence->GetCompletedValue() < ctx->fenceValue) {
+    // we have the fence create an event which is signaled once the
+    // fence's current value is "fenceValue"
+    CHECK_HR(ctx->fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
 
-    // We will wait until the g_Fences has triggered the event that it's
-    // current value has reached "g_FenceValues". once it's value has reached
-    // "g_FenceValues", we know the command queue has finished executing
+    // We will wait until the fence has triggered the event that it's
+    // current value has reached "fenceValue". once it's value has reached
+    // "fenceValue", we know the command queue has finished executing
     WaitForSingleObject(g_FenceEvent, INFINITE);
   }
 }
 
 static void WaitGPUIdle(size_t frameIndex)
 {
-  g_FenceValues[frameIndex]++;
-  CHECK_HR(g_CommandQueue->Signal(g_Fences[frameIndex].Get(),
-                                  g_FenceValues[frameIndex]));
-  WaitForFrame(frameIndex);
+  auto ctx = &g_FrameContext[frameIndex];
+
+  ctx->fenceValue++;
+  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
+  WaitForFrame(ctx);
 }
 
 // Helper function for resolving the full path of assets.
