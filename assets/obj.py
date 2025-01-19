@@ -123,11 +123,13 @@ class Subset:
 
 class Mesh:
     def __init__(self):
+        self.cwd = ""
         self.vertices = []
         self.tris = []
         self.subsets = []
 
     def from_file(self, filename):
+        self.cwd = os.path.dirname(os.path.abspath(filename))
         positions = []
         normals = []
         uvs = []
@@ -136,13 +138,19 @@ class Mesh:
         subset = None
         start = 0
 
+        materials = []
+
         with open(filename) as rawfile:
             while True:
                 line = rawfile.readline()
                 if not line:
                     break
 
-                if line.startswith('v '):
+                if line.startswith('mtllib'):
+                    mtl_filename = ' '.join(line.split(' ')[1:]).strip()
+                    materials.append(self.read_materials(mtl_filename))
+
+                elif line.startswith('v '):
                     data = parse.search('v {px:g} {py:g} {pz:g}', line)
 
                     px = data['px']
@@ -162,6 +170,8 @@ class Mesh:
                     normals.append(Vec3(nx, ny, -nz))
 
                 elif line.startswith('usemtl'):
+                    # TODO: read MTL and find the real name of the texture.
+                    # so we don't need to butcher the obj file
                     data = parse.search('usemtl {:S}', line)
                     self.subsets.append(Subset(data[0], start))
                     subset = len(self.subsets) - 1
@@ -201,6 +211,28 @@ class Mesh:
 
             self.tris.append(Triangle([v0_i, v1_i, v2_i]))
 
+    def read_materials(self, filename):
+        materials = []
+
+        cur_mtl_name = None
+        cur_mtl_tex = None
+
+        with open(os.path.join(self.cwd, filename)) as mtl_file:
+             for line in mtl_file:
+                print(line)
+
+                if line.startswith('newmtl'):
+                    cur_mtl_name = ' '.join(line.split(' ')[1:]).strip()
+
+                elif line.startswith('map_Kd'):
+                    cur_mtl_tex = ' '.join(line.split(' ')[1:]).strip()
+
+                if cur_mtl_name is not None and cur_mtl_tex is not None:
+                    materials.append({ 'name': cur_mtl_name, 'texture': cur_mtl_tex })
+                    cur_mtl_name = None
+                    cur_mtl_tex = None
+
+        return materials
 
     def pack(self, outfile):
         data = bytearray()
