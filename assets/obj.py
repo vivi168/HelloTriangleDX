@@ -138,7 +138,7 @@ class Mesh:
         subset = None
         start = 0
 
-        materials = []
+        materials = {}
 
         with open(filename) as rawfile:
             while True:
@@ -148,7 +148,7 @@ class Mesh:
 
                 if line.startswith('mtllib'):
                     mtl_filename = ' '.join(line.split(' ')[1:]).strip()
-                    materials.append(self.read_materials(mtl_filename))
+                    materials |= self.read_materials(mtl_filename)
 
                 elif line.startswith('v '):
                     data = parse.search('v {px:g} {py:g} {pz:g}', line)
@@ -170,10 +170,8 @@ class Mesh:
                     normals.append(Vec3(nx, ny, -nz))
 
                 elif line.startswith('usemtl'):
-                    # TODO: read MTL and find the real name of the texture.
-                    # so we don't need to butcher the obj file
-                    data = parse.search('usemtl {:S}', line)
-                    self.subsets.append(Subset(data[0], start))
+                    mtl_name = ' '.join(line.split(' ')[1:]).strip()
+                    self.subsets.append(Subset(materials[mtl_name], start))
                     subset = len(self.subsets) - 1
 
                 elif line.startswith('f '):
@@ -212,7 +210,7 @@ class Mesh:
             self.tris.append(Triangle([v0_i, v1_i, v2_i]))
 
     def read_materials(self, filename):
-        materials = []
+        materials = {}
 
         cur_mtl_name = None
         cur_mtl_tex = None
@@ -228,7 +226,7 @@ class Mesh:
                     cur_mtl_tex = ' '.join(line.split(' ')[1:]).strip()
 
                 if cur_mtl_name is not None and cur_mtl_tex is not None:
-                    materials.append({ 'name': cur_mtl_name, 'texture': cur_mtl_tex })
+                    materials[cur_mtl_name] = cur_mtl_tex
                     cur_mtl_name = None
                     cur_mtl_tex = None
 
