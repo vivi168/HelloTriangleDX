@@ -178,40 +178,26 @@ class Mesh:
                     self.subsets[subset].count += 1
                     start += 1
 
+        def find_or_add_vertex(v):
+            try:
+                i = self.vertices.index(v)
+            except ValueError:
+                self.vertices.append(v)
+                i = len(self.vertices) - 1
+            return i
 
         for f in faces:
             # ---- v0
-            v0 = Vertex(positions[f.v0.position],
-                        normals[f.v0.normal],
-                        uvs[f.v0.uv])
-
-            try:
-                v0_i = self.vertices.index(v0)
-            except ValueError:
-                self.vertices.append(v0)
-                v0_i = len(self.vertices) - 1
+            v0 = Vertex(positions[f.v0.position], normals[f.v0.normal], uvs[f.v0.uv])
+            v0_i = find_or_add_vertex(v0)
 
             # ---- v1
-            v1 = Vertex(positions[f.v1.position],
-                        normals[f.v1.normal],
-                        uvs[f.v1.uv])
-
-            try:
-                v1_i = self.vertices.index(v1)
-            except ValueError:
-                self.vertices.append(v1)
-                v1_i = len(self.vertices) - 1
+            v1 = Vertex(positions[f.v1.position], normals[f.v1.normal], uvs[f.v1.uv])
+            v1_i = find_or_add_vertex(v1)
 
             # ---- v2
-            v2 = Vertex(positions[f.v2.position],
-                        normals[f.v2.normal],
-                        uvs[f.v2.uv])
-
-            try:
-                v2_i = self.vertices.index(v2)
-            except ValueError:
-                self.vertices.append(v2)
-                v2_i = len(self.vertices) - 1
+            v2 = Vertex(positions[f.v2.position], normals[f.v2.normal], uvs[f.v2.uv])
+            v2_i = find_or_add_vertex(v2)
 
             self.tris.append(Triangle([v0_i, v1_i, v2_i]))
 
