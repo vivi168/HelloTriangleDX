@@ -1,12 +1,12 @@
 # Export as -Z forward, Y up
-# usemtl format -> usemtl image.bmp
 import numpy as np
 import parse
 import struct
-import sys
 import os
 import argparse
-from PIL import Image
+from raw import RawImage
+
+from typing import List
 
 class Vec2:
     def __init__(self, x=0, y=0):
@@ -37,6 +37,7 @@ class Vec3:
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z
+
 
 class Vec4:
     def __init__(self, x=0, y=0, z=0, w=0):
@@ -103,6 +104,7 @@ class ObjFace:
     def __str__(self):
         return '{} {} {}'.format(self.v0, self.v1, self.v2)
 
+
 MAX_TEXTURE_NAME_LEN = 64
 class Subset:
     def __init__(self, texture='', start=0):
@@ -110,8 +112,9 @@ class Subset:
         self.count = 0
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
-            exit('Texture name too long: {} {}/19'.format(raw_texture, len(raw_texture)))
-        self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1] # limit to MAX_TEXTURE_NAME_LEN chars
+            exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
+        self.original_texture_name = texture
+        self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
 
     def __str__(self):
         return '{} {} ({})'.format(self.start * 3, self.count * 3, self.texture_name)
@@ -121,12 +124,18 @@ class Subset:
         pointer = struct.pack('<Q', 0)
         return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii') + pointer
 
+    def convert_texture(self):
+        m = RawImage(self.original_texture_name, None)
+        with open(self.texture_name, 'wb') as f:
+            f.write(m.pack())
+
+
 class Mesh:
     def __init__(self):
         self.cwd = ""
-        self.vertices = []
-        self.tris = []
-        self.subsets = []
+        self.vertices: List[Vertex] = []
+        self.tris: List[Triangle] = []
+        self.subsets: List[Subset] = []
 
     def from_file(self, filename):
         self.cwd = os.path.dirname(os.path.abspath(filename))
@@ -217,8 +226,6 @@ class Mesh:
 
         with open(os.path.join(self.cwd, filename)) as mtl_file:
              for line in mtl_file:
-                print(line)
-
                 if line.startswith('newmtl'):
                     cur_mtl_name = ' '.join(line.split(' ')[1:]).strip()
 
@@ -257,6 +264,10 @@ class Mesh:
         with open(outfile, 'wb') as f:
             f.write(data)
 
+    def convert_textures(self):
+        for s in self.subsets:
+            print("{} -> {}".format(s.original_texture_name, s.texture_name))
+            s.convert_texture()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Convert obj mesh file')
@@ -273,3 +284,4 @@ if __name__ == '__main__':
     m = Mesh()
     m.from_file(args.infile)
     m.pack(outfile)
+    m.convert_textures()

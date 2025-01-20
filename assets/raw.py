@@ -1,4 +1,3 @@
-import parse
 import struct
 import os
 import re
@@ -6,7 +5,8 @@ import argparse
 from PIL import Image
 
 class RawImage:
-    def __init__(self, img, alpha = None):
+    def __init__(self, filename, alpha = None):
+        img = Image.open(filename)
         self.width, self.height = img.size
         self.alpha = alpha
         self.img = img.convert('RGBA')
@@ -65,13 +65,7 @@ if __name__ == '__main__':
     else:
         outfile = args.outfile
 
-    img = Image.open(args.infile)
-    m = RawImage(img, hex_to_rgb(args.alpha))
+    m = RawImage(args.infile, hex_to_rgb(args.alpha))
 
     with open(outfile, 'wb') as f:
         f.write(m.pack())
-
-
-
-
-
