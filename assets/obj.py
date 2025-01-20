@@ -1,5 +1,4 @@
 # Export as -Z forward, Y up
-import numpy as np
 import parse
 import struct
 import os
