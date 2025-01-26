@@ -72,8 +72,8 @@ class Vertex:
 
 
 class Triangle:
-    def __init__(self, vertIndices=[]):
-        self.vertIndices = vertIndices
+    def __init__(self, vi1=0, vi2=0, vi3=0):
+        self.vertIndices = [vi1, vi2, vi3]
 
     def pack(self):
         return struct.pack('<HHH', self.vertIndices[0], self.vertIndices[2], self.vertIndices[1])
@@ -84,9 +84,10 @@ class Triangle:
 
 
 class Subset:
-    def __init__(self, texture='', start=0):
+    def __init__(self, texture='', start=0, vertex_start=0):
         self.start = start
         self.count = 0
+        self.vertex_start = vertex_start
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
             exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
@@ -94,10 +95,10 @@ class Subset:
         self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
 
     def __str__(self):
-        return '{} {} ({})'.format(self.start * 3, self.count * 3, self.texture_name)
+        return '{} {} ({})'.format(self.start, self.count, self.texture_name)
 
     def pack(self):
-        data = struct.pack('<II', self.start * 3, self.count * 3)
+        data = struct.pack('<II', self.start, self.count)
         pointer = struct.pack('<Q', 0)
         return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii') + pointer
 
