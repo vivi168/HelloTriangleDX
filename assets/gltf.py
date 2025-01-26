@@ -72,7 +72,7 @@ def get_values(accessor_id):
     return values
 
 def get_material(material_id):
-    print(material_id)
+    # print(material_id)
     if material_id is None:
         return
 
@@ -93,29 +93,40 @@ for buf in raw_buffers:
             data = bin_file.read()
         buffers.append(data)
 
+m = Mesh()
+
+istart = 0
+vstart = 0
+
 for prim in primitives:
-    print("*** INDICES ***")
+    # print("*** INDICES ***")
     indices = get_values(prim['indices'])
-    print(len(indices), min(indices), max(indices))
-    triangles = [Triangle(indices[i][0], indices[i+1][0], indices[i+2][0]) for i in range(0, len(indices), 3)]
-    for i in triangles: print(i)
+    # print(len(indices), min(indices), max(indices))
+    num_indices = len(indices)
+    num_vertices = max(indices)[0] + 1
+
+    triangles = [Triangle(indices[i][0], indices[i+1][0], indices[i+2][0]) for i in range(0, num_indices, 3)]
+    m.tris.extend(triangles)
+    # for i in triangles: print(i)
 
     material = get_material(prim.get('material'))
 
+    subset = Subset('', istart, num_indices, vstart)
+    m.subsets.append(subset)
+    print(subset)
+    istart += num_indices
+    vstart += num_vertices
+
     attributes = prim['attributes']
     if attributes.get('POSITION'):
-        print("*** POSITION ***")
         values = get_values(attributes['POSITION'])
         positions = [Vec3(v[0], v[1], v[2]) for v in values]
-        print(len(positions))
-        for p in positions:  print(p)
 
     if attributes.get('NORMAL'):
-        print("*** NORMAL ***")
         values = get_values(attributes['NORMAL'])
         normals = [Vec3(v[0], v[1], v[2]) for v in values]
-        print(len(normals))
-        for n in normals: print(n)
+    else:
+        normals = [Vec3() for _ in values]
 
     # if attributes.get('TANGENT'):
     #     pass # TODO
@@ -124,9 +135,25 @@ for prim in primitives:
     #     pass # TODO
 
     if attributes.get('TEXCOORD_0'):
-        print("*** TEXCOORD_0 ***")
         values = get_values(attributes['TEXCOORD_0'])
         uvs = [Vec2(v[0], v[1]) for v in values]
-        print(len(uvs))
-        for n in uvs: print(n)
-    print()
+    else:
+        uvs = [Vec2() for _ in values]
+
+
+    # print(len(positions))
+    # for p in positions:  print(p)
+    # print(len(normals))
+    # for n in normals: print(n)
+    # print(len(uvs))
+    # for n in uvs: print(n)
+
+    assert len(positions) == len(normals) == len(uvs) == (num_vertices)
+    for i in range(num_vertices):
+        m.vertices.append(Vertex(positions[i], normals[i], uvs[i]))
+
+    # print()
+
+print(len(m.tris))
+print(len(m.vertices))
+print(len(m.subsets))

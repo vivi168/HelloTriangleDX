@@ -84,10 +84,10 @@ class Triangle:
 
 
 class Subset:
-    def __init__(self, texture='', start=0, vertex_start=0):
-        self.start = start
-        self.count = 0
-        self.vertex_start = vertex_start
+    def __init__(self, texture='', istart=0, icount = 0, vstart=0):
+        self.start = istart
+        self.count = icount
+        self.vstart =vstart
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
             exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
@@ -95,7 +95,7 @@ class Subset:
         self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
 
     def __str__(self):
-        return '{} {} ({})'.format(self.start, self.count, self.texture_name)
+        return '{} {} {}({})'.format(self.start, self.count, self.vstart, self.texture_name)
 
     def pack(self):
         data = struct.pack('<II', self.start, self.count)
