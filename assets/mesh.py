@@ -55,13 +55,16 @@ class Vec4:
 
 
 class Vertex:
-    def __init__(self, p=Vec3(), n=Vec3(), t=Vec2()):
+    def __init__(self, p=Vec3(), n=Vec3(), t=Vec2(), c=Vec4(1, 0, 1, 1)):
         self.position = p
         self.normal = n
-        self.color = Vec4(1, 0, 1, 1)
+        self.color = c
         self.uv = t
 
     def pack(self):
+        # positions: p * scale + translation (INT16)
+        # normals: n / 128.0 (SNORM8)
+        # uvs: t / 65535.0 (UNORM16) * scale + translation (of subset)
         return self.position.pack() + self.normal.pack() + self.color.pack() + self.uv.pack()
 
     def __str__(self):
@@ -85,9 +88,9 @@ class Triangle:
 
 class Subset:
     def __init__(self, texture='', istart=0, icount = 0, vstart=0):
-        self.start = istart
-        self.count = icount
-        self.vstart =vstart
+        self.istart = istart
+        self.icount = icount
+        self.vstart = vstart # offset in the vertex array
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
             exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
@@ -95,10 +98,10 @@ class Subset:
         self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
 
     def __str__(self):
-        return '{} {} {}({})'.format(self.start, self.count, self.vstart, self.texture_name)
+        return '{} {} {} ({})'.format(self.istart, self.icount, self.vstart, self.texture_name)
 
     def pack(self):
-        data = struct.pack('<II', self.start, self.count)
+        data = struct.pack('<III', self.istart, self.icount, self.vstart)
         pointer = struct.pack('<Q', 0)
         return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii') + pointer
 
@@ -114,6 +117,9 @@ class Mesh:
         self.vertices: List[Vertex] = []
         self.tris: List[Triangle] = []
         self.subsets: List[Subset] = []
+
+        self.translation: List[float] = []
+        self.scale:List[float] = []
 
     def pack(self, outfile):
         data = bytearray()
