@@ -119,8 +119,9 @@ def get_material(material_id):
 
 
 def process_mesh(i):
-    mesh = meshes[i]
     node = nodes[mesh_nodes[i]]
+    mesh = meshes[node['mesh']]
+
     primitives = mesh['primitives']
 
     # pdb.set_trace()
