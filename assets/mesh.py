@@ -85,41 +85,51 @@ class Triangle:
         return '{} {} {}'.format(
             self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
 
+class Material:
+    def __init__(self, texture, offset=Vec2(), scale=Vec2(), base_color_factor=Vec4(1,1,1,1)):
+        self.offset = offset
+        self.scale = scale
+        self.base_color_factor = base_color_factor
 
-class Subset:
-    def __init__(self, texture='', istart=0, icount = 0, vstart=0):
-        self.istart = istart
-        self.icount = icount
-        self.vstart = vstart # offset in the vertex array
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
             exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
         self.original_texture_name = texture
         self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
 
-    def __str__(self):
-        return '{} {} {} ({})'.format(self.istart, self.icount, self.vstart, self.texture_name)
-
     def pack(self):
-        data = struct.pack('<III', self.istart, self.icount, self.vstart)
-        pointer = struct.pack('<Q', 0)
-        return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii') + pointer
+        data = self.offset.pack() + self.scale.pack()
+        return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
 
     def convert_texture(self):
         m = RawImage(self.original_texture_name, None)
         with open(self.texture_name, 'wb') as f:
             f.write(m.pack())
 
+class Subset:
+    def __init__(self, material, istart=0, icount=0, vstart=0):
+        self.material = material
+        self.istart = istart
+        self.icount = icount
+        self.vstart = vstart # offset in the vertex array
+
+    def __str__(self):
+        return '{} {} {} ({})'.format(self.istart, self.icount, self.vstart, self.material.texture_name)
+
+    def pack(self):
+        data = struct.pack('<III', self.istart, self.icount, self.vstart)
+        pointer = struct.pack('<Q', 0) # pointer to material
+        return data + self.material.pack() + pointer
 
 class Mesh:
-    def __init__(self):
+    def __init__(self, translation=Vec3(), scale=Vec3()):
         self.cwd = ""
         self.vertices: List[Vertex] = []
         self.tris: List[Triangle] = []
         self.subsets: List[Subset] = []
 
-        self.translation: List[float] = []
-        self.scale:List[float] = []
+        self.translation = translation
+        self.scale = scale
 
     def pack(self, outfile):
         data = bytearray()
@@ -148,5 +158,6 @@ class Mesh:
 
     def convert_textures(self):
         for s in self.subsets:
-            print("{} -> {}".format(s.original_texture_name, s.texture_name))
-            s.convert_texture()
+            m = s.material
+            print("{} -> {}".format(m.original_texture_name, m.texture_name))
+            m.convert_texture()

@@ -7,7 +7,7 @@ import os
 import sys
 import base64
 import struct
-from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, Triangle, Subset
+from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, Triangle, Material, Subset
 
 import pdb
 
@@ -108,14 +108,18 @@ def get_material(material_id):
     pbr_mr = material['pbrMetallicRoughness']
     base_color_texture_info = pbr_mr['baseColorTexture']
 
+    assert(base_color_texture_info is not None)
+    assert(base_color_texture_info['extensions'] is not None)
+    tex_transform = base_color_texture_info['extensions']['KHR_texture_transform']
+    offset = tex_transform['offset']
+    scale = tex_transform['scale']
+
     texture = textures[base_color_texture_info['index']]
     image = images[texture['source']]
-    if texture.get('sampler') is not None:
-        pass
+    file = image['uri'] # TODO: can be base64?
+    base_color_factor = pbr_mr.get('baseColorFactor', [1, 1, 1, 1])
 
-    base_color_factor = pbr_mr.get('baseColorFactor', [1, 1, 1, 1]) # TODO: default value or None?
-
-    pdb.set_trace()
+    return Material(file, Vec2(*offset), Vec2(*scale), Vec4(*base_color_factor))
 
 
 def process_mesh(i):
@@ -124,11 +128,12 @@ def process_mesh(i):
 
     primitives = mesh['primitives']
 
-    # pdb.set_trace()
+    translation = node['translation']
+    scale = node['scale']
+    assert(translation is not None)
+    assert(scale is not None)
 
-    m = Mesh()
-    # m.translation = node['translation']
-    # m.scale = node['scale']
+    m = Mesh(translation, scale)
 
     istart = 0
     vstart = 0
@@ -143,7 +148,7 @@ def process_mesh(i):
 
         material = get_material(prim.get('material'))
 
-        subset = Subset('', istart, num_indices, vstart)
+        subset = Subset(material, istart, num_indices, vstart)
         m.subsets.append(subset)
         istart += num_indices
         vstart += num_vertices
@@ -152,18 +157,17 @@ def process_mesh(i):
 
         if attributes.get('POSITION', None) is not None:
             idx = attributes['POSITION']
-            # assert(accessors[idx]['componentType'] == USHORT)
+            assert(accessors[idx]['componentType'] == USHORT)
             values = get_values(idx)
             positions = [Vec3(v[0], v[1], v[2]) for v in values]
             # for p in positions: print(p)
 
         if attributes.get('NORMAL', None) is not None:
             idx = attributes['NORMAL']
-            # assert(accessors[idx]['componentType'] == CHAR)
-            # assert(accessors[idx]['normalized'] == True)
+            assert(accessors[idx]['componentType'] == CHAR)
+            assert(accessors[idx]['normalized'] == True)
             values = get_values(idx)
             normals = [Vec3(v[0], v[1], v[2]) for v in values]
-            # pdb.set_trace()
             # for n in normals: print(n)
         else:
             normals = [Vec3() for _ in values]
@@ -176,11 +180,10 @@ def process_mesh(i):
 
         if attributes.get('TEXCOORD_0', None) is not None:
             idx = attributes['TEXCOORD_0']
-            # assert(accessors[idx]['componentType'] == USHORT)
-            # assert(accessors[idx]['normalized'] == True)
+            assert(accessors[idx]['componentType'] == USHORT)
+            assert(accessors[idx]['normalized'] == True)
             values = get_values(idx)
             uvs = [Vec2(v[0], v[1]) for v in values]
-            # pdb.set_trace()
             # for u in uvs: print(u)
         else:
             uvs = [Vec2() for _ in values]
@@ -189,12 +192,14 @@ def process_mesh(i):
         for i in range(num_vertices):
             m.vertices.append(Vertex(positions[i], normals[i], uvs[i]))
 
-    print(len(m.tris))
-    print(len(m.vertices))
-    print(len(m.subsets))
-    for s in m.subsets: print(s)
+    return m
 
 
 for i in range(len(meshes)):
     print("***** process MESH {} *****".format(i))
-    process_mesh(i)
+    m = process_mesh(i)
+
+    print(len(m.tris))
+    print(len(m.vertices))
+    print(len(m.subsets))
+    for s in m.subsets: print(s)
