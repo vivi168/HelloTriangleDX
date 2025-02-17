@@ -36,6 +36,7 @@ DTYPE_MAP = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}  
 
 file_rp = sys.argv[1]
 file_ap = os.path.abspath(file_rp)
+original_filename = os.path.splitext(os.path.basename(file_ap))[0]
 cwd = os.path.dirname(file_ap)
 with open(file_ap, 'r') as file:
     raw = file.read()
@@ -109,7 +110,7 @@ def get_material(material_id):
     base_color_texture_info = pbr_mr['baseColorTexture']
 
     assert(base_color_texture_info is not None)
-    assert(base_color_texture_info['extensions'] is not None)
+    assert(base_color_texture_info.get('extensions') is not None)
     tex_transform = base_color_texture_info['extensions']['KHR_texture_transform']
     offset = tex_transform['offset']
     scale = tex_transform['scale']
@@ -119,7 +120,7 @@ def get_material(material_id):
     file = image['uri'] # TODO: can be base64?
     base_color_factor = pbr_mr.get('baseColorFactor', [1, 1, 1, 1])
 
-    return Material(file, Vec2(*offset), Vec2(*scale), Vec4(*base_color_factor))
+    return Material(os.path.join(cwd, file), Vec2(*offset), Vec2(*scale), Vec4(*base_color_factor))
 
 
 def process_mesh(i):
@@ -154,23 +155,20 @@ def process_mesh(i):
         vstart += num_vertices
 
         attributes = prim['attributes']
+        assert(attributes.get('POSITION') is not None)
+        assert(attributes.get('NORMAL') is not None)
+        assert(attributes.get('TEXCOORD_0') is not None)
 
-        if attributes.get('POSITION', None) is not None:
-            idx = attributes['POSITION']
-            assert(accessors[idx]['componentType'] == USHORT)
-            values = get_values(idx)
-            positions = [Vec3(v[0], v[1], v[2]) for v in values]
-            # for p in positions: print(p)
+        idx = attributes['POSITION']
+        assert(accessors[idx]['componentType'] == USHORT)
+        values = get_values(idx)
+        positions = [Vec3(v[0], v[1], v[2]) for v in values]
 
-        if attributes.get('NORMAL', None) is not None:
-            idx = attributes['NORMAL']
-            assert(accessors[idx]['componentType'] == CHAR)
-            assert(accessors[idx]['normalized'] == True)
-            values = get_values(idx)
-            normals = [Vec3(v[0], v[1], v[2]) for v in values]
-            # for n in normals: print(n)
-        else:
-            normals = [Vec3() for _ in values]
+        idx = attributes['NORMAL']
+        assert(accessors[idx]['componentType'] == CHAR)
+        assert(accessors[idx]['normalized'] == True)
+        values = get_values(idx)
+        normals = [Vec3(v[0], v[1], v[2]) for v in values]
 
         # if attributes.get('TANGENT', None) is not None:
         #     pass # TODO
@@ -178,15 +176,11 @@ def process_mesh(i):
         # if attributes.get('COLOR_0', None) is not None:
         #     pass # TODO
 
-        if attributes.get('TEXCOORD_0', None) is not None:
-            idx = attributes['TEXCOORD_0']
-            assert(accessors[idx]['componentType'] == USHORT)
-            assert(accessors[idx]['normalized'] == True)
-            values = get_values(idx)
-            uvs = [Vec2(v[0], v[1]) for v in values]
-            # for u in uvs: print(u)
-        else:
-            uvs = [Vec2() for _ in values]
+        idx = attributes['TEXCOORD_0']
+        assert(accessors[idx]['componentType'] == USHORT)
+        assert(accessors[idx]['normalized'] == True)
+        values = get_values(idx)
+        uvs = [Vec2(v[0], v[1]) for v in values]
 
         assert len(positions) == len(normals) == len(uvs) == (num_vertices)
         for i in range(num_vertices):
@@ -198,8 +192,6 @@ def process_mesh(i):
 for i in range(len(meshes)):
     print("***** process MESH {} *****".format(i))
     m = process_mesh(i)
-
-    print(len(m.tris))
-    print(len(m.vertices))
-    print(len(m.subsets))
-    for s in m.subsets: print(s)
+    filename = "{}_mesh_{}.m3d".format(original_filename, i+1)
+    m.pack(filename)
+    m.convert_textures()

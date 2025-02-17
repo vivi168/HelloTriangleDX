@@ -11,11 +11,14 @@ class Vec2:
         self.x = x
         self.y = y
 
-    def pack(self):
+    def pack_u16(self):
+        return struct.pack('<HH', self.x, self.y)
+
+    def pack_f32(self):
         return struct.pack('<ff', self.x, self.y)
 
     def __str__(self):
-        return '{:.6f} {:.6f}'.format(self.x, self.y)
+        return '{} {}'.format(self.x, self.y)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -27,11 +30,17 @@ class Vec3:
         self.y = y
         self.z = z
 
-    def pack(self):
+    def pack_s8(self):
+        return struct.pack('<bbb', self.x, self.y, self.z)
+
+    def pack_u16(self):
+        return struct.pack('<HHH', self.x, self.y, self.z)
+
+    def pack_f32(self):
         return struct.pack('<fff', self.x, self.y, self.z)
 
     def __str__(self):
-        return '{:.6f} {:.6f} {:.6f}'.format(self.x, self.y, self.z)
+        return '{} {} {}'.format(self.x, self.y, self.z)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z
@@ -48,24 +57,23 @@ class Vec4:
         return struct.pack('<ffff', self.x, self.y, self.z, self.w)
 
     def __str__(self):
-        return '{:.6f} {:.6f} {:.6f} {:.6f}'.format(self.x, self.y, self.z, self.w)
+        return '{} {} {} {}'.format(self.x, self.y, self.z, self.w)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z and self.w == other.w
 
 
 class Vertex:
-    def __init__(self, p=Vec3(), n=Vec3(), t=Vec2(), c=Vec4(1, 0, 1, 1)):
+    def __init__(self, p=Vec3(), n=Vec3(), t=Vec2()):
         self.position = p
         self.normal = n
-        self.color = c
         self.uv = t
 
     def pack(self):
-        # positions: p * scale + translation (INT16)
-        # normals: n / 128.0 (SNORM8)
-        # uvs: t / 65535.0 (UNORM16) * scale + translation (of subset)
-        return self.position.pack() + self.normal.pack() + self.color.pack() + self.uv.pack()
+        # positions (UINT16): p * scale + translation
+        # normals (SNORM8): n / 128.0
+        # uvs (UNORM16): t / 65535.0  * scale + translation (of subset)
+        return self.position.pack_u16() + self.normal.pack_s8() + self.uv.pack_u16()
 
     def __str__(self):
         return '({}) ({}) ({})'.format(self.position, self.normal, self.uv)
@@ -92,13 +100,13 @@ class Material:
         self.base_color_factor = base_color_factor
 
         raw_texture = '{}.raw'.format(os.path.splitext(os.path.basename(texture))[0])
-        if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:
+        if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1: # null terminated
             exit('Texture name too long: {} {}/{}'.format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
         self.original_texture_name = texture
-        self.texture_name = raw_texture[:MAX_TEXTURE_NAME_LEN - 1]
+        self.texture_name = raw_texture
 
     def pack(self):
-        data = self.offset.pack() + self.scale.pack()
+        data = self.offset.pack_f32() + self.scale.pack_f32()
         return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
 
     def convert_texture(self):
@@ -108,7 +116,7 @@ class Material:
 
 class Subset:
     def __init__(self, material, istart=0, icount=0, vstart=0):
-        self.material = material
+        self.material:Material = material
         self.istart = istart
         self.icount = icount
         self.vstart = vstart # offset in the vertex array
