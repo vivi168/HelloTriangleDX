@@ -302,7 +302,8 @@ void LoadAssets()
   CHECK_HR(g_CommandList->Reset(cmdAllocator, NULL));
 
   for (auto node : g_Scene.nodes) {
-    LoadMesh3D(node.model->mesh);
+    for (auto mesh : node.model->meshes)
+      LoadMesh3D(mesh);
   }
 
   // End of initial command list
@@ -467,19 +468,22 @@ void Render()
   g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
 
   for (const auto node : g_Scene.nodes) {
-    auto mesh = node.model->mesh;
-    auto geom = mesh->geometry;
-    g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
-    g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
-    g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    for (auto mesh : node.model->meshes) {
+      auto geom = mesh->geometry;
+      g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
+      g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
+      g_CommandList->IASetPrimitiveTopology(
+          D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    g_CommandList->SetGraphicsRootConstantBufferView(
-        1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+      g_CommandList->SetGraphicsRootConstantBufferView(
+          1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
 
-    for (const auto& subset : mesh->subsets) {
-      g_CommandList->SetGraphicsRootDescriptorTable(
-          2, subset.texture->srvGpuDescHandle);
-      g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0, 0);
+      for (const auto& subset : mesh->subsets) {
+        g_CommandList->SetGraphicsRootDescriptorTable(
+            2, subset.texture->srvGpuDescHandle);
+        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0,
+                                            0);
+      }
     }
   }
 
@@ -907,14 +911,14 @@ static void InitFrameResources()
   };
   ImGui_ImplDX12_Init(&initInfo);
 
-  // ImGui_ImplDX12_Init(g_Device.Get(), FRAME_BUFFER_COUNT,
-  //                     DXGI_FORMAT_R8G8B8A8_UNORM, g_MainDescriptorHeap);
-
   // Root Signature
   {
     // Descriptor ranges
+    // TODO: add constant for each of the slots
+    // TODO: how to go bindless? for textures at least.
     CD3DX12_DESCRIPTOR_RANGE descriptorRanges[2] = {};
     descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
+    //TODO: descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);  // u0
     descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
 
     // Root parameters

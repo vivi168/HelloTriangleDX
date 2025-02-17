@@ -1,6 +1,6 @@
 #pragma once
 
-struct Camera;
+class Camera;
 struct Model3D;
 
 namespace Renderer

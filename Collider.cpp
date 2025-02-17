@@ -30,56 +30,58 @@ void Collider::ColliderNode::CreateSurfacesFromModel()
   Clear();
   model->Clean();
 
-  for (auto& sub : model->mesh->subsets) {
-    unsigned int offset = sub.start;
+  for (auto mesh : model->meshes) {
+    for (auto& sub : mesh->subsets) {
+      unsigned int offset = sub.start;
 
-    for (unsigned int i = 0; i < sub.count; i += 3) {
-      Surface surf;
-      XMVECTOR xmv1, xmv2, xmv3;
+      for (unsigned int i = 0; i < sub.count; i += 3) {
+        Surface surf;
+        XMVECTOR xmv1, xmv2, xmv3;
 
-      // copy positions
-      {
-        int i1 = model->mesh->indices[i + offset];
-        int i2 = model->mesh->indices[i + 1 + offset];
-        int i3 = model->mesh->indices[i + 2 + offset];
+        // copy positions
+        {
+          int i1 = mesh->indices[i + offset];
+          int i2 = mesh->indices[i + 1 + offset];
+          int i3 = mesh->indices[i + 2 + offset];
 
-        Vertex v1 = model->mesh->vertices[i1];
-        Vertex v2 = model->mesh->vertices[i2];
-        Vertex v3 = model->mesh->vertices[i3];
+          Vertex v1 = mesh->vertices[i1];
+          Vertex v2 = mesh->vertices[i2];
+          Vertex v3 = mesh->vertices[i3];
 
-        xmv1 = XMVectorSet(v1.position.x, v1.position.y, v1.position.z, 1.0f);
-        xmv1 = XMVector4Transform(xmv1, model->WorldMatrix());
-        XMStoreFloat3(&surf.v1, xmv1);
+          xmv1 = XMVectorSet(v1.position.x, v1.position.y, v1.position.z, 1.0f);
+          xmv1 = XMVector4Transform(xmv1, model->WorldMatrix());
+          XMStoreFloat3(&surf.v1, xmv1);
 
-        xmv2 = XMVectorSet(v2.position.x, v2.position.y, v2.position.z, 1.0f);
-        xmv2 = XMVector4Transform(xmv2, model->WorldMatrix());
-        XMStoreFloat3(&surf.v2, xmv2);
+          xmv2 = XMVectorSet(v2.position.x, v2.position.y, v2.position.z, 1.0f);
+          xmv2 = XMVector4Transform(xmv2, model->WorldMatrix());
+          XMStoreFloat3(&surf.v2, xmv2);
 
-        xmv3 = XMVectorSet(v3.position.x, v3.position.y, v3.position.z, 1.0f);
-        xmv3 = XMVector4Transform(xmv3, model->WorldMatrix());
-        XMStoreFloat3(&surf.v3, xmv3);
+          xmv3 = XMVectorSet(v3.position.x, v3.position.y, v3.position.z, 1.0f);
+          xmv3 = XMVector4Transform(xmv3, model->WorldMatrix());
+          XMStoreFloat3(&surf.v3, xmv3);
+        }
+
+        // compute face normal and origin offset
+        {
+          XMVECTOR u, v, normal;
+          u = xmv2 - xmv1;
+          v = xmv3 - xmv1;
+          normal = XMVector3Normalize(XMVector3Cross(u, v));
+          XMStoreFloat3(&surf.normal, normal);
+
+          XMStoreFloat(&surf.originOffset, -XMVector3Dot(normal, xmv1));
+        }
+
+        surf.minY = std::min({surf.v1.y, surf.v2.y, surf.v3.y});
+        surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y});
+
+        if (surf.normal.y > 0.25)
+          floors.push_back(surf);
+        else if (surf.normal.y < -0.25)
+          ceilings.push_back(surf);
+        else
+          walls.push_back(surf);
       }
-
-      // compute face normal and origin offset
-      {
-        XMVECTOR u, v, normal;
-        u = xmv2 - xmv1;
-        v = xmv3 - xmv1;
-        normal = XMVector3Normalize(XMVector3Cross(u, v));
-        XMStoreFloat3(&surf.normal, normal);
-
-        XMStoreFloat(&surf.originOffset, -XMVector3Dot(normal, xmv1));
-      }
-
-      surf.minY = std::min({surf.v1.y, surf.v2.y, surf.v3.y});
-      surf.maxY = std::max({surf.v1.y, surf.v2.y, surf.v3.y});
-
-      if (surf.normal.y > 0.25)
-        floors.push_back(surf);
-      else if (surf.normal.y < -0.25)
-        ceilings.push_back(surf);
-      else
-        walls.push_back(surf);
     }
   }
 }

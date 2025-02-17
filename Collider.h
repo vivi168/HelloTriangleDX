@@ -33,7 +33,7 @@ private:
     std::list<Surface> walls;
     std::list<Surface> ceilings;
 
-    Model3D* model;
+    Model3D* model = nullptr;
 
     void CreateSurfacesFromModel();
     void Clear()

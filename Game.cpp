@@ -74,7 +74,8 @@ void Player::ProcessKeyboard(float dt)
     lookYaw -= PLAYER_ROT_SPEED * dt;
   }
 
-  static constexpr float epsilon = std::numeric_limits<float>::epsilon();
+  // TODO: align this with Camera.cpp
+  static constexpr float epsilon = 0.001f;
   static constexpr float upper = XM_PIDIV2 - epsilon;
   static constexpr float lower = -XM_PIDIV2 + epsilon;
 
@@ -177,20 +178,20 @@ void Game::Init()
   // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
   unitCubeMesh.Read("assets/plateform.objb");
-  cylinderMesh.Read("assets/cylinder.objb");
+  cylinderMesh.Read("assets/soldier.objb");
   stairsMesh.Read("assets/stairs.objb");
   fieldMesh.Read("assets/bf.objb");
 
-  bigTree.mesh = &treeMesh;
-  smallTree.mesh = &treeMesh;
-  yuka.mesh = &yukaMesh;
-  house.mesh = &houseMesh;
-  terrain.mesh = &terrainMesh;
-  // terrain.mesh = &fieldMesh;
-  cube.mesh = &cubeMesh;
-  cylinder.mesh = &cylinderMesh;
-  stairs.mesh = &stairsMesh;
-  unitCube.mesh = &unitCubeMesh;
+  bigTree.meshes.push_back(&treeMesh);
+  smallTree.meshes.push_back(&treeMesh);
+  yuka.meshes.push_back(&yukaMesh);
+  house.meshes.push_back(&houseMesh);
+  terrain.meshes.push_back(&terrainMesh);
+  // terrain.meshes.push_back(&fieldMesh);
+  cube.meshes.push_back(&cubeMesh);
+  cylinder.meshes.push_back(&cylinderMesh);
+  stairs.meshes.push_back(&stairsMesh);
+  unitCube.meshes.push_back(&unitCubeMesh);
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);

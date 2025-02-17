@@ -34,9 +34,7 @@ struct Mesh3D {
   std::string name;
   struct Geometry* geometry = nullptr;  // GPU data
 
-  // TODO: automatically read textures as well
   void Read(std::string filename);
-  void CreateTextures();
 
   uint64_t VertexBufferSize() const { return sizeof(Vertex) * header.numVerts; }
 
@@ -47,7 +45,9 @@ struct Mesh3D {
 };
 
 struct Model3D {
-  Mesh3D* mesh = nullptr;
+  std::vector<Mesh3D*> meshes;
+  // TODO: skeleton
+  // TODO: std::vector<animations>
 
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 rotate;
