@@ -9,7 +9,7 @@ import base64
 import struct
 from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, Triangle, Material, Subset
 
-import pdb
+# import pdb
 
 # 5123 -> USHORT
 # 5125 -> UINT
@@ -19,6 +19,7 @@ import pdb
 
 CHAR = 5120
 USHORT = 5123
+FLOAT32 = 5126
 
 TYPE_SIZES = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}
 COMPONENT_TYPE_SIZES = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}  # Size in bytes
@@ -109,18 +110,19 @@ def get_material(material_id):
     pbr_mr = material['pbrMetallicRoughness']
     base_color_texture_info = pbr_mr['baseColorTexture']
 
-    assert(base_color_texture_info is not None)
-    assert(base_color_texture_info.get('extensions') is not None)
-    tex_transform = base_color_texture_info['extensions']['KHR_texture_transform']
-    offset = tex_transform['offset']
-    scale = tex_transform['scale']
+    # assert(base_color_texture_info is not None)
+    # assert(base_color_texture_info.get('extensions') is not None)
+    # tex_transform = base_color_texture_info['extensions']['KHR_texture_transform']
+    # offset = tex_transform['offset']
+    # scale = tex_transform['scale']
 
     texture = textures[base_color_texture_info['index']]
     image = images[texture['source']]
     file = image['uri'] # TODO: can be base64?
     base_color_factor = pbr_mr.get('baseColorFactor', [1, 1, 1, 1])
 
-    return Material(os.path.join(cwd, file), Vec2(*offset), Vec2(*scale), Vec4(*base_color_factor))
+    # return Material(os.path.join(cwd, file), Vec2(*offset), Vec2(*scale), Vec4(*base_color_factor))
+    return Material(os.path.join(cwd, file))
 
 
 def process_mesh(i):
@@ -129,12 +131,13 @@ def process_mesh(i):
 
     primitives = mesh['primitives']
 
-    translation = node['translation']
-    scale = node['scale']
-    assert(translation is not None)
-    assert(scale is not None)
+    # translation = node['translation']
+    # scale = node['scale']
+    # assert(translation is not None)
+    # assert(scale is not None)
 
-    m = Mesh(translation, scale)
+    # m = Mesh(translation, scale)
+    m = Mesh()
 
     istart = 0
     vstart = 0
@@ -160,13 +163,15 @@ def process_mesh(i):
         assert(attributes.get('TEXCOORD_0') is not None)
 
         idx = attributes['POSITION']
-        assert(accessors[idx]['componentType'] == USHORT)
+        # assert(accessors[idx]['componentType'] == USHORT)
+        assert(accessors[idx]['componentType'] == FLOAT32)
         values = get_values(idx)
         positions = [Vec3(v[0], v[1], v[2]) for v in values]
 
         idx = attributes['NORMAL']
-        assert(accessors[idx]['componentType'] == CHAR)
-        assert(accessors[idx]['normalized'] == True)
+        # assert(accessors[idx]['componentType'] == CHAR)
+        assert(accessors[idx]['componentType'] == FLOAT32)
+        # assert(accessors[idx]['normalized'] == True)
         values = get_values(idx)
         normals = [Vec3(v[0], v[1], v[2]) for v in values]
 
@@ -177,8 +182,9 @@ def process_mesh(i):
         #     pass # TODO
 
         idx = attributes['TEXCOORD_0']
-        assert(accessors[idx]['componentType'] == USHORT)
-        assert(accessors[idx]['normalized'] == True)
+        # assert(accessors[idx]['componentType'] == USHORT)
+        assert(accessors[idx]['componentType'] == FLOAT32)
+        # assert(accessors[idx]['normalized'] == True)
         values = get_values(idx)
         uvs = [Vec2(v[0], v[1]) for v in values]
 

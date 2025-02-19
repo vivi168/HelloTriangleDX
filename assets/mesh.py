@@ -64,16 +64,18 @@ class Vec4:
 
 
 class Vertex:
-    def __init__(self, p=Vec3(), n=Vec3(), t=Vec2()):
+    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2()):
         self.position = p
         self.normal = n
-        self.uv = t
+        self.uv = u
 
     def pack(self):
         # positions (UINT16): p * scale + translation
         # normals (SNORM8): n / 128.0
+        # color (UNORM8): n / 255.0
         # uvs (UNORM16): t / 65535.0  * scale + translation (of subset)
-        return self.position.pack_u16() + self.normal.pack_s8() + self.uv.pack_u16()
+        # return self.position.pack_u16() + self.normal.pack_s8() + Vec4().pack() + self.uv.pack_u16()
+        return self.position.pack_f32() + self.normal.pack_f32() + Vec4().pack() + self.uv.pack_f32()
 
     def __str__(self):
         return '({}) ({}) ({})'.format(self.position, self.normal, self.uv)
@@ -122,7 +124,7 @@ class Subset:
         self.vstart = vstart # offset in the vertex array
 
     def __str__(self):
-        return '{} {} {} ({})'.format(self.istart, self.icount, self.vstart, self.material.texture_name)
+        return '{} {}/{} ({})'.format(self.istart, self.icount, self.vstart, self.material.texture_name)
 
     def pack(self):
         data = struct.pack('<III', self.istart, self.icount, self.vstart)
@@ -148,17 +150,17 @@ class Mesh:
 
         print('*** Vertices ***')
         for v in self.vertices:
-            print(v)
+            # print(v)
             data += v.pack()
 
         print('*** Triangles ***')
         for t in self.tris:
-            print(t)
+            # print(t)
             data += t.pack()
 
         print('*** Subsets ***')
         for s in self.subsets:
-            print(s)
+            # print(s)
             data += s.pack()
 
         with open(outfile, 'wb') as f:
