@@ -14,7 +14,7 @@ struct Vertex {
 };
 
 struct Subset {
-  uint32_t start, count;
+  uint32_t start, count, vstart, pad;
   TEXTURENAME name;
 
   struct Texture* texture = nullptr;  // GPU data
@@ -52,7 +52,7 @@ struct Model3D {
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 rotate;
   DirectX::XMFLOAT3 translate;
-  bool dirty; // world position changed
+  bool dirty; // world position changed. Rename to collisionDirty?
 
   Model3D();
   DirectX::XMMATRIX WorldMatrix();

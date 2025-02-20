@@ -24,9 +24,10 @@ struct Player {
 };
 
 static Mesh3D treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
-    terrainMesh, stairsMesh, unitCubeMesh, fieldMesh;
+    terrainMesh, stairsMesh, unitCubeMesh, fieldMesh, boarMesh, sponzaMesh;
+static Mesh3D humanMeshes[2];
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
-    unitCube;
+    unitCube, boar, human, sponza;
 
 static Camera camera;
 static Collider collider;
@@ -178,9 +179,15 @@ void Game::Init()
   // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
   unitCubeMesh.Read("assets/plateform.objb");
-  cylinderMesh.Read("assets/soldier.objb");
+  cylinderMesh.Read("assets/cylinder.objb");
   stairsMesh.Read("assets/stairs.objb");
   fieldMesh.Read("assets/bf.objb");
+
+  boarMesh.Read("assets/OPTIM_noq_boarskinbrown_mesh_1.m3d");
+  humanMeshes[0].Read("assets/OPTIM_noq_humanmale_mesh_1.m3d");
+  humanMeshes[1].Read("assets/OPTIM_noq_humanmale_mesh_2.m3d");
+
+  sponzaMesh.Read("assets/OPTIM_noq_Sponza_mesh_1.m3d");
 
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
@@ -193,6 +200,12 @@ void Game::Init()
   stairs.meshes.push_back(&stairsMesh);
   unitCube.meshes.push_back(&unitCubeMesh);
 
+  human.meshes.push_back(&humanMeshes[0]);
+  human.meshes.push_back(&humanMeshes[1]);
+
+  boar.meshes.push_back(&boarMesh);
+  sponza.meshes.push_back(&sponzaMesh);
+
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);
   bigTree.Translate(-7.f, 0.0f, 14.f);
@@ -203,8 +216,17 @@ void Game::Init()
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
 
+  human.Translate(10.f, 0, -10.f);
+  human.Scale(2.0f);
+
+  boar.Translate(10.f, 0, -15.f);
+  boar.Scale(3.0f);
+
   unitCube.Translate(10.f, plateformY, -10.f);
   unitCube.Rotate(plateformPitch, 0.f, 0.f);
+
+  sponza.Translate(-150.f, 5.f, -150.f);
+  sponza.Scale(5.f);
 
   Renderer::AppendToScene(&bigTree);
   Renderer::AppendToScene(&smallTree);
@@ -215,6 +237,10 @@ void Game::Init()
   Renderer::AppendToScene(&cylinder);
   Renderer::AppendToScene(&stairs);
   Renderer::AppendToScene(&unitCube);
+
+  Renderer::AppendToScene(&human);
+  Renderer::AppendToScene(&boar);
+  Renderer::AppendToScene(&sponza);
 
   // static
   collider.AppendModel(&terrain);

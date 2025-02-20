@@ -201,3 +201,4 @@ for i in range(len(meshes)):
     filename = "{}_mesh_{}.m3d".format(original_filename, i+1)
     m.pack(filename)
     m.convert_textures()
+    print(filename)

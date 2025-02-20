@@ -18,7 +18,7 @@ class Vec2:
         return struct.pack('<ff', self.x, self.y)
 
     def __str__(self):
-        return '{} {}'.format(self.x, self.y)
+        return '{:.6f} {:.6f}'.format(self.x, self.y)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -40,7 +40,7 @@ class Vec3:
         return struct.pack('<fff', self.x, self.y, self.z)
 
     def __str__(self):
-        return '{} {} {}'.format(self.x, self.y, self.z)
+        return '{:.6f} {:.6f} {:.6f}'.format(self.x, self.y, self.z)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z
@@ -57,7 +57,7 @@ class Vec4:
         return struct.pack('<ffff', self.x, self.y, self.z, self.w)
 
     def __str__(self):
-        return '{} {} {} {}'.format(self.x, self.y, self.z, self.w)
+        return '{:.6f} {:.6f} {:.6f} {:.6f}'.format(self.x, self.y, self.z, self.w)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z and self.w == other.w
@@ -89,7 +89,7 @@ class Triangle:
         self.vertIndices = [vi1, vi2, vi3]
 
     def pack(self):
-        return struct.pack('<HHH', self.vertIndices[0], self.vertIndices[2], self.vertIndices[1])
+        return struct.pack('<HHH', self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
 
     def __str__(self):
         return '{} {} {}'.format(
@@ -108,8 +108,9 @@ class Material:
         self.texture_name = raw_texture
 
     def pack(self):
-        data = self.offset.pack_f32() + self.scale.pack_f32()
-        return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
+        # data = self.offset.pack_f32() + self.scale.pack_f32()
+        # return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
+        return bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
 
     def convert_texture(self):
         m = RawImage(self.original_texture_name, None)
@@ -127,7 +128,7 @@ class Subset:
         return '{} {}/{} ({})'.format(self.istart, self.icount, self.vstart, self.material.texture_name)
 
     def pack(self):
-        data = struct.pack('<III', self.istart, self.icount, self.vstart)
+        data = struct.pack('<IIII', self.istart, self.icount, self.vstart, 0)
         pointer = struct.pack('<Q', 0) # pointer to material
         return data + self.material.pack() + pointer
 

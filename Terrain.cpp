@@ -48,7 +48,7 @@ Mesh3D Chunk::Mesh()
   mesh.indices[4] = 2;
   mesh.indices[5] = 3;
 
-  mesh.subsets[0] = Subset{0, 6, "cube.raw"};
+  mesh.subsets[0] = Subset{0, 6, 0, 0, "cube.raw"};
 
   mesh.name = "terrain issou";
 

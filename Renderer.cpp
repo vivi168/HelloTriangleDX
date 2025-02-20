@@ -481,7 +481,7 @@ void Render()
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
             2, subset.texture->srvGpuDescHandle);
-        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, 0,
+        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, subset.vstart,
                                             0);
       }
     }
