@@ -83,6 +83,24 @@ class Vertex:
     def __eq__(self, other):
         return self.position == other.position and self.normal == other.normal and self.uv == other.uv
 
+MAX_WEIGHTS = 4
+
+class SkinnedVertex(Vertex):
+    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2(), w: tuple[int]=[], ji: tuple[int]=[]):
+        super().__init__(p, n, u)
+
+        assert(len(w) == len(ji) <= MAX_WEIGHTS)
+        self.weights = w
+        self.joint_indices = ji
+
+    def pack(self):
+        vertex_data = super().pack()
+        padded_weights = list(self.weights) + [0.0] * (MAX_WEIGHTS - len(self.weights))
+        padded_indices = list(self.joint_indices) + [0] * (MAX_WEIGHTS - len(self.joint_indices))
+        weights_data = struct.pack('<BBBB', *padded_weights[:MAX_WEIGHTS])
+        indices_data = struct.pack('<BBBB', *padded_indices[:MAX_WEIGHTS])
+
+        return vertex_data + weights_data + indices_data
 
 class Triangle:
     def __init__(self, vi1=0, vi2=0, vi3=0):
@@ -146,6 +164,7 @@ class Mesh:
         data = bytearray()
 
         print('*** Header ***')
+        # TODO: add skin index if skinned mesh
         print(len(self.vertices), len(self.tris) * 3, len(self.subsets))
         data += struct.pack('<III', len(self.vertices), len(self.tris) * 3, len(self.subsets))
 
@@ -172,3 +191,6 @@ class Mesh:
             m = s.material
             print("{} -> {}".format(m.original_texture_name, m.texture_name))
             m.convert_texture()
+
+# class SkinnedMesh(Mesh):
+#     pass

@@ -7,10 +7,11 @@ import os
 import sys
 import base64
 import struct
-from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, Triangle, Material, Subset
+from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, SkinnedVertex, Triangle, Material, Subset
 
-# import pdb
+import pdb
 
+# 5121 -> UCHAR
 # 5123 -> USHORT
 # 5125 -> UINT
 # 5126 -> FLOAT32
@@ -18,10 +19,11 @@ from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, Triangle, Material, Subset
 # 34963 -> ELEMENT_ARRAY_BUFFER (indices)
 
 CHAR = 5120
+UCHAR = 5121
 USHORT = 5123
 FLOAT32 = 5126
 
-TYPE_SIZES = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}
+TYPE_SIZES = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
 COMPONENT_TYPE_SIZES = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}  # Size in bytes
 DTYPE_MAP = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}  # Struct format
 
@@ -35,11 +37,14 @@ DTYPE_MAP = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}  
 #     m = GltfMesh()
 #     m.from_file(sys.argv[1])
 
-file_rp = sys.argv[1]
-file_ap = os.path.abspath(file_rp)
-original_filename = os.path.splitext(os.path.basename(file_ap))[0]
-cwd = os.path.dirname(file_ap)
-with open(file_ap, 'r') as file:
+file_rel_path = sys.argv[1]
+skinned = False
+if len(sys.argv) > 2: skinned = sys.argv[2] == '--skinned'
+
+file_abs_path = os.path.abspath(file_rel_path)
+original_filename = os.path.splitext(os.path.basename(file_abs_path))[0]
+cwd = os.path.dirname(file_abs_path)
+with open(file_abs_path, 'r') as file:
     raw = file.read()
 
 gltf = json.loads(raw)
@@ -48,12 +53,17 @@ scene = gltf['scene']
 nodes = gltf['nodes']
 
 mesh_nodes = [i for i, n in enumerate(nodes) if 'mesh' in n]
+skin_nodes = [i for i, n in enumerate(nodes) if 'skin' in n]
+skin_indices = set([nodes[n]['skin'] for n in skin_nodes])
+pdb.set_trace()
 meshes = gltf['meshes']
+skins = gltf['skins']
 materials = gltf['materials']
 textures = gltf['textures']
 images = gltf['images']
 
 assert(len(mesh_nodes) == len(meshes))
+assert(len(skin_indices) == len(skins))
 
 accessors = gltf['accessors']
 buffer_views = gltf['bufferViews']
@@ -125,9 +135,8 @@ def get_material(material_id):
     return Material(os.path.join(cwd, file))
 
 
-def process_mesh(i):
-    node = nodes[mesh_nodes[i]]
-    mesh = meshes[node['mesh']]
+def process_mesh(mi):
+    mesh = meshes[mi]
 
     primitives = mesh['primitives']
 
@@ -162,9 +171,12 @@ def process_mesh(i):
         assert(attributes.get('NORMAL') is not None)
         assert(attributes.get('TEXCOORD_0') is not None)
 
+        # pdb.set_trace()
+
         idx = attributes['POSITION']
         # assert(accessors[idx]['componentType'] == USHORT)
         assert(accessors[idx]['componentType'] == FLOAT32)
+        assert(accessors[idx].get('normalized', False) == False)
         values = get_values(idx)
         positions = [Vec3(v[0], v[1], v[2]) for v in values]
 
@@ -172,6 +184,7 @@ def process_mesh(i):
         # assert(accessors[idx]['componentType'] == CHAR)
         assert(accessors[idx]['componentType'] == FLOAT32)
         # assert(accessors[idx]['normalized'] == True)
+        assert(accessors[idx].get('normalized', False) == False)
         values = get_values(idx)
         normals = [Vec3(v[0], v[1], v[2]) for v in values]
 
@@ -185,20 +198,72 @@ def process_mesh(i):
         # assert(accessors[idx]['componentType'] == USHORT)
         assert(accessors[idx]['componentType'] == FLOAT32)
         # assert(accessors[idx]['normalized'] == True)
+        assert(accessors[idx].get('normalized', False) == False)
         values = get_values(idx)
         uvs = [Vec2(v[0], v[1]) for v in values]
 
-        assert len(positions) == len(normals) == len(uvs) == (num_vertices)
-        for i in range(num_vertices):
-            m.vertices.append(Vertex(positions[i], normals[i], uvs[i]))
+        assert(len(positions) == len(normals) == len(uvs) == num_vertices)
+
+        if skinned:
+            assert(attributes.get('JOINTS_0') is not None)
+            assert(attributes.get('WEIGHTS_0') is not None)
+
+            idx = attributes['JOINTS_0']
+            assert(accessors[idx]['componentType'] == UCHAR)
+            # assert(accessors[idx]['normalized'] == True)
+            assert(accessors[idx].get('normalized', False) == False)
+            joints = get_values(idx)
+
+            idx = attributes['WEIGHTS_0']
+            assert(accessors[idx]['componentType'] == UCHAR)
+            assert(accessors[idx]['normalized'] == True)
+            weights = get_values(idx)
+
+            assert(len(joints) == len(weights) == num_vertices)
+
+            for i in range(num_vertices):
+                m.vertices.append(SkinnedVertex(positions[i], normals[i], uvs[i], weights[i], joints[i]))
+        else:
+            for i in range(num_vertices):
+                m.vertices.append(Vertex(positions[i], normals[i], uvs[i]))
 
     return m
 
+def construct_bone_hierarchy(si):
+    skin = skins[si]
+    joints = skin['joints']
+    skeleton_index = skin['skeleton']
+    pairs = []
+    stack = [(skeleton_index, -1)]
 
-for i in range(len(meshes)):
+    while stack:
+        node_idx, parent_idx = stack.pop()
+        pairs.append({"child": node_idx, "parent": parent_idx})
+
+        if "children" in nodes[node_idx]:
+            for child_idx in nodes[node_idx]["children"]:
+                stack.append((child_idx, node_idx))
+
+    # for pair in pairs:
+    #     c = pair['child']
+    #     p = pair['parent']
+    #     print("{}({}) -> {}({})".format(c, nodes[c].get('name', c), p, nodes[p].get('name', p)))
+
+    return pairs
+
+for i in mesh_nodes:
+    node = nodes[i]
     print("***** process MESH {} *****".format(i))
-    m = process_mesh(i)
+    m = process_mesh(node['mesh'])
     filename = "{}_mesh_{}.m3d".format(original_filename, i+1)
+    # TODO: assign skin index
     m.pack(filename)
     m.convert_textures()
     print(filename)
+
+if skinned:
+    for i in skin_indices:
+        # potentially same skin, avoid processing twice
+        jh = construct_bone_hierarchy(i)
+
+        pdb.set_trace()
