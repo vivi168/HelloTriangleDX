@@ -302,8 +302,7 @@ void LoadAssets()
   CHECK_HR(g_CommandList->Reset(cmdAllocator, NULL));
 
   for (auto node : g_Scene.nodes) {
-    for (auto mesh : node.model->meshes)
-      LoadMesh3D(mesh);
+    for (auto mesh : node.model->meshes) LoadMesh3D(mesh);
   }
 
   // End of initial command list
@@ -358,11 +357,13 @@ void Update(float time)
       ObjectCB1_VS cb;
 
       XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
-      XMStoreFloat4x4(&cb.WorldViewProj, worldViewProjection);
-      XMStoreFloat4x4(&cb.WorldMatrix, node.model->WorldMatrix());
+      XMStoreFloat4x4(&cb.WorldViewProj,
+                      XMMatrixTranspose(worldViewProjection));
+      XMStoreFloat4x4(&cb.WorldMatrix,
+                      XMMatrixTranspose(node.model->WorldMatrix()));
 
-      XMMATRIX normalMatrix = XMMatrixTranspose(
-          XMMatrixInverse(nullptr, node.model->WorldMatrix()));
+      XMMATRIX normalMatrix =
+          XMMatrixInverse(nullptr, node.model->WorldMatrix());
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
       memcpy((uint8_t*)ctx->objectCbAddress + node.cbIndex, &cb, sizeof(cb));
@@ -481,8 +482,8 @@ void Render()
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
             2, subset.texture->srvGpuDescHandle);
-        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start, subset.vstart,
-                                            0);
+        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
+                                            subset.vstart, 0);
       }
     }
   }

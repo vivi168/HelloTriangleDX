@@ -10,11 +10,11 @@ cbuffer ObjectCb : register(b1)
 VS_OUTPUT main(VS_INPUT input)
 {
   VS_OUTPUT output;
-  output.pos = mul(WorldViewProj, float4(input.pos, 1.0f));
+  output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
 
   output.color = input.color;
   output.texCoord = input.texCoord;
-  float3 norm = mul(NormalMatrix, float4(input.normal, 1.0f));
+  float3 norm = mul(float4(input.normal, 1.0f), NormalMatrix);
   output.normal = normalize(norm);
   return output;
 }

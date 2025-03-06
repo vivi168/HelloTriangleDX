@@ -25,7 +25,10 @@ void Mesh3D::Read(std::string filename)
 }
 
 Model3D::Model3D()
-    : scale(1.f, 1.f, 1.f), rotate(0.f, 0.f, 0.f), translate(0.f, 0.f, 0.f), dirty(false)
+    : scale(1.f, 1.f, 1.f),
+      rotate(0.f, 0.f, 0.f),
+      translate(0.f, 0.f, 0.f),
+      dirty(false)
 {
 }
 
@@ -33,17 +36,14 @@ DirectX::XMMATRIX Model3D::WorldMatrix()
 {
   XMVECTOR scaleVector = XMLoadFloat3(&scale);
   XMVECTOR transVector = XMLoadFloat3(&translate);
+  XMVECTOR rotVector = XMLoadFloat3(&rotate);
+  XMVECTOR q = XMQuaternionRotationRollPitchYawFromVector(rotVector);
 
   XMMATRIX scaleMatrix = XMMatrixScalingFromVector(scaleVector);
   XMMATRIX transMatrix = XMMatrixTranslationFromVector(transVector);
+  XMMATRIX rotMatrix = XMMatrixRotationQuaternion(q);
 
-  XMMATRIX rotX = XMMatrixRotationX(rotate.x);
-  XMMATRIX rotY = XMMatrixRotationY(rotate.y);
-  XMMATRIX rotZ = XMMatrixRotationZ(rotate.z);
-
-  XMMATRIX rotXYZ = rotX * rotY * rotZ;
-
-  return rotXYZ * scaleMatrix * transMatrix;
+  return scaleMatrix * rotMatrix * transMatrix;
 }
 
 void Model3D::Scale(float s)
