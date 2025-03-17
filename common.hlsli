@@ -4,6 +4,10 @@ struct VS_INPUT
   float3 normal : NORMAL;
   float4 color : COLOR;
   float2 texCoord : TEXCOORD;
+#ifdef SKINNED
+  float4 boneWeights : WEIGHTS;
+  uint4 boneIndices : BONEINDICES;
+#endif
 };
 
 struct VS_INPUT_TERRAIN

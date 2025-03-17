@@ -11,7 +11,7 @@ class Chunk
 public:
   Chunk();
   DirectX::XMMATRIX WorldMatrix();
-  Mesh3D Mesh();
+  Mesh3D<Vertex> Mesh();
 
 private:
   void InitHeightmap();
@@ -19,7 +19,7 @@ private:
   int cx, cy;
   DirectX::XMFLOAT3 translate;
   std::array<std::array<float, CHUNK_SIZE + 1>, CHUNK_SIZE + 1> m_Heightmap;
-  Mesh3D mesh;
+  Mesh3D<Vertex> mesh;
 };
 
 class Terrain

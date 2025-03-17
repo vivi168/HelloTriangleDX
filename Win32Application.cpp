@@ -64,8 +64,6 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   ShowWindow(g_Hwnd, nCmdShow);
 
-  Chunk t;
-
   Game::Init();
 
   Renderer::LoadAssets();

@@ -1,7 +1,5 @@
 # Convert a GLTF packed with gltfpack to binary format
-# Position are assumed to be quantized to uint16
-# Normals quantized to int8 and normalized
-# UVs quantized to uint16 and normalized
+# gltfpack.exe -i "$InFile" -o "$OutFile -noq
 import json
 import os
 import sys
@@ -20,6 +18,7 @@ import pdb
 
 CHAR = 5120
 UCHAR = 5121
+SSHORT = 5122
 USHORT = 5123
 FLOAT32 = 5126
 
@@ -55,7 +54,6 @@ nodes = gltf['nodes']
 mesh_nodes = [i for i, n in enumerate(nodes) if 'mesh' in n]
 skin_nodes = [i for i, n in enumerate(nodes) if 'skin' in n]
 skin_indices = set([nodes[n]['skin'] for n in skin_nodes])
-pdb.set_trace()
 meshes = gltf['meshes']
 skins = gltf['skins']
 materials = gltf['materials']
@@ -229,34 +227,31 @@ def process_mesh(mi):
 
     return m
 
+
 def construct_bone_hierarchy(si):
     skin = skins[si]
-    joints = skin['joints']
     skeleton_index = skin['skeleton']
-    pairs = []
+    pairs = {}
+
     stack = [(skeleton_index, -1)]
 
     while stack:
         node_idx, parent_idx = stack.pop()
-        pairs.append({"child": node_idx, "parent": parent_idx})
+        assert(pairs.get(node_idx) is None)
+        pairs[node_idx] = parent_idx
 
         if "children" in nodes[node_idx]:
             for child_idx in nodes[node_idx]["children"]:
                 stack.append((child_idx, node_idx))
 
-    # for pair in pairs:
-    #     c = pair['child']
-    #     p = pair['parent']
-    #     print("{}({}) -> {}({})".format(c, nodes[c].get('name', c), p, nodes[p].get('name', p)))
-
     return pairs
 
-for i in mesh_nodes:
-    node = nodes[i]
+for i, ni in enumerate(mesh_nodes):
+    node = nodes[ni]
     print("***** process MESH {} *****".format(i))
     m = process_mesh(node['mesh'])
     filename = "{}_mesh_{}.m3d".format(original_filename, i+1)
-    # TODO: assign skin index
+    # TODO: assign skin index to mesh
     m.pack(filename)
     m.convert_textures()
     print(filename)

@@ -6,11 +6,22 @@
 #define MAX_TEXTURE_NAME_LEN 64
 typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
 
+#define MAX_WEIGHTS 4
+
 struct Vertex {
   DirectX::XMFLOAT3 position;
   DirectX::XMFLOAT3 normal;
   DirectX::XMFLOAT4 color;
   DirectX::XMFLOAT2 uv;
+};
+
+struct SkinnedVertex : Vertex {
+  UCHAR weights[MAX_WEIGHTS];
+  UCHAR joints[MAX_WEIGHTS];
+};
+
+struct Skin {
+  std::vector<int> boneHierarchy;
 };
 
 struct Subset {
@@ -20,6 +31,7 @@ struct Subset {
   struct Texture* texture = nullptr;  // GPU data
 };
 
+template <typename T>
 struct Mesh3D {
   struct {
     uint32_t numVerts;
@@ -27,16 +39,41 @@ struct Mesh3D {
     uint32_t numSubsets;
   } header;
 
-  std::vector<Vertex> vertices;
+  static_assert(std::is_base_of_v<Vertex, T>);
+  std::vector<T> vertices;
   std::vector<uint16_t> indices;
   std::vector<Subset> subsets;
 
   std::string name;
   struct Geometry* geometry = nullptr;  // GPU data
+  struct Skin* skin = nullptr; // in case of skinned mesh
 
-  void Read(std::string filename);
+  void Read(std::string filename)
+  {
+    FILE* fp;
+    fopen_s(&fp, filename.c_str(), "rb");
+    assert(fp);
 
-  uint64_t VertexBufferSize() const { return sizeof(Vertex) * header.numVerts; }
+    name = filename;
+
+    fread(&header, sizeof(header), 1, fp);
+
+    vertices.resize(header.numVerts);
+    indices.resize(header.numIndices);
+    subsets.resize(header.numSubsets);
+
+    //if constexpr (std::is_same_v<T, SkinnedVertex>) {
+
+    //}
+
+    fread(vertices.data(), sizeof(T), header.numVerts, fp);
+    fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
+    fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
+
+    fclose(fp);
+  }
+
+  uint64_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
 
   uint64_t IndexBufferSize() const
   {
@@ -45,7 +82,8 @@ struct Mesh3D {
 };
 
 struct Model3D {
-  std::vector<Mesh3D*> meshes;
+  std::vector<Mesh3D<Vertex>*> meshes;
+  std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
   // TODO: skeleton
   // TODO: std::vector<animations>
 

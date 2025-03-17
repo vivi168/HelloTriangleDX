@@ -92,7 +92,7 @@ struct Texture {
 
 namespace Renderer
 {
-enum class PSO { Basic, Terrain, ColliderSurface };
+enum class PSO { Basic, Skinned, Terrain, ColliderSurface };
 
 struct Scene {
   struct SceneNode {
@@ -213,8 +213,8 @@ static void WaitForFrame(FrameContext* ctx);
 static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
-static void LoadMesh3D(Mesh3D* mesh);
-static Geometry* CreateGeometry(Mesh3D* mesh);
+template <typename T> static void LoadMesh3D(Mesh3D<T>* mesh);
+template <typename T> static Geometry* CreateGeometry(Mesh3D<T>* mesh);
 static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
@@ -303,6 +303,7 @@ void LoadAssets()
 
   for (auto node : g_Scene.nodes) {
     for (auto mesh : node.model->meshes) LoadMesh3D(mesh);
+    for (auto mesh : node.model->skinnedMeshes) LoadMesh3D(mesh);
   }
 
   // End of initial command list
@@ -466,10 +467,32 @@ void Render()
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
-  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
-
   for (const auto node : g_Scene.nodes) {
+    // static meshes
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
+
     for (auto mesh : node.model->meshes) {
+      auto geom = mesh->geometry;
+      g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
+      g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
+      g_CommandList->IASetPrimitiveTopology(
+          D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+      g_CommandList->SetGraphicsRootConstantBufferView(
+          1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+
+      for (const auto& subset : mesh->subsets) {
+        g_CommandList->SetGraphicsRootDescriptorTable(
+            2, subset.texture->srvGpuDescHandle);
+        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
+                                            subset.vstart, 0);
+      }
+    }
+
+    // skinned meshes
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
+
+    for (auto mesh : node.model->skinnedMeshes) {
       auto geom = mesh->geometry;
       g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
       g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
@@ -555,6 +578,7 @@ void Cleanup()
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
+  g_PipelineStateObjects[PSO::Skinned].Reset();
   g_PipelineStateObjects[PSO::Terrain].Reset();
   g_RootSignature.Reset();
 
@@ -1083,6 +1107,65 @@ static void InitFrameResources()
     g_PipelineStateObjects[PSO::Basic].Attach(pipelineStateObject);
   }
 
+  // Pipeline State for skinned objects
+  {
+    // Vertex Shader
+    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"VS_skinned.cso").c_str());
+    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
+                                          vertexShaderBlob.size()};
+
+    // Pixel Shader
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"PS_skinned.cso").c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
+
+    // Input Layout
+    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"WEIGHTS", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"BONEINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT, 0,
+         D3D12_APPEND_ALIGNED_ELEMENT,
+         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    };
+
+    // PSO
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout.NumElements = _countof(inputLayout);
+    psoDesc.InputLayout.pInputElementDescs = inputLayout;
+    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.VS = vertexShader;
+    psoDesc.PS = pixelShader;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
+    psoDesc.SampleMask = 0xffffffff;
+    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
+    SetDefaultBlendDesc(psoDesc.BlendState);
+    psoDesc.NumRenderTargets = 1;
+    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+
+    // Create the PSO
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreateGraphicsPipelineState(
+        &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::Skinned].Attach(pipelineStateObject);
+  }
+
   // Pipeline state for terrain
   {
     // Vertex Shader
@@ -1253,7 +1336,8 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
   }
 }
 
-static void LoadMesh3D(Mesh3D* mesh)
+template <typename T>
+static void LoadMesh3D(Mesh3D<T>* mesh)
 {
   auto geomNeedle = g_Geometries.find(mesh->name);
   if (geomNeedle == std::end(g_Geometries)) {
@@ -1280,7 +1364,8 @@ static void LoadMesh3D(Mesh3D* mesh)
   }
 }
 
-static Geometry* CreateGeometry(Mesh3D* mesh)
+template <typename T>
+static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 {
   Geometry geom;
 
@@ -1354,7 +1439,7 @@ static Geometry* CreateGeometry(Mesh3D* mesh)
     // create a vertex buffer
     geom.m_VertexBufferView.BufferLocation =
         geom.m_VertexBuffer->GetGPUVirtualAddress();
-    geom.m_VertexBufferView.StrideInBytes = sizeof(Vertex);
+    geom.m_VertexBufferView.StrideInBytes = sizeof(T);
     geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
   }
 

@@ -24,7 +24,8 @@ void Chunk::InitHeightmap()
   }
 }
 
-Mesh3D Chunk::Mesh()
+/*
+Mesh3D<Vertex> Chunk::Mesh()
 {
   if (mesh.header.numVerts != 0) return mesh;
 
@@ -116,7 +117,7 @@ Mesh3D Chunk::Mesh()
     vi += 4;
     ii += 6;
   }
-  */
+  * /
   // TODO
   return mesh;
 }
@@ -127,3 +128,4 @@ XMMATRIX Chunk::WorldMatrix()
 
   return XMMatrixTranslationFromVector(transVector);
 }
+*/
