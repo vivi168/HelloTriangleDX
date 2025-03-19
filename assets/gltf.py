@@ -256,9 +256,137 @@ for i, ni in enumerate(mesh_nodes):
     m.convert_textures()
     print(filename)
 
-if skinned:
-    for i in skin_indices:
-        # potentially same skin, avoid processing twice
-        jh = construct_bone_hierarchy(i)
+################################################################################
+#
+# SKINNED
+#
+################################################################################
 
+if skinned:
+    animations = gltf['animations']
+
+    def keyframes_for(ai):
+        animation = animations[ai]
+        samplers = animation['samplers']
+        channels = animation['channels']
+
+        sampler_input_accessors = set([s['input'] for s in samplers])
+        sampler_output_accessors = set([s['output'] for s in samplers])
+        sampler_input_values = {}
+        sampler_output_values = {}
+        for s in sampler_input_accessors:
+            if s not in sampler_input_values:
+                sampler_input_values[s] = get_values(s)
+        for s in sampler_output_accessors:
+            if s not in sampler_output_values:
+                # TODO: values may be normalized (rotation => quaternion)
+                sampler_output_values[s] = get_values(s)
+
+
+        nodes_keyframes = {}
+        target_nodes = set([c['target']['node'] for c in channels])
+
+        num_keyframes = []
+
+        for node_idx in target_nodes:
+            channels = [channel for channel in animation['channels'] if channel['target']['node'] == node_idx]
+            trans_channels = [channel for channel in channels if channel['target']['path'] == 'translation']
+            rot_channels = [channel for channel in channels if channel['target']['path'] == 'rotation']
+            scale_channels = [channel for channel in channels if channel['target']['path'] == 'scale']
+
+            keyframes = {}
+
+            # TODO: dry these 3 ifs
+            if len(trans_channels) > 0:
+                assert(len(trans_channels) == 1)
+                sampler_i = trans_channels[0]['sampler']
+                sampler = samplers[sampler_i]
+                inputs = sampler_input_values[sampler['input']]
+                outputs = sampler_output_values[sampler['output']]
+
+                assert(len(inputs) == len(outputs))
+                for i in range(len(inputs)):
+                    keyframes[inputs[i][0]] = { 'translation': outputs[i] }
+
+            if len(rot_channels) > 0:
+                assert(len(rot_channels) == 1)
+                sampler_i = rot_channels[0]['sampler']
+                sampler = samplers[sampler_i]
+                inputs = sampler_input_values[sampler['input']]
+                outputs = sampler_output_values[sampler['output']]
+
+                assert(len(inputs) == len(outputs))
+                for i in range(len(inputs)):
+                    key = inputs[i][0]
+                    if key in keyframes:
+                        keyframes[key]['rotation'] = outputs[i]
+                    else:
+                        keyframes[key] = { 'rotation': outputs[i] }
+
+            if len(scale_channels) > 0:
+                assert(len(scale_channels) == 1)
+                sampler_i = scale_channels[0]['sampler']
+                sampler = samplers[sampler_i]
+                inputs = sampler_input_values[sampler['input']]
+                outputs = sampler_output_values[sampler['output']]
+
+                assert(len(inputs) == len(outputs))
+                for i in range(len(inputs)):
+                    key = inputs[i][0]
+                    if key in keyframes:
+                        keyframes[key]['scale'] = outputs[i]
+                    else:
+                        keyframes[key] = { 'scale': outputs[i] }
+
+            nodes_keyframes[node_idx] = keyframes
+            num_keyframes.append(len(keyframes))
+
+        # assert(len(set(num_keyframes)) == 1)
+        return num_keyframes, nodes_keyframes
+
+    for i in skin_indices:
+        bh = construct_bone_hierarchy(i)
+
+        num_keyframes, animation_keyframes = keyframes_for(0)
+        local_node_transforms = {}
+
+        joints = skins[i]['joints']
+        extra = set(bh.keys()) - set(joints)
+
+        # list of nodes whose direct parent are not in joint list
+        parents_not_joint = {}
+        for joint in joints:
+            chain = []
+            parent = bh.get(joint)
+
+            while parent in extra:
+                chain.append(parent)
+                parent = bh.get(parent)
+
+            if chain:
+                parents_not_joint[joint] = chain
+
+        pdb.set_trace()
+        for node_index in joints:
+            local_transform = {}
+            parent_transform = {}
+
+            # TODO: compute the parent transform here
+            if node_index in parents_not_joint:
+                pdb.set_trace()
+
+            # TODO: here node_index is potentially not in animation_keyframes so use node transform.
+            # there is thus only one keyframe
+            if node_index not in animation_keyframes:
+                pdb.set_trace()
+
+            kf = animation_keyframes[node_index]
+            for time, kf_transforms in kf.items():
+                t = {}
+                t['translation'] = Vec3(*kf_transforms.get('translation', nodes[node_index].get('translation', [0, 0, 0])))
+                t['rotation'] = Vec4(*kf_transforms.get('rotation', nodes[node_index].get('rotation', [0, 0, 0, 1])))
+                t['scale'] = Vec3(*kf_transforms.get('scale', nodes[node_index].get('scale', [1, 1, 1])))
+
+                local_transform[time] = t
+            local_node_transforms[node_index] = local_transform
         pdb.set_trace()
