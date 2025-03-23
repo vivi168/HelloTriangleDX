@@ -21,7 +21,51 @@ struct SkinnedVertex : Vertex {
 };
 
 struct Skin {
-  std::vector<int> boneHierarchy;
+  struct {
+    UINT rootBone;
+    UINT numBones;
+    UINT numJoints;
+  } header;
+
+  // child -> parent
+  std::unordered_map<USHORT, USHORT> boneHierarchy;
+  // joint -> matrix
+  std::unordered_map<USHORT, DirectX::XMFLOAT4X4> inverseBindMatrices;
+
+  void Read(std::string filename)
+  {
+    FILE* fp;
+    fopen_s(&fp, filename.c_str(), "rb");
+    assert(fp);
+
+    fread(&header, sizeof(header), 1, fp);
+
+    // bone hierarchy
+    std::vector<USHORT> childBones;
+    std::vector<USHORT> parentBones;
+    childBones.resize(header.numBones);
+    parentBones.resize(header.numBones);
+
+    fread(childBones.data(), sizeof(USHORT), header.numBones, fp);
+    fread(parentBones.data(), sizeof(USHORT), header.numBones, fp);
+
+    for (int i = 0; i < header.numBones; i++) {
+      boneHierarchy[childBones[i]] = parentBones[i];
+    }
+
+    // joints + inverse bind matrices
+    std::vector<USHORT> jointIndices;
+    std::vector<DirectX::XMFLOAT4X4> matrices;
+    jointIndices.resize(header.numJoints);
+    matrices.resize(header.numJoints);
+
+    fread(jointIndices.data(), sizeof(USHORT), header.numJoints, fp);
+    fread(matrices.data(), sizeof(DirectX::XMFLOAT4X4), header.numJoints, fp);
+
+    for (int i = 0; i < header.numJoints; i++) {
+      inverseBindMatrices[jointIndices[i]] = matrices[i];
+    }
+  }
 };
 
 struct Subset {

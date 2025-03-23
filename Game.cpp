@@ -25,10 +25,11 @@ struct Player {
 
 static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
     terrainMesh, stairsMesh, unitCubeMesh, fieldMesh, boarMesh, sponzaMesh;
-static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh;
+static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh, cesiumMesh;
+static Skin cesiumSkin;
 
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
-    unitCube, boar, human, sponza;
+    unitCube, boar, human, sponza, cesium;
 
 static Camera camera;
 static Collider collider;
@@ -191,6 +192,10 @@ void Game::Init()
 
   sponzaMesh.Read("assets/OPTIM_noq_Sponza_mesh_1.m3d");
 
+  cesiumMesh.Read("assets/OPTIM_CesiumMan_mesh_1.mesh");
+  cesiumSkin.Read("assets/OPTIM_CesiumMan_skin_1.skin");
+  // animation
+
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
   yuka.meshes.push_back(&yukaMesh);
@@ -207,6 +212,7 @@ void Game::Init()
   boar.skinnedMeshes.push_back(&boarSkinnedMesh);
   //boar.meshes.push_back(&boarMesh);
   sponza.meshes.push_back(&sponzaMesh);
+  cesium.skinnedMeshes.push_back(&cesiumMesh);
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);
@@ -230,6 +236,9 @@ void Game::Init()
   sponza.Translate(-150.f, 5.f, -150.f);
   sponza.Scale(5.f);
 
+  cesium.Scale(5.f);
+  cesium.Rotate(-XM_PIDIV2, 0.0f, 0.0f);
+
   Renderer::AppendToScene(&bigTree);
   Renderer::AppendToScene(&smallTree);
   Renderer::AppendToScene(&yuka);
@@ -243,6 +252,7 @@ void Game::Init()
   Renderer::AppendToScene(&human);
   Renderer::AppendToScene(&boar);
   Renderer::AppendToScene(&sponza);
+  Renderer::AppendToScene(&cesium);
 
   // static
   collider.AppendModel(&terrain);

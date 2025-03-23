@@ -192,5 +192,32 @@ class Mesh:
             print("{} -> {}".format(m.original_texture_name, m.texture_name))
             m.convert_texture()
 
-# class SkinnedMesh(Mesh):
-#     pass
+class Skin:
+    def __init__(self, root_bone, joints, matrices, hierarchy):
+        self.root_bone = root_bone
+        self.joints = joints
+        self.inverse_bind_matrices = matrices
+        self.bone_hierarchy = hierarchy
+
+        # print(" ".join(f"{val:.6f}" for val in inverse_bind_matrices[0]))
+
+    def pack(self, outfile):
+        # header
+        num_bones = len(self.bone_hierarchy)
+        num_joints = len(self.joints)
+
+        assert(len(self.joints) == len(self.inverse_bind_matrices))
+        header = struct.pack('<III', self.root_bone, num_bones, num_joints)
+
+        matrices = bytearray()
+        for m in self.inverse_bind_matrices:
+            matrices += struct.pack('<16f', *m)
+
+        child_bones = struct.pack('<{}h'.format(num_bones), *self.bone_hierarchy.keys())
+        parent_bones = struct.pack('<{}h'.format(num_bones), *self.bone_hierarchy.values())
+        joint_bones = struct.pack('<{}h'.format(num_joints), *self.joints)
+
+        data = header + child_bones + parent_bones + joint_bones + matrices
+
+        with open(outfile, 'wb') as f:
+            f.write(data)
