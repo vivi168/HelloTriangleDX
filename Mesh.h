@@ -28,9 +28,9 @@ struct Skin {
   } header;
 
   // child -> parent
-  std::unordered_map<USHORT, USHORT> boneHierarchy;
+  std::unordered_map<SHORT, SHORT> boneHierarchy;
   // joint -> matrix
-  std::unordered_map<USHORT, DirectX::XMFLOAT4X4> inverseBindMatrices;
+  std::unordered_map<SHORT, DirectX::XMFLOAT4X4> inverseBindMatrices;
 
   void Read(std::string filename)
   {
@@ -41,25 +41,25 @@ struct Skin {
     fread(&header, sizeof(header), 1, fp);
 
     // bone hierarchy
-    std::vector<USHORT> childBones;
-    std::vector<USHORT> parentBones;
+    std::vector<SHORT> childBones;
+    std::vector<SHORT> parentBones;
     childBones.resize(header.numBones);
     parentBones.resize(header.numBones);
 
-    fread(childBones.data(), sizeof(USHORT), header.numBones, fp);
-    fread(parentBones.data(), sizeof(USHORT), header.numBones, fp);
+    fread(childBones.data(), sizeof(SHORT), header.numBones, fp);
+    fread(parentBones.data(), sizeof(SHORT), header.numBones, fp);
 
     for (int i = 0; i < header.numBones; i++) {
       boneHierarchy[childBones[i]] = parentBones[i];
     }
 
     // joints + inverse bind matrices
-    std::vector<USHORT> jointIndices;
+    std::vector<SHORT> jointIndices;
     std::vector<DirectX::XMFLOAT4X4> matrices;
     jointIndices.resize(header.numJoints);
     matrices.resize(header.numJoints);
 
-    fread(jointIndices.data(), sizeof(USHORT), header.numJoints, fp);
+    fread(jointIndices.data(), sizeof(SHORT), header.numJoints, fp);
     fread(matrices.data(), sizeof(DirectX::XMFLOAT4X4), header.numJoints, fp);
 
     for (int i = 0; i < header.numJoints; i++) {
