@@ -5,8 +5,8 @@ using namespace DirectX;
 
 Model3D::Model3D()
     : scale(1.f, 1.f, 1.f),
-      rotate(0.f, 0.f, 0.f),
       translate(0.f, 0.f, 0.f),
+      rotate(0.f, 0.f, 0.f),
       dirty(false)
 {
 }

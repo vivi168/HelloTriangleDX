@@ -221,3 +221,22 @@ class Skin:
 
         with open(outfile, 'wb') as f:
             f.write(data)
+
+class Animation:
+    def __init__(self, num_kf, keyframes):
+        self.num_keyframes = num_kf
+        self.keyframes = keyframes
+
+    def pack(self, outfile):
+        # header
+        num_animated_bones = struct.pack('<I', len(self.keyframes))
+        num_keyframes = struct.pack('<{}I'.format(len(self.keyframes)), *self.num_keyframes)
+
+        keyframes_data = bytearray()
+        for ni, keyframes in self.keyframes.items():
+            for time, transform in keyframes.items():
+                keyframes_data += struct.pack('<f', time) + transform['scale'].pack_f32() + transform['translation'].pack_f32() + transform['rotation'].pack()
+
+        data = num_animated_bones + num_keyframes + keyframes_data
+        with open(outfile, 'wb') as f:
+            f.write(data)

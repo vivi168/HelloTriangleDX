@@ -6,7 +6,7 @@ import sys
 import base64
 import struct
 from collections import defaultdict, deque
-from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, SkinnedVertex, Triangle, Material, Subset, Skin
+from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, SkinnedVertex, Triangle, Material, Subset, Skin, Animation
 
 import pdb
 
@@ -250,30 +250,6 @@ def construct_bone_hierarchy(si):
 
     return pairs
 
-# TODO: maybe useless
-def ordered_hierarchy(h):
-    children_map = defaultdict(list)
-    root = None
-
-    for child, parent in h.items():
-        if parent == -1:
-            root = child
-        else:
-            children_map[parent].append(child)
-
-    id_map = {}
-    queue = deque([root])
-    new_id = 0
-
-    while queue:
-        node = queue.popleft()
-        id_map[node] = new_id
-        new_id += 1
-        queue.extend(children_map[node])
-
-    nh =  {id_map[k]: (id_map[v] if v != -1 else -1) for k, v in h.items()}
-
-    return id_map, nh
 
 def keyframes_for(ai):
     animation = animations[ai]
@@ -367,59 +343,48 @@ def convert():
         m.convert_textures()
         print("mesh: {} (skin: {})".format(filename, skin_idx + 1))
 
-################################################################################
-#
-# SKINNED
-#
-################################################################################
+        m3d_m = m # TODO: remove later
+
+    ############################################################################
+    #
+    # SKINNED
+    #
+    ############################################################################
 
     if not skinned:
         return
 
+    nodes_static_transforms = {}
+
+    # skins
     for i in skin_indices:
         bh = construct_bone_hierarchy(i)
-        idmap, oh = ordered_hierarchy(bh)
-
-        num_keyframes, animation_keyframes = keyframes_for(0)
-        local_node_transforms = {}
+        m3d_bh = bh # TODO: remove later
 
         root_bone = skins[i]['skeleton']
         joints = skins[i]['joints']
         inverse_bind_matrices = get_values(skins[i]['inverseBindMatrices'])
-        extra = set(bh.keys()) - set(joints)
 
         filename = "{}_skin_{}.skin".format(original_filename, i+1)
         s = Skin(root_bone, joints, inverse_bind_matrices, bh)
         s.pack(filename)
-        print("skin: {}".format(filename, skin_idx + 1))
+        print("skin: {}".format(filename))
 
-        # list of nodes whose direct parent are not in joint list
-        parents_not_joint = {}
-        for joint in joints:
-            chain = []
-            parent = bh.get(joint)
+        for ni in bh.keys():
+            t = {}
+            t['translation'] = Vec3(*nodes[ni].get('translation', [0, 0, 0]))
+            t['rotation'] = Vec4(*nodes[ni].get('rotation', [0, 0, 0, 1]))
+            t['scale'] = Vec3(*nodes[ni].get('scale', [1, 1, 1]))
 
-            while parent in extra:
-                chain.append(parent)
-                parent = bh.get(parent)
+        nodes_static_transforms[ni] = t
 
-            if chain:
-                parents_not_joint[joint] = chain
-
-        for node_index in joints:
+    # animations
+    for ai in range(len(animations)):
+        num_keyframes, animation_keyframes = keyframes_for(ai)
+        nodes_keyframe_transforms = {}
+        for node_index, kf in animation_keyframes.items():
             local_transform = {}
-            parent_transform = {}
 
-            # TODO: compute the parent transform here
-            if node_index in parents_not_joint:
-                pdb.set_trace()
-
-            # TODO: here node_index is potentially not in animation_keyframes so use node transform.
-            # there is thus only one keyframe
-            if node_index not in animation_keyframes:
-                pdb.set_trace()
-
-            kf = animation_keyframes[node_index]
             for time, kf_transforms in kf.items():
                 t = {}
                 t['translation'] = Vec3(*kf_transforms.get('translation', nodes[node_index].get('translation', [0, 0, 0])))
@@ -427,9 +392,72 @@ def convert():
                 t['scale'] = Vec3(*kf_transforms.get('scale', nodes[node_index].get('scale', [1, 1, 1])))
 
                 local_transform[time] = t
-            local_node_transforms[node_index] = local_transform
-        # pdb.set_trace()
+            nodes_keyframe_transforms[node_index] = local_transform
 
+        filename = "{}_animation_{}.anim".format(original_filename, ai+1)
+        a = Animation(num_keyframes, nodes_keyframe_transforms)
+        a.pack(filename)
+        print("animation: {} -- [{}]".format(filename, animations[ai].get('name', 'noname')))
+
+        m3d_kf = nodes_keyframe_transforms # TODO: remove later
+
+
+    # pdb.set_trace()
+    # TODO: remove later.
+    # import numpy as np
+    # print("***************m3d-File-Header***************")
+    # print("#Materials {}".format(len(m3d_m.subsets)))
+    # print("#Vertices {}".format(len(m3d_m.vertices)))
+    # print("#Triangles {}".format(len(m3d_m.tris)))
+    # print("#Bones {}".format(len(m3d_bh)))
+    # print("#AnimationClips {}".format(1))
+
+    # print("\n***************Materials*********************")
+    # for i, s in enumerate(m3d_m.subsets):
+    #     print("Name: material_{}".format(i))
+    #     print("Diffuse: 1 1 1")
+    #     print("Fresnel0: 0.05 0.05 0.05")
+    #     print("Roughness: 0.5")
+    #     print("AlphaClip: 0")
+    #     print("MaterialTypeName: Skinned")
+    #     print("DiffuseMap: upBody_diff.dds")
+    #     print("NormalMap: upBody_norm.dds")
+
+    # print("\n***************SubsetTable*******************")
+    # for i, s in enumerate(m3d_m.subsets):
+    #     print("SubsetID: {} VertexStart: {} VertexCount: {} FaceStart: {} FaceCount: {}".format(i, s.vstart, len(m3d_m.vertices), s.istart, int(s.icount/3)))
+    # print("\n***************Vertices**********************")
+    # for i, v in enumerate(m3d_m.vertices):
+    #     print("Position: {}".format(v.position))
+    #     print("Tangent: {:.6f} {:.6f} {:.6f} {:.6f}".format(0, 0, 0, 1))
+    #     print("Normal: {}".format(v.normal))
+    #     print("Tex-Coords: {}".format(v.uv))
+    #     padded_weights = list(v.weights) + [0.0] * (4 - len(v.weights))
+    #     padded_indices = list(v.joint_indices) + [0] * (4 - len(v.joint_indices))
+    #     print("BlendWeights: {:.6f} {:.6f} {:.6f} {:.6f}".format(padded_weights[0]/255, padded_weights[1]/255, padded_weights[2]/255, padded_weights[3]/255))
+    #     print("BlendIndices: {} {} {} {}\n".format(padded_indices[0], padded_indices[1], padded_indices[2], padded_indices[3]))
+    # print("\n***************Triangles*********************")
+    # for t in m.tris:
+    #     print(t)
+    # print("\n***************BoneOffsets*******************")
+    # ibms = get_values(skins[0]['inverseBindMatrices'])
+    # for i, bo in enumerate(ibms):
+    #     matrix = (np.array(bo).reshape(4, 4))
+    #     print("BoneOffset{}".format(i), " ".join(f"{val:.6f}" for row in matrix for val in row))
+    # print("\n***************BoneHierarchy*****************")
+    # joints = skins[0]['joints']
+    # for c, p in sorted(m3d_bh.items(), key=lambda item: joints.index(item[0])):
+    #     print("ParentIndexOfBone{}: {}".format(joints.index(c), joints.index(p) if p in joints else p))
+    # print("\n***************AnimationClips****************")
+    # print("AnimationClip Take1")
+    # print("{")
+    # for c, kfs in sorted(m3d_kf.items(), key=lambda item: joints.index(item[0])):
+    #     print("\tBone{} #Keyframes: {}".format(joints.index(c), len(kfs)))
+    #     print("\t{")
+    #     for t, kf in kfs.items():
+    #         print("\t\tTime: {} Pos: {} Scale: {} Quat: {}".format(t, kf['translation'], kf['scale'], kf['rotation']))
+    #     print("\t}\n")
+    # print("}")
 
 
 if __name__ == '__main__':

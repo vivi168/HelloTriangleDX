@@ -68,6 +68,36 @@ struct Skin {
   }
 };
 
+struct Keyframe {
+  float time;
+  DirectX::XMFLOAT3 scale;
+  DirectX::XMFLOAT3 translation;
+  DirectX::XMFLOAT4 rotation;
+};
+
+struct Animation {
+  UINT numAnimatedBones;
+  
+  // bone id -> keyframes
+  std::unordered_map<SHORT, std::vector<Keyframe>> bonesKeyframes;
+
+  void Read(std::string filename)
+  {
+    FILE* fp;
+    fopen_s(&fp, filename.c_str(), "rb");
+    assert(fp);
+
+    fread(&numAnimatedBones, sizeof(numAnimatedBones), 1, fp);
+
+    std::vector<UINT> numsKeyframes;
+    numsKeyframes.resize(numAnimatedBones);
+
+    fread(numsKeyframes.data(), sizeof(UINT), numAnimatedBones, fp);
+
+    // TODO
+  }
+};
+
 struct Subset {
   uint32_t start, count, vstart, pad;
   TEXTURENAME name;
@@ -132,9 +162,9 @@ struct Model3D {
   // TODO: std::vector<animations>
 
   DirectX::XMFLOAT3 scale;
-  DirectX::XMFLOAT3 rotate;
   DirectX::XMFLOAT3 translate;
-  bool dirty; // world position changed. Rename to collisionDirty?
+  DirectX::XMFLOAT3 rotate;
+  bool dirty;  // world position changed. Rename to collisionDirty?
 
   Model3D();
   DirectX::XMMATRIX WorldMatrix();
