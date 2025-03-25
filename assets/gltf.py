@@ -395,7 +395,7 @@ def convert():
             nodes_keyframe_transforms[node_index] = local_transform
 
         filename = "{}_animation_{}.anim".format(original_filename, ai+1)
-        a = Animation(num_keyframes, nodes_keyframe_transforms)
+        a = Animation(nodes_keyframe_transforms)
         a.pack(filename)
         print("animation: {} -- [{}]".format(filename, animations[ai].get('name', 'noname')))
 

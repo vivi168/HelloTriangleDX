@@ -22,15 +22,15 @@ struct SkinnedVertex : Vertex {
 
 struct Skin {
   struct {
-    UINT rootBone;
+    int rootBone;
     UINT numBones;
     UINT numJoints;
   } header;
 
-  // child -> parent
-  std::unordered_map<SHORT, SHORT> boneHierarchy;
-  // joint -> matrix
-  std::unordered_map<SHORT, DirectX::XMFLOAT4X4> inverseBindMatrices;
+  // parent -> children
+  std::unordered_map<int, std::vector<int>> boneHierarchy;
+  std::vector<int> jointIndices;
+  std::vector<DirectX::XMFLOAT4X4> inverseBindMatrices;
 
   void Read(std::string filename)
   {
@@ -41,30 +41,25 @@ struct Skin {
     fread(&header, sizeof(header), 1, fp);
 
     // bone hierarchy
-    std::vector<SHORT> childBones;
-    std::vector<SHORT> parentBones;
-    childBones.resize(header.numBones);
-    parentBones.resize(header.numBones);
+    std::vector<int> childBones(header.numBones);
+    std::vector<int> parentBones(header.numBones);
 
-    fread(childBones.data(), sizeof(SHORT), header.numBones, fp);
-    fread(parentBones.data(), sizeof(SHORT), header.numBones, fp);
+    fread(childBones.data(), sizeof(int), header.numBones, fp);
+    fread(parentBones.data(), sizeof(int), header.numBones, fp);
 
     for (int i = 0; i < header.numBones; i++) {
-      boneHierarchy[childBones[i]] = parentBones[i];
+      auto parent = parentBones[i];
+      if (parent < 0) continue;
+      boneHierarchy[parent].push_back(childBones[i]);
     }
 
     // joints + inverse bind matrices
-    std::vector<SHORT> jointIndices;
-    std::vector<DirectX::XMFLOAT4X4> matrices;
     jointIndices.resize(header.numJoints);
-    matrices.resize(header.numJoints);
+    inverseBindMatrices.resize(header.numJoints);
 
-    fread(jointIndices.data(), sizeof(SHORT), header.numJoints, fp);
-    fread(matrices.data(), sizeof(DirectX::XMFLOAT4X4), header.numJoints, fp);
-
-    for (int i = 0; i < header.numJoints; i++) {
-      inverseBindMatrices[jointIndices[i]] = matrices[i];
-    }
+    fread(jointIndices.data(), sizeof(int), header.numJoints, fp);
+    fread(inverseBindMatrices.data(), sizeof(DirectX::XMFLOAT4X4),
+          header.numJoints, fp);
   }
 };
 
@@ -76,10 +71,8 @@ struct Keyframe {
 };
 
 struct Animation {
-  UINT numAnimatedBones;
-  
   // bone id -> keyframes
-  std::unordered_map<SHORT, std::vector<Keyframe>> bonesKeyframes;
+  std::unordered_map<int, std::vector<Keyframe>> bonesKeyframes;
 
   void Read(std::string filename)
   {
@@ -87,14 +80,17 @@ struct Animation {
     fopen_s(&fp, filename.c_str(), "rb");
     assert(fp);
 
+    UINT numAnimatedBones;
+
     fread(&numAnimatedBones, sizeof(numAnimatedBones), 1, fp);
 
-    std::vector<UINT> numsKeyframes;
-    numsKeyframes.resize(numAnimatedBones);
+    for (int i = 0; i < numAnimatedBones; i++) {
+      int info[2];  // boneId + numKeyframes
+      fread(info, sizeof(int), 2, fp);
 
-    fread(numsKeyframes.data(), sizeof(UINT), numAnimatedBones, fp);
-
-    // TODO
+      bonesKeyframes[info[0]].resize(info[1]);
+      fread(bonesKeyframes[info[0]].data(), sizeof(Keyframe), info[1], fp);
+    }
   }
 };
 
@@ -120,7 +116,7 @@ struct Mesh3D {
 
   std::string name;
   struct Geometry* geometry = nullptr;  // GPU data
-  struct Skin* skin = nullptr; // in case of skinned mesh
+  struct Skin* skin = nullptr;          // in case of skinned mesh
 
   void Read(std::string filename)
   {
@@ -136,7 +132,7 @@ struct Mesh3D {
     indices.resize(header.numIndices);
     subsets.resize(header.numSubsets);
 
-    //if constexpr (std::is_same_v<T, SkinnedVertex>) {
+    // if constexpr (std::is_same_v<T, SkinnedVertex>) {
 
     //}
 
@@ -172,5 +168,5 @@ struct Model3D {
   void Scale(float s);
   void Rotate(float x, float y, float z);
   void Translate(float x, float y, float z);
-  void Clean() { dirty = false;  }
+  void Clean() { dirty = false; }
 };

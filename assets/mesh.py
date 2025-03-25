@@ -213,9 +213,9 @@ class Skin:
         for m in self.inverse_bind_matrices:
             matrices += struct.pack('<16f', *m)
 
-        child_bones = struct.pack('<{}h'.format(num_bones), *self.bone_hierarchy.keys())
-        parent_bones = struct.pack('<{}h'.format(num_bones), *self.bone_hierarchy.values())
-        joint_bones = struct.pack('<{}h'.format(num_joints), *self.joints)
+        child_bones = struct.pack('<{}i'.format(num_bones), *self.bone_hierarchy.keys())
+        parent_bones = struct.pack('<{}i'.format(num_bones), *self.bone_hierarchy.values())
+        joint_bones = struct.pack('<{}i'.format(num_joints), *self.joints)
 
         data = header + child_bones + parent_bones + joint_bones + matrices
 
@@ -223,20 +223,21 @@ class Skin:
             f.write(data)
 
 class Animation:
-    def __init__(self, num_kf, keyframes):
-        self.num_keyframes = num_kf
+    def __init__(self, keyframes):
         self.keyframes = keyframes
 
     def pack(self, outfile):
         # header
         num_animated_bones = struct.pack('<I', len(self.keyframes))
-        num_keyframes = struct.pack('<{}I'.format(len(self.keyframes)), *self.num_keyframes)
 
         keyframes_data = bytearray()
         for ni, keyframes in self.keyframes.items():
+            print(ni, len(keyframes))
+            keyframes_data += struct.pack('<ii', ni, len(keyframes))
             for time, transform in keyframes.items():
+                print(time, transform['scale'], transform['translation'], transform['rotation'])
                 keyframes_data += struct.pack('<f', time) + transform['scale'].pack_f32() + transform['translation'].pack_f32() + transform['rotation'].pack()
 
-        data = num_animated_bones + num_keyframes + keyframes_data
+        data = num_animated_bones + keyframes_data
         with open(outfile, 'wb') as f:
             f.write(data)

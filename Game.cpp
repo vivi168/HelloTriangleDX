@@ -27,6 +27,7 @@ static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
     terrainMesh, stairsMesh, unitCubeMesh, fieldMesh, boarMesh, sponzaMesh;
 static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh, cesiumMesh;
 static Skin cesiumSkin;
+static Animation cesiumAnim;
 
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
     unitCube, boar, human, sponza, cesium;
@@ -194,6 +195,7 @@ void Game::Init()
 
   cesiumMesh.Read("assets/OPTIM_CesiumMan_mesh_1.mesh");
   cesiumSkin.Read("assets/OPTIM_CesiumMan_skin_1.skin");
+  cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
   // animation
 
   bigTree.meshes.push_back(&treeMesh);
