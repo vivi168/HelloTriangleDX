@@ -116,7 +116,7 @@ struct Mesh3D {
 
   std::string name;
   struct Geometry* geometry = nullptr;  // GPU data
-  struct Skin* skin = nullptr;          // in case of skinned mesh
+  Skin* skin = nullptr;                 // in case of skinned mesh
 
   void Read(std::string filename)
   {
@@ -154,8 +154,7 @@ struct Mesh3D {
 struct Model3D {
   std::vector<Mesh3D<Vertex>*> meshes;
   std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
-  // TODO: skeleton
-  // TODO: std::vector<animations>
+  std::vector<Animation*> animations;
 
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 translate;

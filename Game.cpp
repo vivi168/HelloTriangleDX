@@ -195,8 +195,8 @@ void Game::Init()
 
   cesiumMesh.Read("assets/OPTIM_CesiumMan_mesh_1.mesh");
   cesiumSkin.Read("assets/OPTIM_CesiumMan_skin_1.skin");
+  cesiumMesh.skin = &cesiumSkin;
   cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
-  // animation
 
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
@@ -215,6 +215,7 @@ void Game::Init()
   //boar.meshes.push_back(&boarMesh);
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);
+  cesium.animations.push_back(&cesiumAnim);
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);
