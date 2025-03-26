@@ -94,6 +94,11 @@ namespace Renderer
 {
 enum class PSO { Basic, Skinned, Terrain, ColliderSurface };
 
+namespace RootParameter
+{
+enum Slots : size_t { PerFrameCb = 0, PerObjCb, DiffuseTex, Count };
+}
+
 struct Scene {
   struct SceneNode {
     Model3D* model;
@@ -333,7 +338,7 @@ void LoadAssets()
   }
 }
 
-void Update(float time)
+void Update(float time, float dt)
 {
   auto ctx = &g_FrameContext[g_FrameIndex];
 
@@ -357,14 +362,23 @@ void Update(float time)
     for (auto& node : g_Scene.nodes) {
       ObjectCB1_VS cb;
 
-      XMMATRIX worldViewProjection = node.model->WorldMatrix() * viewProjection;
+      auto model = node.model;
+
+      if (model->currentAnimation) {
+         for (auto skinnedMesh : model->skinnedMeshes) {
+           // compute transformation matrix here
+           // in case of multiple meshes, need multiple cb
+         }
+      }
+
+      XMMATRIX worldViewProjection = model->WorldMatrix() * viewProjection;
       XMStoreFloat4x4(&cb.WorldViewProj,
                       XMMatrixTranspose(worldViewProjection));
       XMStoreFloat4x4(&cb.WorldMatrix,
-                      XMMatrixTranspose(node.model->WorldMatrix()));
+                      XMMatrixTranspose(model->WorldMatrix()));
 
       XMMATRIX normalMatrix =
-          XMMatrixInverse(nullptr, node.model->WorldMatrix());
+          XMMatrixInverse(nullptr, model->WorldMatrix());
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
       memcpy((uint8_t*)ctx->objectCbAddress + node.cbIndex, &cb, sizeof(cb));
@@ -459,7 +473,7 @@ void Render()
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
   g_CommandList->SetGraphicsRootDescriptorTable(
-      0, ctx->constantBufferSrvGpuDescHandle);
+      RootParameter::PerFrameCb, ctx->constantBufferSrvGpuDescHandle);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
@@ -479,11 +493,11 @@ void Render()
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       g_CommandList->SetGraphicsRootConstantBufferView(
-          1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+          RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
-            2, subset.texture->srvGpuDescHandle);
+            RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -499,12 +513,13 @@ void Render()
       g_CommandList->IASetPrimitiveTopology(
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+      // TODO: here need to set correct cb (joint matrix different per mesh)
       g_CommandList->SetGraphicsRootConstantBufferView(
-          1, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+          RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
-            2, subset.texture->srvGpuDescHandle);
+            RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -640,6 +655,8 @@ void SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
 void AppendToScene(Model3D* model)
 {
   size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
+  // TODO: here reserve some cb in case of skinned meshes ?
+  // eg: 2 skinned meshes for a model = 2 sets of matrices = 2 cb
 
   g_Scene.nodes.push_back({model, cbIndex});
 }
@@ -939,20 +956,20 @@ static void InitFrameResources()
   // Root Signature
   {
     // Descriptor ranges
-    // TODO: add constant for each of the slots
+    // TODO: add enum for each of the slots
     // TODO: how to go bindless? for textures at least.
     CD3DX12_DESCRIPTOR_RANGE descriptorRanges[2] = {};
     descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
-    //TODO: descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);  // u0
+    // TODO: descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
     descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
 
     // Root parameters
     // Applications should sort entries in the root signature from most
     // frequently changing to least.
-    CD3DX12_ROOT_PARAMETER rootParameters[3] = {};
-    rootParameters[0].InitAsDescriptorTable(1, &descriptorRanges[0]);
-    rootParameters[1].InitAsConstantBufferView(1);  // b1
-    rootParameters[2].InitAsDescriptorTable(1, &descriptorRanges[1]);
+    CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
+    rootParameters[RootParameter::PerFrameCb].InitAsDescriptorTable(1, &descriptorRanges[0]);
+    rootParameters[RootParameter::PerObjCb].InitAsConstantBufferView(1);  // b1
+    rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRanges[1]);
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};

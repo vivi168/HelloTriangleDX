@@ -90,7 +90,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         }
 
         Game::Update(g_Time, g_TimeDelta);
-        Renderer::Update(g_Time);
+        Renderer::Update(g_Time, g_TimeDelta);
         Game::DebugWindow();
         Renderer::Render();
       }

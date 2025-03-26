@@ -9,7 +9,7 @@ void InitWindow(UINT width, UINT height, std::wstring name);
 void InitAdapter(DXGIUsage*, IDXGIAdapter1*);
 void Init();
 void LoadAssets();
-void Update(float);
+void Update(float, float);
 void Render();
 void Cleanup();
 void PrintStatsString();
