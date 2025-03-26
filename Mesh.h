@@ -154,7 +154,7 @@ struct Mesh3D {
 struct Model3D {
   std::vector<Mesh3D<Vertex>*> meshes;
   std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
-  std::vector<Animation*> animations;
+  std::unordered_map<std::string, Animation*> animations;
 
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 translate;

@@ -215,7 +215,7 @@ void Game::Init()
   //boar.meshes.push_back(&boarMesh);
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);
-  cesium.animations.push_back(&cesiumAnim);
+  cesium.animations["walk"] = &cesiumAnim;
 
   smallTree.Scale(0.5f);
   smallTree.Translate(-7.f, 0.f, 0.f);
