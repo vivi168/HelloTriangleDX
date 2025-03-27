@@ -96,13 +96,14 @@ enum class PSO { Basic, Skinned, Terrain, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { PerFrameCb = 0, PerObjCb, DiffuseTex, Count };
+enum Slots : size_t { PerFrameCb = 0, PerObjCb, BoneTransforms, DiffuseTex, Count };
 }
 
 struct Scene {
   struct SceneNode {
     Model3D* model;
     size_t cbIndex;
+    // TODO: also need to store offsets for boneTransformsSrv
   };
 
   std::list<SceneNode> nodes;
@@ -137,6 +138,11 @@ struct FrameContext {
   ComPtr<ID3D12Resource> constantBufferUploadHeap;
   D3D12MA::Allocation* constantBufferUploadAllocation;
   void* constantBufferAddress;
+
+  // TODO: abstract this away?
+  ComPtr<ID3D12Resource> boneTransformSrvUploadHeap;
+  D3D12MA::Allocation* boneTransformSrvUploadHeapAllocation;
+  void* boneTransformSrvAddress;
 
   D3D12_CPU_DESCRIPTOR_HANDLE constantBufferSrvCpuDescHandle;
   D3D12_GPU_DESCRIPTOR_HANDLE constantBufferSrvGpuDescHandle;
@@ -368,8 +374,15 @@ void Update(float time, float dt)
          for (auto skinnedMesh : model->skinnedMeshes) {
            // compute transformation matrix here
            // in case of multiple meshes, need multiple cb
+
+           // TODO: from current time, get keyframe
+           // from keyframe, skin, and current animation, get final transforms matrices
+
+           std::vector<XMFLOAT4X4> matrices = skinnedMesh->skin->inverseBindMatrices;
+           memcpy((uint8_t*)ctx->boneTransformSrvAddress, matrices.data(),
+                  sizeof(XMFLOAT4X4) * matrices.size() /* TODO: need to offset here */);
          }
-      }
+      } // else identity matrices ?
 
       XMMATRIX worldViewProjection = model->WorldMatrix() * viewProjection;
       XMStoreFloat4x4(&cb.WorldViewProj,
@@ -513,9 +526,13 @@ void Render()
       g_CommandList->IASetPrimitiveTopology(
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-      // TODO: here need to set correct cb (joint matrix different per mesh)
       g_CommandList->SetGraphicsRootConstantBufferView(
           RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+
+      // TODO: here need to set correct cb (joint matrix different per mesh)
+      g_CommandList->SetGraphicsRootShaderResourceView(
+          RootParameter::BoneTransforms,
+          ctx->boneTransformSrvUploadHeap->GetGPUVirtualAddress() /* TODO: need to offset here */);
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
@@ -602,13 +619,18 @@ void Cleanup()
   g_CommandQueue.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    // TODO: Method from FrameContext
+    // TODO: Method from FrameContext + abstract away these 3
     g_FrameContext[i].objectCbUploadHeap.Reset();
     g_FrameContext[i].objectCbUploadHeapAllocation->Release();
     g_FrameContext[i].objectCbUploadHeapAllocation = nullptr;
+
     g_FrameContext[i].constantBufferUploadHeap.Reset();
     g_FrameContext[i].constantBufferUploadAllocation->Release();
     g_FrameContext[i].constantBufferUploadAllocation = nullptr;
+
+    g_FrameContext[i].boneTransformSrvUploadHeap.Reset();
+    g_FrameContext[i].boneTransformSrvUploadHeapAllocation->Release();
+    g_FrameContext[i].boneTransformSrvUploadHeapAllocation = nullptr;
   }
 
   g_SrvDescriptorHeap->Release();
@@ -960,7 +982,6 @@ static void InitFrameResources()
     // TODO: how to go bindless? for textures at least.
     CD3DX12_DESCRIPTOR_RANGE descriptorRanges[2] = {};
     descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
-    // TODO: descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
     descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
 
     // Root parameters
@@ -969,6 +990,7 @@ static void InitFrameResources()
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::PerFrameCb].InitAsDescriptorTable(1, &descriptorRanges[0]);
     rootParameters[RootParameter::PerObjCb].InitAsConstantBufferView(1);  // b1
+    rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(1); // t1
     rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRanges[1]);
 
     // Static sampler
@@ -982,7 +1004,7 @@ static void InitFrameResources()
         D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-        3, rootParameters, 1, staticSamplers, flags);
+        RootParameter::Count, rootParameters, 1, staticSamplers, flags);
 
     ID3DBlob* signatureBlobPtr;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
@@ -1027,7 +1049,6 @@ static void InitFrameResources()
   }
 
   // per object CB
-  // TODO: use a storage buffer instead?
   {
     D3D12MA::ALLOCATION_DESC allocDesc = {};
     allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
@@ -1055,6 +1076,33 @@ static void InitFrameResources()
 
       CHECK_HR(
           ctx->objectCbUploadHeap->Map(0, &EMPTY_RANGE, &ctx->objectCbAddress));
+    }
+  }
+
+  // bone transforms buffer
+  {
+    D3D12MA::ALLOCATION_DESC allocDesc = {};
+    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      auto ctx = &g_FrameContext[i];
+
+      CHECK_HR(g_Allocator->CreateResource(
+          &allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
+          D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+          &ctx->boneTransformSrvUploadHeapAllocation,
+          IID_PPV_ARGS(&ctx->boneTransformSrvUploadHeap)));
+
+      std::wstring name =
+          L"SRV Buffer (bone transforms) Upload Heap - " + std::to_wstring(i);
+      std::wstring allocName =
+          L"SRV Buffer (bone transforms) Upload Heap Allocation - " +
+          std::to_wstring(i);
+      ctx->boneTransformSrvUploadHeap->SetName(name.c_str());
+      ctx->boneTransformSrvUploadHeapAllocation->SetName(name.c_str());
+
+      CHECK_HR(ctx->boneTransformSrvUploadHeap->Map(
+          0, &EMPTY_RANGE, &ctx->boneTransformSrvAddress));
     }
   }
 
