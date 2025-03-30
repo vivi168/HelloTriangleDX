@@ -149,6 +149,12 @@ struct Mesh3D {
   {
     return sizeof(uint16_t) * header.numIndices;
   }
+
+  size_t SkinMatricesSize() const {
+    if (!skin) return 0;
+
+    return sizeof(DirectX::XMFLOAT4X4) * skin->header.numJoints;
+  }
 };
 
 struct Model3D {

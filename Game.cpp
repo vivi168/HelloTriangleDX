@@ -26,8 +26,8 @@ struct Player {
 static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
     terrainMesh, stairsMesh, unitCubeMesh, fieldMesh, boarMesh, sponzaMesh;
 static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh, cesiumMesh;
-static Skin cesiumSkin;
-static Animation cesiumAnim;
+static Skin cesiumSkin, boarSkin;
+static Animation cesiumAnim, boarAnim;
 
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
     unitCube, boar, human, sponza, cesium;
@@ -186,8 +186,12 @@ void Game::Init()
   stairsMesh.Read("assets/stairs.objb");
   fieldMesh.Read("assets/bf.objb");
 
-  boarMesh.Read("assets/OPTIM_noq_boarskinbrown_not_skinned.m3d");
+  //boarMesh.Read("assets/OPTIM_noq_boarskinbrown_not_skinned.m3d");
   boarSkinnedMesh.Read("assets/OPTIM_noq_boarskinbrown_mesh_1.m3d");
+  boarSkin.Read("assets/OPTIM_noq_boarskinbrown_skin_1.skin");
+  boarSkinnedMesh.skin = &boarSkin;
+  boarAnim.Read("assets/OPTIM_noq_boarskinbrown_animation_13.anim");
+
   humanMeshes[0].Read("assets/OPTIM_noq_humanmale_mesh_1.m3d");
   humanMeshes[1].Read("assets/OPTIM_noq_humanmale_mesh_2.m3d");
 
@@ -211,7 +215,11 @@ void Game::Init()
 
   human.skinnedMeshes.push_back(&humanMeshes[0]);
   human.skinnedMeshes.push_back(&humanMeshes[1]);
+
   boar.skinnedMeshes.push_back(&boarSkinnedMesh);
+  boar.animations["test"] = &boarAnim;
+  boar.currentAnimation = boar.animations["test"];
+
   //boar.meshes.push_back(&boarMesh);
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);

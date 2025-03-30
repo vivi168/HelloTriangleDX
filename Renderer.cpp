@@ -103,7 +103,7 @@ struct Scene {
   struct SceneNode {
     Model3D* model;
     size_t cbIndex;
-    // TODO: also need to store offsets for boneTransformsSrv
+    std::vector<size_t> bonesIndices;
   };
 
   std::list<SceneNode> nodes;
@@ -139,13 +139,13 @@ struct FrameContext {
   D3D12MA::Allocation* constantBufferUploadAllocation;
   void* constantBufferAddress;
 
+  D3D12_CPU_DESCRIPTOR_HANDLE constantBufferSrvCpuDescHandle;
+  D3D12_GPU_DESCRIPTOR_HANDLE constantBufferSrvGpuDescHandle;
+
   // TODO: abstract this away?
   ComPtr<ID3D12Resource> boneTransformSrvUploadHeap;
   D3D12MA::Allocation* boneTransformSrvUploadHeapAllocation;
   void* boneTransformSrvAddress;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE constantBufferSrvCpuDescHandle;
-  D3D12_GPU_DESCRIPTOR_HANDLE constantBufferSrvGpuDescHandle;
 };
 
 struct DescriptorHeapListAllocator {
@@ -230,7 +230,8 @@ static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
 
-static unsigned int g_CbNextIndex = 0;
+static size_t g_CbNextIndex = 0;
+static size_t g_BonesNextIndex = 0;
 
 static UINT g_Width;
 static UINT g_Height;
@@ -371,16 +372,18 @@ void Update(float time, float dt)
       auto model = node.model;
 
       if (model->currentAnimation) {
+         size_t i = 0;
          for (auto skinnedMesh : model->skinnedMeshes) {
            // compute transformation matrix here
            // in case of multiple meshes, need multiple cb
 
            // TODO: from current time, get keyframe
            // from keyframe, skin, and current animation, get final transforms matrices
+           auto bonesIndex = node.bonesIndices[i++];
 
            std::vector<XMFLOAT4X4> matrices = skinnedMesh->skin->inverseBindMatrices;
-           memcpy((uint8_t*)ctx->boneTransformSrvAddress, matrices.data(),
-                  sizeof(XMFLOAT4X4) * matrices.size() /* TODO: need to offset here */);
+           memcpy((uint8_t*)ctx->boneTransformSrvAddress + bonesIndex, matrices.data(),
+                  sizeof(XMFLOAT4X4) * matrices.size());
          }
       } // else identity matrices ?
 
@@ -519,6 +522,7 @@ void Render()
     // skinned meshes
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
 
+    size_t i = 0;
     for (auto mesh : node.model->skinnedMeshes) {
       auto geom = mesh->geometry;
       g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
@@ -529,10 +533,10 @@ void Render()
       g_CommandList->SetGraphicsRootConstantBufferView(
           RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
 
-      // TODO: here need to set correct cb (joint matrix different per mesh)
+      auto bonesIndex = node.bonesIndices[i++];
       g_CommandList->SetGraphicsRootShaderResourceView(
           RootParameter::BoneTransforms,
-          ctx->boneTransformSrvUploadHeap->GetGPUVirtualAddress() /* TODO: need to offset here */);
+          ctx->boneTransformSrvUploadHeap->GetGPUVirtualAddress() + bonesIndex);
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
@@ -677,10 +681,18 @@ void SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
 void AppendToScene(Model3D* model)
 {
   size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
-  // TODO: here reserve some cb in case of skinned meshes ?
-  // eg: 2 skinned meshes for a model = 2 sets of matrices = 2 cb
 
-  g_Scene.nodes.push_back({model, cbIndex});
+  Scene::SceneNode node;
+  node.model = model;
+  node.cbIndex = cbIndex;
+
+  for (auto mesh : model->skinnedMeshes) {
+    size_t boneIndex = g_BonesNextIndex;
+    g_BonesNextIndex += mesh->SkinMatricesSize();
+    node.bonesIndices.push_back(boneIndex);
+  }
+
+  g_Scene.nodes.push_back(node);
 }
 
 // ========== Static functions
@@ -985,8 +997,8 @@ static void InitFrameResources()
     descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
 
     // Root parameters
-    // Applications should sort entries in the root signature from most
-    // frequently changing to least.
+    // Applications should sort entries in the root signature from most frequently changing to least.
+    // TODO: rework these. root constant, descriptor, descriptor table, bindless
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::PerFrameCb].InitAsDescriptorTable(1, &descriptorRanges[0]);
     rootParameters[RootParameter::PerObjCb].InitAsConstantBufferView(1);  // b1
@@ -1037,7 +1049,6 @@ static void InitFrameResources()
           ctx->constantBufferUploadHeap->GetGPUVirtualAddress();
       cbvDesc.SizeInBytes = AlignUp<UINT>(sizeof(FrameCB0_ALL), 256);
 
-      // TODO: Alloc Here?
       g_SrvDescHeapAlloc.Alloc(&ctx->constantBufferSrvCpuDescHandle,
                                &ctx->constantBufferSrvGpuDescHandle);
       g_Device->CreateConstantBufferView(&cbvDesc,
