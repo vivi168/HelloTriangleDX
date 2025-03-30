@@ -261,9 +261,9 @@ void Game::Init()
   Renderer::AppendToScene(&stairs);
   Renderer::AppendToScene(&unitCube);
 
-  Renderer::AppendToScene(&human);
-  Renderer::AppendToScene(&boar);
-  Renderer::AppendToScene(&sponza);
+  //Renderer::AppendToScene(&human);
+  //Renderer::AppendToScene(&boar);
+  //Renderer::AppendToScene(&sponza);
   Renderer::AppendToScene(&cesium);
 
   // static

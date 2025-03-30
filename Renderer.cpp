@@ -372,20 +372,16 @@ void Update(float time, float dt)
       auto model = node.model;
 
       if (model->currentAnimation) {
-         size_t i = 0;
-         for (auto skinnedMesh : model->skinnedMeshes) {
-           // compute transformation matrix here
-           // in case of multiple meshes, need multiple cb
+        model->currentAnimation->Update(dt);
+        size_t i = 0;
+        for (auto skinnedMesh : model->skinnedMeshes) {
+          std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
 
-           // TODO: from current time, get keyframe
-           // from keyframe, skin, and current animation, get final transforms matrices
-           auto bonesIndex = node.bonesIndices[i++];
-
-           std::vector<XMFLOAT4X4> matrices = skinnedMesh->skin->inverseBindMatrices;
-           memcpy((uint8_t*)ctx->boneTransformSrvAddress + bonesIndex, matrices.data(),
-                  sizeof(XMFLOAT4X4) * matrices.size());
-         }
-      } // else identity matrices ?
+          auto bonesIndex = node.bonesIndices[i++];
+          memcpy((uint8_t*)ctx->boneTransformSrvAddress + bonesIndex,
+                 matrices.data(), sizeof(XMFLOAT4X4) * matrices.size());
+        }
+      }  // else identity matrices ?
 
       XMMATRIX worldViewProjection = model->WorldMatrix() * viewProjection;
       XMStoreFloat4x4(&cb.WorldViewProj,

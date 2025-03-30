@@ -73,6 +73,16 @@ struct Keyframe {
 struct Animation {
   // bone id -> keyframes
   std::unordered_map<int, std::vector<Keyframe>> bonesKeyframes;
+  float minTime;
+  float maxTime;
+
+  float curTime = 0.0f;
+
+  void Update(float dt) {
+    curTime += dt;
+    if (curTime > maxTime)
+      curTime = minTime;
+  }
 
   void Read(std::string filename)
   {
@@ -90,8 +100,21 @@ struct Animation {
 
       bonesKeyframes[info[0]].resize(info[1]);
       fread(bonesKeyframes[info[0]].data(), sizeof(Keyframe), info[1], fp);
+
+      auto [minEl, maxEl] = std::minmax_element(
+          bonesKeyframes[info[0]].begin(), bonesKeyframes[info[0]].end(),
+          [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
+
+      if (minEl->time < minTime) minTime = minEl->time;
+      if (maxEl->time > maxTime) maxTime = maxEl->time;
+
+      curTime = minTime;
     }
   }
+
+  DirectX::XMMATRIX Interpolate(int boneId);
+
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(Skin* skin);
 };
 
 struct Subset {
