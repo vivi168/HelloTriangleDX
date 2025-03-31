@@ -232,12 +232,31 @@ class Animation:
 
         keyframes_data = bytearray()
         for ni, keyframes in self.keyframes.items():
-            print(ni, len(keyframes))
+            # print(ni, len(keyframes))
             keyframes_data += struct.pack('<ii', ni, len(keyframes))
             for time, transform in keyframes.items():
-                print(time, transform['scale'], transform['translation'], transform['rotation'])
+                # print(time, transform['scale'], transform['translation'], transform['rotation'])
                 keyframes_data += struct.pack('<f', time) + transform['scale'].pack_f32() + transform['translation'].pack_f32() + transform['rotation'].pack()
 
         data = num_animated_bones + keyframes_data
+        with open(outfile, 'wb') as f:
+            f.write(data)
+
+class StaticTransforms:
+    def __init__(self, indices, transforms):
+        self.transforms = transforms
+        self.missing_indices = indices
+
+    def pack(self, outfile):
+        transform_data = bytearray()
+        num_missing_indices = len(self.missing_indices)
+        indices = struct.pack('<I', num_missing_indices) + struct.pack('<{}i'.format(num_missing_indices), *self.missing_indices)
+
+        for ni in self.missing_indices:
+            transform = self.transforms[ni]
+            transform_data += transform['scale'].pack_f32() + transform['translation'].pack_f32() + transform['rotation'].pack()
+
+        data = indices + transform_data
+
         with open(outfile, 'wb') as f:
             f.write(data)

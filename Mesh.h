@@ -32,6 +32,8 @@ struct Skin {
   std::vector<int> jointIndices;
   std::vector<DirectX::XMFLOAT4X4> inverseBindMatrices;
 
+  std::unordered_map<int, DirectX::XMFLOAT4X4> staticTransforms;
+
   void Read(std::string filename)
   {
     FILE* fp;
@@ -61,6 +63,8 @@ struct Skin {
     fread(inverseBindMatrices.data(), sizeof(DirectX::XMFLOAT4X4),
           header.numJoints, fp);
   }
+
+  void ReadStaticTransforms(std::string filename);
 };
 
 struct Keyframe {
@@ -73,9 +77,9 @@ struct Keyframe {
 struct Animation {
   // bone id -> keyframes
   std::unordered_map<int, std::vector<Keyframe>> bonesKeyframes;
+
   float minTime;
   float maxTime;
-
   float curTime = 0.0f;
 
   void Update(float dt) {
@@ -112,7 +116,7 @@ struct Animation {
     }
   }
 
-  DirectX::XMMATRIX Interpolate(int boneId);
+  DirectX::XMMATRIX Interpolate(int boneId, Skin* skin);
 
   std::vector<DirectX::XMFLOAT4X4> BoneTransforms(Skin* skin);
 };

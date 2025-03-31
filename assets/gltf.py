@@ -6,7 +6,7 @@ import sys
 import base64
 import struct
 from collections import defaultdict, deque
-from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, SkinnedVertex, Triangle, Material, Subset, Skin, Animation
+from mesh import Mesh, Vec2, Vec3, Vec4, Vertex, SkinnedVertex, Triangle, Material, Subset, Skin, Animation, StaticTransforms
 
 import pdb
 
@@ -271,8 +271,6 @@ def keyframes_for(ai):
     nodes_keyframes = {}
     target_nodes = set([c['target']['node'] for c in channels])
 
-    num_keyframes = []
-
     for node_idx in target_nodes:
         channels = [channel for channel in animation['channels'] if channel['target']['node'] == node_idx]
         trans_channels = [channel for channel in channels if channel['target']['path'] == 'translation']
@@ -324,10 +322,8 @@ def keyframes_for(ai):
                     keyframes[key] = { 'scale': outputs[i] }
 
         nodes_keyframes[node_idx] = keyframes
-        num_keyframes.append(len(keyframes))
 
-    # assert(len(set(num_keyframes)) == 1)
-    return num_keyframes, nodes_keyframes
+    return nodes_keyframes
 
 def convert():
     for i, ni in enumerate(mesh_nodes):
@@ -343,8 +339,6 @@ def convert():
         m.convert_textures()
         print("mesh: {} (skin: {})".format(filename, skin_idx + 1))
 
-        m3d_m = m # TODO: remove later
-
     ############################################################################
     #
     # SKINNED
@@ -355,12 +349,11 @@ def convert():
         return
 
     nodes_static_transforms = {}
+    missing_bones = set()
 
     # skins
     for i in skin_indices:
         bh = construct_bone_hierarchy(i)
-        m3d_bh = bh # TODO: remove later
-
         root_bone = skins[i]['skeleton']
         joints = skins[i]['joints']
         inverse_bind_matrices = get_values(skins[i]['inverseBindMatrices'])
@@ -376,11 +369,11 @@ def convert():
             t['rotation'] = Vec4(*nodes[ni].get('rotation', [0, 0, 0, 1]))
             t['scale'] = Vec3(*nodes[ni].get('scale', [1, 1, 1]))
 
-        nodes_static_transforms[ni] = t
+            nodes_static_transforms[ni] = t
 
     # animations
     for ai in range(len(animations)):
-        num_keyframes, animation_keyframes = keyframes_for(ai)
+        animation_keyframes = keyframes_for(ai)
         nodes_keyframe_transforms = {}
         for node_index, kf in animation_keyframes.items():
             local_transform = {}
@@ -399,68 +392,18 @@ def convert():
         a.pack(filename)
         print("animation: {} -- [{}]".format(filename, animations[ai].get('name', 'noname')))
 
-        m3d_kf = nodes_keyframe_transforms # TODO: remove later
+        missing = set(bh.keys()) - set(nodes_keyframe_transforms.keys())
+        if len(missing) > 0:
+            missing_bones.update(missing)
 
-
-    # pdb.set_trace()
-    # TODO: remove later.
-    # import numpy as np
-    # print("***************m3d-File-Header***************")
-    # print("#Materials {}".format(len(m3d_m.subsets)))
-    # print("#Vertices {}".format(len(m3d_m.vertices)))
-    # print("#Triangles {}".format(len(m3d_m.tris)))
-    # print("#Bones {}".format(len(m3d_bh)))
-    # print("#AnimationClips {}".format(1))
-
-    # print("\n***************Materials*********************")
-    # for i, s in enumerate(m3d_m.subsets):
-    #     print("Name: material_{}".format(i))
-    #     print("Diffuse: 1 1 1")
-    #     print("Fresnel0: 0.05 0.05 0.05")
-    #     print("Roughness: 0.5")
-    #     print("AlphaClip: 0")
-    #     print("MaterialTypeName: Skinned")
-    #     print("DiffuseMap: upBody_diff.dds")
-    #     print("NormalMap: upBody_norm.dds")
-
-    # print("\n***************SubsetTable*******************")
-    # for i, s in enumerate(m3d_m.subsets):
-    #     print("SubsetID: {} VertexStart: {} VertexCount: {} FaceStart: {} FaceCount: {}".format(i, s.vstart, len(m3d_m.vertices), s.istart, int(s.icount/3)))
-    # print("\n***************Vertices**********************")
-    # for i, v in enumerate(m3d_m.vertices):
-    #     print("Position: {}".format(v.position))
-    #     print("Tangent: {:.6f} {:.6f} {:.6f} {:.6f}".format(0, 0, 0, 1))
-    #     print("Normal: {}".format(v.normal))
-    #     print("Tex-Coords: {}".format(v.uv))
-    #     padded_weights = list(v.weights) + [0.0] * (4 - len(v.weights))
-    #     padded_indices = list(v.joint_indices) + [0] * (4 - len(v.joint_indices))
-    #     print("BlendWeights: {:.6f} {:.6f} {:.6f} {:.6f}".format(padded_weights[0]/255, padded_weights[1]/255, padded_weights[2]/255, padded_weights[3]/255))
-    #     print("BlendIndices: {} {} {} {}\n".format(padded_indices[0], padded_indices[1], padded_indices[2], padded_indices[3]))
-    # print("\n***************Triangles*********************")
-    # for t in m.tris:
-    #     print(t)
-    # print("\n***************BoneOffsets*******************")
-    # ibms = get_values(skins[0]['inverseBindMatrices'])
-    # for i, bo in enumerate(ibms):
-    #     matrix = (np.array(bo).reshape(4, 4))
-    #     print("BoneOffset{}".format(i), " ".join(f"{val:.6f}" for row in matrix for val in row))
-    # print("\n***************BoneHierarchy*****************")
-    # joints = skins[0]['joints']
-    # for c, p in sorted(m3d_bh.items(), key=lambda item: joints.index(item[0])):
-    #     print("ParentIndexOfBone{}: {}".format(joints.index(c), joints.index(p) if p in joints else p))
-    # print("\n***************AnimationClips****************")
-    # print("AnimationClip Take1")
-    # print("{")
-    # for c, kfs in sorted(m3d_kf.items(), key=lambda item: joints.index(item[0])):
-    #     print("\tBone{} #Keyframes: {}".format(joints.index(c), len(kfs)))
-    #     print("\t{")
-    #     for t, kf in kfs.items():
-    #         print("\t\tTime: {} Pos: {} Scale: {} Quat: {}".format(t, kf['translation'], kf['scale'], kf['rotation']))
-    #     print("\t}\n")
-    # print("}")
-
+    if len(missing_bones) > 0:
+        filename = "{}_transforms.bin".format(original_filename)
+        print("transforms {}".format(filename))
+        st = StaticTransforms(missing_bones, nodes_static_transforms)
+        st.pack(filename)
 
 if __name__ == '__main__':
     convert()
 
-    # when dumping skin, also print as reference the names of the bones
+    # TODO: when dumping skin, also print as reference the names of the bones
+    # TODO: txt file that list all components for this model?

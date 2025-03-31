@@ -189,8 +189,9 @@ void Game::Init()
   //boarMesh.Read("assets/OPTIM_noq_boarskinbrown_not_skinned.m3d");
   boarSkinnedMesh.Read("assets/OPTIM_noq_boarskinbrown_mesh_1.m3d");
   boarSkin.Read("assets/OPTIM_noq_boarskinbrown_skin_1.skin");
+  boarSkin.ReadStaticTransforms("assets/OPTIM_noq_boarskinbrown_transforms.bin");
   boarSkinnedMesh.skin = &boarSkin;
-  boarAnim.Read("assets/OPTIM_noq_boarskinbrown_animation_13.anim");
+  boarAnim.Read("assets/OPTIM_noq_boarskinbrown_animation_1.anim");
 
   humanMeshes[0].Read("assets/OPTIM_noq_humanmale_mesh_1.m3d");
   humanMeshes[1].Read("assets/OPTIM_noq_humanmale_mesh_2.m3d");
@@ -262,7 +263,7 @@ void Game::Init()
   Renderer::AppendToScene(&unitCube);
 
   //Renderer::AppendToScene(&human);
-  //Renderer::AppendToScene(&boar);
+  Renderer::AppendToScene(&boar);
   //Renderer::AppendToScene(&sponza);
   Renderer::AppendToScene(&cesium);
 

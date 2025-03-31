@@ -5,8 +5,44 @@
 
 using namespace DirectX;
 
-XMMATRIX Animation::Interpolate(int boneId)
+void Skin::ReadStaticTransforms(std::string filename)
 {
+  FILE* fp;
+  fopen_s(&fp, filename.c_str(), "rb");
+  assert(fp);
+
+  UINT numBones;
+  fread(&numBones, sizeof(numBones), 1, fp);
+
+  std::vector<int> boneIds(numBones);
+  fread(boneIds.data(), sizeof(int), numBones, fp);
+
+  XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+
+  for (auto& i : boneIds) {
+    struct {
+      DirectX::XMFLOAT3 scale;
+      DirectX::XMFLOAT3 translation;
+      DirectX::XMFLOAT4 rotation;
+    } transform;
+
+    fread(&transform, sizeof(transform), 1, fp);
+
+    XMVECTOR scale = XMLoadFloat3(&transform.scale);
+    XMVECTOR trans = XMLoadFloat3(&transform.translation);
+    XMVECTOR rot = XMLoadFloat4(&transform.rotation);
+
+    auto issou = XMMatrixAffineTransformation(scale, zero, rot, trans);
+    XMStoreFloat4x4(&staticTransforms[i], issou);
+  }
+}
+
+XMMATRIX Animation::Interpolate(int boneId, Skin* skin)
+{
+  if (bonesKeyframes.find(boneId) == bonesKeyframes.end()) {
+    return XMLoadFloat4x4(&skin->staticTransforms[boneId]);
+  }
+
   auto keyframes = bonesKeyframes[boneId];
 
   float startTime = keyframes.front().time;
@@ -55,7 +91,7 @@ XMMATRIX Animation::Interpolate(int boneId)
 std::vector<XMFLOAT4X4> Animation::BoneTransforms(Skin* skin)
 {
   std::unordered_map<int, XMMATRIX> boneLocalTransforms;
-  boneLocalTransforms[skin->header.rootBone] = Interpolate(skin->header.rootBone);
+  boneLocalTransforms[skin->header.rootBone] = Interpolate(skin->header.rootBone, skin);
 
   std::stack<int> stack;
   stack.push(skin->header.rootBone);
@@ -68,7 +104,7 @@ std::vector<XMFLOAT4X4> Animation::BoneTransforms(Skin* skin)
 
     auto children = skin->boneHierarchy[bone];
     for (auto child : children) {
-      auto localTransform = Interpolate(child);
+      auto localTransform = Interpolate(child, skin);
       boneLocalTransforms[child] = localTransform * parentLocalTransform;
       stack.push(child);
     }
