@@ -70,11 +70,6 @@ class Vertex:
         self.uv = u
 
     def pack(self):
-        # positions (UINT16): p * scale + translation
-        # normals (SNORM8): n / 128.0
-        # color (UNORM8): n / 255.0
-        # uvs (UNORM16): t / 65535.0  * scale + translation (of subset)
-        # return self.position.pack_u16() + self.normal.pack_s8() + Vec4().pack() + self.uv.pack_u16()
         return self.position.pack_f32() + self.normal.pack_f32() + Vec4().pack() + self.uv.pack_f32()
 
     def __str__(self):
@@ -126,8 +121,6 @@ class Material:
         self.texture_name = raw_texture
 
     def pack(self):
-        # data = self.offset.pack_f32() + self.scale.pack_f32()
-        # return data + bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
         return bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, '\0'), 'ascii')
 
     def convert_texture(self):
@@ -163,24 +156,16 @@ class Mesh:
     def pack(self, outfile):
         data = bytearray()
 
-        print('*** Header ***')
-        # TODO: add skin index if skinned mesh
-        print(len(self.vertices), len(self.tris) * 3, len(self.subsets))
+        # print(len(self.vertices), len(self.tris) * 3, len(self.subsets))
         data += struct.pack('<III', len(self.vertices), len(self.tris) * 3, len(self.subsets))
 
-        print('*** Vertices ***')
         for v in self.vertices:
-            # print(v)
             data += v.pack()
 
-        print('*** Triangles ***')
         for t in self.tris:
-            # print(t)
             data += t.pack()
 
-        print('*** Subsets ***')
         for s in self.subsets:
-            # print(s)
             data += s.pack()
 
         with open(outfile, 'wb') as f:
@@ -189,7 +174,7 @@ class Mesh:
     def convert_textures(self):
         for s in self.subsets:
             m = s.material
-            print("{} -> {}".format(m.original_texture_name, m.texture_name))
+            # print("{} -> {}".format(m.original_texture_name, m.texture_name))
             m.convert_texture()
 
 class Skin:
@@ -198,8 +183,6 @@ class Skin:
         self.joints = joints
         self.inverse_bind_matrices = matrices
         self.bone_hierarchy = hierarchy
-
-        # print(" ".join(f"{val:.6f}" for val in inverse_bind_matrices[0]))
 
     def pack(self, outfile):
         # header
@@ -248,6 +231,7 @@ class StaticTransforms:
         self.missing_indices = indices
 
     def pack(self, outfile):
+        # TODO: only pack non identity
         transform_data = bytearray()
         num_missing_indices = len(self.missing_indices)
         indices = struct.pack('<I', num_missing_indices) + struct.pack('<{}i'.format(num_missing_indices), *self.missing_indices)
