@@ -24,7 +24,7 @@ struct Player {
 };
 
 static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
-    terrainMesh, stairsMesh, unitCubeMesh, fieldMesh, boarMesh, sponzaMesh;
+    terrainMesh, stairsMesh, unitCubeMesh, boarMesh, sponzaMesh;
 static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh, cesiumMesh;
 static Skin cesiumSkin, boarSkin, humanSkin;
 static Animation cesiumAnim, boarAnim, humanAnim;
@@ -179,14 +179,11 @@ void Game::Init()
   yukaMesh.Read("assets/yuka.objb");
   houseMesh.Read("assets/tower.objb");
   terrainMesh.Read("assets/terrain.objb");
-  // terrainMesh = t.Mesh();
   cubeMesh.Read("assets/cube.objb");
   unitCubeMesh.Read("assets/plateform.objb");
   cylinderMesh.Read("assets/cylinder.objb");
   stairsMesh.Read("assets/stairs.objb");
-  fieldMesh.Read("assets/bf.objb");
 
-  //boarMesh.Read("assets/OPTIM_noq_boarskinbrown_not_skinned.m3d");
   boarSkinnedMesh.Read("assets/OPTIM_noq_boarskinbrown_mesh_1.m3d");
   boarSkin.Read("assets/OPTIM_noq_boarskinbrown_skin_1.skin");
   boarSkin.ReadStaticTransforms("assets/OPTIM_noq_boarskinbrown_transforms.bin");
@@ -213,7 +210,6 @@ void Game::Init()
   yuka.meshes.push_back(&yukaMesh);
   house.meshes.push_back(&houseMesh);
   terrain.meshes.push_back(&terrainMesh);
-  // terrain.meshes.push_back(&fieldMesh);
   cube.meshes.push_back(&cubeMesh);
   cylinder.meshes.push_back(&cylinderMesh);
   stairs.meshes.push_back(&stairsMesh);
@@ -228,7 +224,6 @@ void Game::Init()
   boar.animations["test"] = &boarAnim;
   boar.currentAnimation = boar.animations["test"];
 
-  //boar.meshes.push_back(&boarMesh);
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);
   cesium.animations["walk"] = &cesiumAnim;

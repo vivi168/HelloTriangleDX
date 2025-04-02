@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "Win32Application.h"
 #include "Renderer.h"
-#include "Terrain.h"
 #include "Input.h"
 #include "Game.h"
 

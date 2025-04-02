@@ -1,16 +1,11 @@
 #include "stdafx.h"
 
 #include "Renderer.h"
-#include "D3D12MemAlloc.h"
-#include "Win32Application.h"
 
-#include "d3dx12_root_signature.h"
-#include "d3dx12_resource_helpers.h"
-#include "d3dx12_barriers.h"
+#include "Win32Application.h"
 
 #include "Camera.h"
 #include "Mesh.h"
-#include "Terrain.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -92,7 +87,7 @@ struct Texture {
 
 namespace Renderer
 {
-enum class PSO { Basic, Skinned, Terrain, ColliderSurface };
+enum class PSO { Basic, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
@@ -107,7 +102,6 @@ struct Scene {
   };
 
   std::list<SceneNode> nodes;
-  Terrain* terrain;
   Camera* camera;
 } g_Scene;
 
@@ -611,7 +605,6 @@ void Cleanup()
 
   g_PipelineStateObjects[PSO::Basic].Reset();
   g_PipelineStateObjects[PSO::Skinned].Reset();
-  g_PipelineStateObjects[PSO::Terrain].Reset();
   g_RootSignature.Reset();
 
   CloseHandle(g_FenceEvent);
@@ -1236,62 +1229,6 @@ static void InitFrameResources()
     CHECK_HR(g_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::Skinned].Attach(pipelineStateObject);
-  }
-
-  // Pipeline state for terrain
-  {
-    // Vertex Shader
-    auto vertexShaderBlob =
-        ReadData(GetAssetFullPath(L"TerrainVS.cso").c_str());
-    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
-                                          vertexShaderBlob.size()};
-
-    // Pixel Shader
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"TerrainPS.cso").c_str());
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                         pixelShaderBlob.size()};
-
-    // create input layout
-    // The input layout is used by the Input Assembler so that it knows how to
-    // read the vertex data bound to it.
-    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout.NumElements = _countof(inputLayout);
-    psoDesc.InputLayout.pInputElementDescs = inputLayout;
-    psoDesc.pRootSignature = g_RootSignature.Get();
-    psoDesc.VS = vertexShader;
-    psoDesc.PS = pixelShader;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
-    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.SampleDesc.Count = 1;  // must be the same sample description as the
-                                   // swapchain and depth/stencil buffer
-    psoDesc.SampleDesc.Quality = 0;
-    // sample mask has to do with multi-sampling. 0xffffffff means point
-    // sampling is done
-    psoDesc.SampleMask = 0xffffffff;
-    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
-    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    SetDefaultBlendDesc(psoDesc.BlendState);
-    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
-    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
-
-    // create the pso
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateGraphicsPipelineState(
-        &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::Terrain].Attach(pipelineStateObject);
   }
 }
 

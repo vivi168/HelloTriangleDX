@@ -7,9 +7,6 @@
 [submodule "DirectX-Headers"]
 	path = third_party/DirectX-Headers
 	url = https://github.com/microsoft/DirectX-Headers
-[submodule "FastNoise2"]
-	path = third_party/FastNoise2
-	url = https://github.com/Auburn/FastNoise2
 [submodule "third_party/meshoptimizer"]
 	path = third_party/meshoptimizer
 	url = https://github.com/zeux/meshoptimizer.git

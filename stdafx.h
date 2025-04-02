@@ -11,10 +11,21 @@
 
 #include <windows.h>
 
+#include <wrl.h>
+#include <shellapi.h>
+
 #include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <DirectXMath.h>
+
+#include "D3D12MemAlloc.h"
+#include "d3dx12_root_signature.h"
+#include "d3dx12_resource_helpers.h"
+#include "d3dx12_barriers.h"
+
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx12.h"
 
 #include <iostream>
 #include <fstream>
@@ -38,12 +49,5 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
-
-#include <wrl.h>
-#include <shellapi.h>
-
-#include "imgui.h"
-#include "imgui_impl_win32.h"
-#include "imgui_impl_dx12.h"
 
 #include "RendererHelper.h"
