@@ -27,7 +27,7 @@ VS_OUTPUT main(VS_INPUT input)
 
   output.color = input.color;
   output.texCoord = input.texCoord;
-  float3 norm = mul(float4(input.normal, 1.0f), NormalMatrix);
+  float3 norm = mul(float4(input.normal, 1.0f), NormalMatrix).xyz;
   output.normal = normalize(norm);
   return output;
 }

@@ -1106,17 +1106,17 @@ static void InitFrameResources()
     }
   }
 
+  // Pixel Shader
+  auto pixelShaderBlob = ReadData(GetAssetFullPath(L"DefaultPS.cso").c_str());
+  D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                       pixelShaderBlob.size()};
+
   // Pipeline State for static objects
   {
     // Vertex Shader
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"VS.cso").c_str());
+    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"DefaultVS.cso").c_str());
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
                                           vertexShaderBlob.size()};
-
-    // Pixel Shader
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"PS.cso").c_str());
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                         pixelShaderBlob.size()};
 
     // create input layout
     // The input layout is used by the Input Assembler so that it knows how to
@@ -1175,14 +1175,9 @@ static void InitFrameResources()
   // Pipeline State for skinned objects
   {
     // Vertex Shader
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"VS_skinned.cso").c_str());
+    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"DefaultSkinnedVS.cso").c_str());
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
                                           vertexShaderBlob.size()};
-
-    // Pixel Shader
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"PS_skinned.cso").c_str());
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                         pixelShaderBlob.size()};
 
     // Input Layout
     const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
