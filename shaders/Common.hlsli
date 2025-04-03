@@ -25,8 +25,8 @@ struct VS_OUTPUT
   float2 texCoord : TEXCOORD;
 };
 
-cbuffer PassCb : register(b0)
+cbuffer FrameConstants : register(b0)
 {
-  float4 color;
   float time;
+  float deltaTime;
 };

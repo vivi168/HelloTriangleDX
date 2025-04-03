@@ -1,4 +1,4 @@
-#include "common.hlsli"
+#include "Common.hlsli"
 
 cbuffer ObjectCb : register(b1)
 {

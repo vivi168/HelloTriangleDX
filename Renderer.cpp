@@ -91,7 +91,7 @@ enum class PSO { Basic, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { PerFrameCb = 0, PerObjCb, BoneTransforms, DiffuseTex, Count };
+enum Slots : size_t { FrameConstants = 0, PerObjCb, BoneTransforms, DiffuseTex, Count };
 }
 
 struct Scene {
@@ -105,11 +105,7 @@ struct Scene {
   Camera* camera;
 } g_Scene;
 
-struct FrameCB0_ALL {
-  XMFLOAT4 Color;
-  float time;
-};
-
+// TODO: rename this ?
 struct ObjectCB1_VS {
   XMFLOAT4X4 WorldViewProj;
   XMFLOAT4X4 WorldMatrix;
@@ -117,24 +113,23 @@ struct ObjectCB1_VS {
 };
 
 struct FrameContext {
+  struct {
+    float time;
+    float deltaTime;
+  } frameConstants;
+
+  static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT);
+
   ComPtr<ID3D12Resource> renderTarget;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
   ComPtr<ID3D12Fence> fence;
   UINT64 fenceValue;
 
-  // TODO: struct to hold these?
+  // TODO: struct to hold these? + rename objectCb ?
   ComPtr<ID3D12Resource> objectCbUploadHeap;
   D3D12MA::Allocation* objectCbUploadHeapAllocation;
   void* objectCbAddress;
-
-  // TODO: struct to hold these?
-  ComPtr<ID3D12Resource> constantBufferUploadHeap;
-  D3D12MA::Allocation* constantBufferUploadAllocation;
-  void* constantBufferAddress;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE constantBufferSrvCpuDescHandle;
-  D3D12_GPU_DESCRIPTOR_HANDLE constantBufferSrvGpuDescHandle;
 
   // TODO: abstract this away?
   ComPtr<ID3D12Resource> boneTransformSrvUploadHeap;
@@ -264,7 +259,7 @@ static D3D12MA::Allocation* g_DepthStencilAllocation;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
 static ID3D12DescriptorHeap* g_SrvDescriptorHeap;  // TODO: ComPtr?
-static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
+static DescriptorHeapListAllocator g_SrvDescHeapAlloc; // better name for this?
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>>
@@ -343,13 +338,10 @@ void Update(float time, float dt)
 {
   auto ctx = &g_FrameContext[g_FrameIndex];
 
-  // Per frame constant buffer
+  // Per frame root constants
   {
-    const float r = sin(0.5f * time * (XM_PI * 2.f)) * 0.5f + 0.5f;
-    FrameCB0_ALL cb;
-    cb.Color = XMFLOAT4(r, 1.f, 1.f, 1.f);
-    cb.time = time;
-    memcpy(ctx->constantBufferAddress, &cb, sizeof(cb));
+    ctx->frameConstants.time = time;
+    ctx->frameConstants.deltaTime = dt;
   }
 
   // Per object constant buffer
@@ -368,6 +360,7 @@ void Update(float time, float dt)
       if (model->currentAnimation) {
         model->currentAnimation->Update(dt);
         size_t i = 0;
+        // TODO: don't loop skinnedMesh but loop unique skins to avoid computing same thing twice
         for (auto skinnedMesh : model->skinnedMeshes) {
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
 
@@ -478,8 +471,8 @@ void Render()
   ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap};
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-  g_CommandList->SetGraphicsRootDescriptorTable(
-      RootParameter::PerFrameCb, ctx->constantBufferSrvGpuDescHandle);
+  g_CommandList->SetGraphicsRoot32BitConstants(
+      RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
@@ -612,14 +605,10 @@ void Cleanup()
   g_CommandQueue.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    // TODO: Method from FrameContext + abstract away these 3
+    // TODO: Method from FrameContext + abstract away these 2?
     g_FrameContext[i].objectCbUploadHeap.Reset();
     g_FrameContext[i].objectCbUploadHeapAllocation->Release();
     g_FrameContext[i].objectCbUploadHeapAllocation = nullptr;
-
-    g_FrameContext[i].constantBufferUploadHeap.Reset();
-    g_FrameContext[i].constantBufferUploadAllocation->Release();
-    g_FrameContext[i].constantBufferUploadAllocation = nullptr;
 
     g_FrameContext[i].boneTransformSrvUploadHeap.Reset();
     g_FrameContext[i].boneTransformSrvUploadHeapAllocation->Release();
@@ -979,20 +968,16 @@ static void InitFrameResources()
   // Root Signature
   {
     // Descriptor ranges
-    // TODO: add enum for each of the slots
     // TODO: how to go bindless? for textures at least.
-    CD3DX12_DESCRIPTOR_RANGE descriptorRanges[2] = {};
-    descriptorRanges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);  // b0
-    descriptorRanges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
+    CD3DX12_DESCRIPTOR_RANGE descriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
 
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
-    // TODO: rework these. root constant, descriptor, descriptor table, bindless
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::PerFrameCb].InitAsDescriptorTable(1, &descriptorRanges[0]);
+    rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
     rootParameters[RootParameter::PerObjCb].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(1); // t1
-    rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRanges[1]);
+    rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1016,36 +1001,6 @@ static void InitFrameResources()
         0, signatureBlobPtr->GetBufferPointer(),
         signatureBlobPtr->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
     g_RootSignature.Attach(rootSignature);
-  }
-
-  // Constant Buffers
-  // per frame CB
-  {
-    D3D12MA::ALLOCATION_DESC allocDesc = {};
-    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      auto ctx = &g_FrameContext[i];
-
-      CHECK_HR(g_Allocator->CreateResource(
-          &allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
-          D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-          &ctx->constantBufferUploadAllocation,
-          IID_PPV_ARGS(&ctx->constantBufferUploadHeap)));
-
-      D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-      cbvDesc.BufferLocation =
-          ctx->constantBufferUploadHeap->GetGPUVirtualAddress();
-      cbvDesc.SizeInBytes = AlignUp<UINT>(sizeof(FrameCB0_ALL), 256);
-
-      g_SrvDescHeapAlloc.Alloc(&ctx->constantBufferSrvCpuDescHandle,
-                               &ctx->constantBufferSrvGpuDescHandle);
-      g_Device->CreateConstantBufferView(&cbvDesc,
-                                         ctx->constantBufferSrvCpuDescHandle);
-
-      CHECK_HR(ctx->constantBufferUploadHeap->Map(0, &EMPTY_RANGE,
-                                                  &ctx->constantBufferAddress));
-    }
   }
 
   // per object CB
