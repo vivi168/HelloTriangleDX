@@ -177,8 +177,8 @@ struct DescriptorHeapListAllocator {
     m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
     m_HeapHandleIncrement =
         device->GetDescriptorHandleIncrementSize(m_HeapType);
-    m_FreeIndices.reserve((int)desc.NumDescriptors);
-    for (int n = desc.NumDescriptors; n > 0; n--) m_FreeIndices.push_back(n);
+    m_FreeIndices.reserve(desc.NumDescriptors);
+    for (UINT n = desc.NumDescriptors; n != 0; n--) m_FreeIndices.push_back(n);
   }
   void Destroy()
   {
@@ -189,7 +189,7 @@ struct DescriptorHeapListAllocator {
              D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
   {
     assert(m_FreeIndices.size() > 0);
-    int idx = m_FreeIndices.back();
+    UINT idx = m_FreeIndices.back();
     m_FreeIndices.pop_back();
     outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
     outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
@@ -197,12 +197,10 @@ struct DescriptorHeapListAllocator {
   void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
             D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
   {
-    int cpu_idx =
-        (int)((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
-    int gpu_idx =
-        (int)((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
-    assert(cpu_idx == gpu_idx);
-    m_FreeIndices.push_back(cpu_idx);
+    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
+    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
+    assert(cpuIdx == gpuIdx);
+    m_FreeIndices.push_back(cpuIdx);
   }
 
 private:
@@ -211,7 +209,7 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
   D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
   UINT m_HeapHandleIncrement;
-  std::vector<int> m_FreeIndices;
+  std::vector<UINT> m_FreeIndices;
 };
 
 // ========== Constants
