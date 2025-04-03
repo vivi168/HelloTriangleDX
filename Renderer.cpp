@@ -91,7 +91,7 @@ enum class PSO { Basic, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerObjCb, BoneTransforms, DiffuseTex, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, DiffuseTex, Count };
 }
 
 struct Scene {
@@ -527,7 +527,7 @@ void Render()
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerObjCb, ctx->perModelConstants.GpuAddress(node.cbIndex));
+          RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
@@ -549,7 +549,7 @@ void Render()
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerObjCb, ctx->perModelConstants.GpuAddress(node.cbIndex));
+          RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       auto bonesIndex = node.bonesIndices[i++];
       g_CommandList->SetGraphicsRootShaderResourceView(
@@ -1004,7 +1004,7 @@ static void InitFrameResources()
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
-    rootParameters[RootParameter::PerObjCb].InitAsConstantBufferView(1);  // b1
+    rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(1); // t1
     rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
 
