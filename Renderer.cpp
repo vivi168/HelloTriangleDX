@@ -112,13 +112,49 @@ struct ObjectCB1_VS {
   XMFLOAT4X4 NormalMatrix;
 };
 
+struct UploadHeapResource {
+  ComPtr<ID3D12Resource> uploadHeap;
+  D3D12MA::Allocation* uploadHeapAllocation;
+  void* address;
+
+  D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
+  D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle;
+
+  BYTE* Address(size_t offset) const { return (BYTE*)address + offset; }
+
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset) const
+  {
+    return uploadHeap->GetGPUVirtualAddress() + offset;
+  }
+
+  void CreateResource(D3D12MA::ALLOCATION_DESC* allocDesc, UINT64 width);
+
+  void Map() { CHECK_HR(uploadHeap->Map(0, &EMPTY_RANGE, &address)); }
+
+  void SetName(std::wstring baseName, int index)
+  {
+    std::wstring name = L"Constant Buffer " + baseName +
+                        L" Upload Resource Heap - " + std::to_wstring(index);
+
+    uploadHeap->SetName(name.c_str());
+    uploadHeapAllocation->SetName(name.c_str());
+  }
+
+  void Release()
+  {
+    uploadHeap.Reset();
+    uploadHeapAllocation->Release();
+    uploadHeapAllocation = nullptr;
+  }
+};
+
 struct FrameContext {
   struct {
     float time;
     float deltaTime;
   } frameConstants;
 
-  static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT);
+  static constexpr UINT64 frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
 
   ComPtr<ID3D12Resource> renderTarget;
 
@@ -126,15 +162,8 @@ struct FrameContext {
   ComPtr<ID3D12Fence> fence;
   UINT64 fenceValue;
 
-  // TODO: struct to hold these? + rename objectCb ?
-  ComPtr<ID3D12Resource> objectCbUploadHeap;
-  D3D12MA::Allocation* objectCbUploadHeapAllocation;
-  void* objectCbAddress;
-
-  // TODO: abstract this away?
-  ComPtr<ID3D12Resource> boneTransformSrvUploadHeap;
-  D3D12MA::Allocation* boneTransformSrvUploadHeapAllocation;
-  void* boneTransformSrvAddress;
+  UploadHeapResource perModelConstants;
+  UploadHeapResource boneTransformMatrices;
 };
 
 struct DescriptorHeapListAllocator {
@@ -273,6 +302,14 @@ static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
 
+void UploadHeapResource::CreateResource(D3D12MA::ALLOCATION_DESC* allocDesc, UINT64 width)
+{
+  CHECK_HR(g_Allocator->CreateResource(
+      allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(width),
+      D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, &uploadHeapAllocation,
+      IID_PPV_ARGS(&uploadHeap)));
+}
+
 void InitWindow(UINT width, UINT height, std::wstring name)
 {
   g_Width = width;
@@ -365,7 +402,7 @@ void Update(float time, float dt)
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
 
           auto bonesIndex = node.bonesIndices[i++];
-          memcpy((uint8_t*)ctx->boneTransformSrvAddress + bonesIndex,
+          memcpy(ctx->boneTransformMatrices.Address(bonesIndex),
                  matrices.data(), sizeof(XMFLOAT4X4) * matrices.size());
         }
       }  // else identity matrices ?
@@ -380,7 +417,7 @@ void Update(float time, float dt)
           XMMatrixInverse(nullptr, model->WorldMatrix());
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
-      memcpy((uint8_t*)ctx->objectCbAddress + node.cbIndex, &cb, sizeof(cb));
+      memcpy(ctx->perModelConstants.Address(node.cbIndex), &cb, sizeof(cb));
     }
   }
 
@@ -492,7 +529,7 @@ void Render()
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+          RootParameter::PerObjCb, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
@@ -514,12 +551,12 @@ void Render()
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
       g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerObjCb, ctx->objectCbUploadHeap->GetGPUVirtualAddress() + node.cbIndex);
+          RootParameter::PerObjCb, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       auto bonesIndex = node.bonesIndices[i++];
       g_CommandList->SetGraphicsRootShaderResourceView(
           RootParameter::BoneTransforms,
-          ctx->boneTransformSrvUploadHeap->GetGPUVirtualAddress() + bonesIndex);
+          ctx->boneTransformMatrices.GpuAddress(bonesIndex));
 
       for (const auto& subset : mesh->subsets) {
         g_CommandList->SetGraphicsRootDescriptorTable(
@@ -605,14 +642,8 @@ void Cleanup()
   g_CommandQueue.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    // TODO: Method from FrameContext + abstract away these 2?
-    g_FrameContext[i].objectCbUploadHeap.Reset();
-    g_FrameContext[i].objectCbUploadHeapAllocation->Release();
-    g_FrameContext[i].objectCbUploadHeapAllocation = nullptr;
-
-    g_FrameContext[i].boneTransformSrvUploadHeap.Reset();
-    g_FrameContext[i].boneTransformSrvUploadHeapAllocation->Release();
-    g_FrameContext[i].boneTransformSrvUploadHeapAllocation = nullptr;
+    g_FrameContext[i].perModelConstants.Release();
+    g_FrameContext[i].boneTransformMatrices.Release();
   }
 
   g_SrvDescriptorHeap->Release();
@@ -1011,53 +1042,13 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
-      CHECK_HR(g_Allocator->CreateResource(
-          &allocDesc,
-          // size of the resource heap. Must be a multiple of 64KB for
-          // single-textures and constant buffers
-          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
-          // will be data that is read from so we keep it in the generic read
-          // state
-          D3D12_RESOURCE_STATE_GENERIC_READ,
-          nullptr,  // we do not have use an optimized clear value for constant
-                    // buffers
-          &ctx->objectCbUploadHeapAllocation,
-          IID_PPV_ARGS(&ctx->objectCbUploadHeap)));
+      ctx->perModelConstants.CreateResource(&allocDesc, 1024 * 64);
+      ctx->perModelConstants.SetName(L"(per model constants)", i);
+      ctx->perModelConstants.Map();
 
-      std::wstring name = L"Constant Buffer (per obj) Upload Resource Heap - " +
-                          std::to_wstring(i);
-      ctx->objectCbUploadHeap->SetName(name.c_str());
-      ctx->objectCbUploadHeapAllocation->SetName(name.c_str());
-
-      CHECK_HR(
-          ctx->objectCbUploadHeap->Map(0, &EMPTY_RANGE, &ctx->objectCbAddress));
-    }
-  }
-
-  // bone transforms buffer
-  {
-    D3D12MA::ALLOCATION_DESC allocDesc = {};
-    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      auto ctx = &g_FrameContext[i];
-
-      CHECK_HR(g_Allocator->CreateResource(
-          &allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64),
-          D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-          &ctx->boneTransformSrvUploadHeapAllocation,
-          IID_PPV_ARGS(&ctx->boneTransformSrvUploadHeap)));
-
-      std::wstring name =
-          L"SRV Buffer (bone transforms) Upload Heap - " + std::to_wstring(i);
-      std::wstring allocName =
-          L"SRV Buffer (bone transforms) Upload Heap Allocation - " +
-          std::to_wstring(i);
-      ctx->boneTransformSrvUploadHeap->SetName(name.c_str());
-      ctx->boneTransformSrvUploadHeapAllocation->SetName(name.c_str());
-
-      CHECK_HR(ctx->boneTransformSrvUploadHeap->Map(
-          0, &EMPTY_RANGE, &ctx->boneTransformSrvAddress));
+      ctx->boneTransformMatrices.CreateResource(&allocDesc, 1024 * 64);
+      ctx->perModelConstants.SetName(L"(bone matrices)", i);
+      ctx->boneTransformMatrices.Map();
     }
   }
 
