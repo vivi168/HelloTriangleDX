@@ -5,6 +5,8 @@
 
 using namespace DirectX;
 
+static XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+
 void Skin::ReadStaticTransforms(std::string filename)
 {
   FILE* fp;
@@ -16,8 +18,6 @@ void Skin::ReadStaticTransforms(std::string filename)
 
   std::vector<int> boneIds(numBones);
   fread(boneIds.data(), sizeof(int), numBones, fp);
-
-  XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
 
   for (auto& i : boneIds) {
     struct {
@@ -47,8 +47,6 @@ XMMATRIX Animation::Interpolate(int boneId, Skin* skin)
 
   float startTime = keyframes.front().time;
   float endTime = keyframes.back().time;
-
-  XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
 
   if (curTime <= startTime) {
     XMVECTOR scale = XMLoadFloat3(&keyframes.front().scale);
@@ -138,11 +136,7 @@ XMMATRIX Model3D::WorldMatrix()
   XMVECTOR rotVector = XMLoadFloat3(&rotate);
   XMVECTOR q = XMQuaternionRotationRollPitchYawFromVector(rotVector);
 
-  XMMATRIX scaleMatrix = XMMatrixScalingFromVector(scaleVector);
-  XMMATRIX transMatrix = XMMatrixTranslationFromVector(transVector);
-  XMMATRIX rotMatrix = XMMatrixRotationQuaternion(q);
-
-  return scaleMatrix * rotMatrix * transMatrix;
+  return XMMatrixAffineTransformation(scaleVector, zero, q, transVector);
 }
 
 void Model3D::Scale(float s)
