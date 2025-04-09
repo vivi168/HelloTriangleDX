@@ -106,45 +106,48 @@ struct Scene {
 } g_Scene;
 
 // TODO: rename this ?
-struct ObjectCB1_VS {
+struct ModelConstantBuffer {
   XMFLOAT4X4 WorldViewProj;
   XMFLOAT4X4 WorldMatrix;
   XMFLOAT4X4 NormalMatrix;
 };
 
-struct UploadHeapResource {
-  ComPtr<ID3D12Resource> uploadHeap;
-  D3D12MA::Allocation* uploadHeapAllocation;
+struct HeapResource {
+  ComPtr<ID3D12Resource> resource;
+  D3D12MA::Allocation* allocation;
   void* address;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
-  D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle;
-
-  BYTE* Address(size_t offset) const { return (BYTE*)address + offset; }
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset) const
   {
-    return uploadHeap->GetGPUVirtualAddress() + offset;
+    return resource->GetGPUVirtualAddress() + offset;
   }
 
-  void CreateResource(D3D12MA::ALLOCATION_DESC* allocDesc, UINT64 width);
+  void CreateResource(const D3D12MA::ALLOCATION_DESC* allocDesc,
+                      const D3D12_RESOURCE_DESC* pResourceDesc,
+                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
+                      const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr);
 
-  void Map() { CHECK_HR(uploadHeap->Map(0, &EMPTY_RANGE, &address)); }
+  void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
+
+  void Copy(size_t offset, const void* data, size_t size)
+  {
+    memcpy((BYTE*)address + offset, data, size);
+  }
 
   void SetName(std::wstring baseName, int index)
   {
     std::wstring name = L"Constant Buffer " + baseName +
                         L" Upload Resource Heap - " + std::to_wstring(index);
 
-    uploadHeap->SetName(name.c_str());
-    uploadHeapAllocation->SetName(name.c_str());
+    resource->SetName(name.c_str());
+    allocation->SetName(name.c_str());
   }
 
   void Release()
   {
-    uploadHeap.Reset();
-    uploadHeapAllocation->Release();
-    uploadHeapAllocation = nullptr;
+    resource.Reset();
+    allocation->Release();
+    allocation = nullptr;
   }
 };
 
@@ -162,8 +165,17 @@ struct FrameContext {
   ComPtr<ID3D12Fence> fence;
   UINT64 fenceValue;
 
-  UploadHeapResource perModelConstants;
-  UploadHeapResource boneTransformMatrices;
+  HeapResource perModelConstants;
+  HeapResource boneTransformMatrices;
+
+  void Reset() {
+    perModelConstants.Release();
+    boneTransformMatrices.Release();
+
+    renderTarget.Reset();
+    commandAllocator.Reset();
+    fence.Reset();
+  }
 };
 
 struct DescriptorHeapListAllocator {
@@ -240,7 +252,7 @@ static void* const CUSTOM_ALLOCATION_PRIVATE_DATA =
     (void*)(uintptr_t)0xDEADC0DE;
 
 static const size_t OBJECT_CB_ALIGNED_SIZE =
-    AlignUp<size_t>(sizeof(ObjectCB1_VS), 256);
+    AlignUp<size_t>(sizeof(ModelConstantBuffer), 256);
 static const size_t FRAME_BUFFER_COUNT = 3;
 
 static const UINT PRESENT_SYNC_INTERVAL = 1;
@@ -318,12 +330,15 @@ static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
 
-void UploadHeapResource::CreateResource(D3D12MA::ALLOCATION_DESC* allocDesc, UINT64 width)
+void HeapResource::CreateResource(
+    const D3D12MA::ALLOCATION_DESC* allocDesc,
+    const D3D12_RESOURCE_DESC* pResourceDesc,
+    D3D12_RESOURCE_STATES InitialResourceState,
+    const D3D12_CLEAR_VALUE* pOptimizedClearValue)
 {
   CHECK_HR(g_Allocator->CreateResource(
-      allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(width),
-      D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, &uploadHeapAllocation,
-      IID_PPV_ARGS(&uploadHeap)));
+      allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
+      &allocation, IID_PPV_ARGS(&resource)));
 }
 
 void InitWindow(UINT width, UINT height, std::wstring name)
@@ -406,7 +421,7 @@ void Update(float time, float dt)
     XMMATRIX viewProjection = view * projection;
 
     for (auto& node : g_Scene.nodes) {
-      ObjectCB1_VS cb;
+      ModelConstantBuffer cb;
 
       auto model = node.model;
 
@@ -418,8 +433,8 @@ void Update(float time, float dt)
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
 
           auto bonesIndex = node.bonesIndices[i++];
-          memcpy(ctx->boneTransformMatrices.Address(bonesIndex),
-                 matrices.data(), sizeof(XMFLOAT4X4) * matrices.size());
+          ctx->boneTransformMatrices.Copy(bonesIndex, matrices.data(),
+                                          sizeof(XMFLOAT4X4) * matrices.size());
         }
       }  // else identity matrices ?
 
@@ -433,7 +448,7 @@ void Update(float time, float dt)
           XMMatrixInverse(nullptr, model->WorldMatrix());
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
-      memcpy(ctx->perModelConstants.Address(node.cbIndex), &cb, sizeof(cb));
+      ctx->perModelConstants.Copy(node.cbIndex, &cb, sizeof(cb));
     }
   }
 
@@ -657,11 +672,6 @@ void Cleanup()
   g_CommandList.Reset();
   g_CommandQueue.Reset();
 
-  for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    g_FrameContext[i].perModelConstants.Release();
-    g_FrameContext[i].boneTransformMatrices.Release();
-  }
-
   g_SrvDescriptorHeap->Release();
   g_SrvDescriptorHeap = nullptr;
   g_DepthStencilDescriptorHeap.Reset();
@@ -671,10 +681,7 @@ void Cleanup()
   g_RtvDescriptorHeap.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
-    // TODO: Method from FrameContext
-    g_FrameContext[i].renderTarget.Reset();
-    g_FrameContext[i].commandAllocator.Reset();
-    g_FrameContext[i].fence.Reset();
+    g_FrameContext[i].Reset();
   }
 
   g_Allocator.Reset();
@@ -1058,11 +1065,11 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
-      ctx->perModelConstants.CreateResource(&allocDesc, 1024 * 64);
+      ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
       ctx->perModelConstants.SetName(L"(per model constants)", i);
       ctx->perModelConstants.Map();
 
-      ctx->boneTransformMatrices.CreateResource(&allocDesc, 1024 * 64);
+      ctx->boneTransformMatrices.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
       ctx->perModelConstants.SetName(L"(bone matrices)", i);
       ctx->boneTransformMatrices.Map();
     }
