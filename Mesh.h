@@ -121,11 +121,18 @@ struct Animation {
   std::vector<DirectX::XMFLOAT4X4> BoneTransforms(Skin* skin);
 };
 
+// Forward declaration
+namespace Renderer
+{
+struct Geometry;
+struct Texture;
+}  // namespace Renderer
+
 struct Subset {
   uint32_t start, count, vstart, pad;
   TEXTURENAME name;
 
-  struct Texture* texture = nullptr;  // GPU data
+  Renderer::Texture* texture = nullptr;  // GPU data
 };
 
 template <typename T>
@@ -142,7 +149,7 @@ struct Mesh3D {
   std::vector<Subset> subsets;
 
   std::string name;
-  struct Geometry* geometry = nullptr;  // GPU data
+  Renderer::Geometry* geometry = nullptr;  // GPU data
   Skin* skin = nullptr;                 // in case of skinned mesh
 
   void Read(std::string filename)
