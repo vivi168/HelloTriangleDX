@@ -41,7 +41,7 @@
 #include <chrono>
 #include <string>
 #include <exception>
-#include <string>
+#include <deque>
 
 #include <cassert>
 #include <cstdlib>

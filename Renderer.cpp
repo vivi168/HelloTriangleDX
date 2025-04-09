@@ -80,9 +80,9 @@ struct Texture {
 
   uint32_t Height() const { return header.height; }
 
-  uint64_t BytesPerRow() const { return Width() * BytesPerPixel(); }
+  size_t BytesPerRow() const { return Width() * BytesPerPixel(); }
 
-  uint64_t ImageSize() const { return Height() * BytesPerRow(); }
+  size_t ImageSize() const { return Height() * BytesPerRow(); }
 };
 
 namespace Renderer
@@ -154,7 +154,7 @@ struct FrameContext {
     float deltaTime;
   } frameConstants;
 
-  static constexpr UINT64 frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
+  static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
 
   ComPtr<ID3D12Resource> renderTarget;
 
@@ -171,36 +171,54 @@ struct DescriptorHeapListAllocator {
   {
     assert(m_Heap == nullptr && m_FreeIndices.empty());
     m_Heap = heap;
+
     D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
     m_HeapType = desc.Type;
     m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
     m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
-    m_HeapHandleIncrement =
-        device->GetDescriptorHandleIncrementSize(m_HeapType);
-    m_FreeIndices.reserve(desc.NumDescriptors);
-    for (UINT n = desc.NumDescriptors; n != 0; n--) m_FreeIndices.push_back(n);
+    m_HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(m_HeapType);
+
+    for (size_t i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
   }
+
   void Destroy()
   {
     m_Heap = nullptr;
     m_FreeIndices.clear();
   }
+
   void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
              D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
   {
     assert(m_FreeIndices.size() > 0);
-    UINT idx = m_FreeIndices.back();
-    m_FreeIndices.pop_back();
+
+    size_t idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
     outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
     outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
   }
+
+  size_t Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
+  {
+    assert(m_FreeIndices.size() > 0);
+
+    size_t idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+
+    return idx;
+  }
+
   void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
             D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
   {
-    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
-    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
+    size_t cpuIdx = (cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement;
+    size_t gpuIdx = (gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement;
+
     assert(cpuIdx == gpuIdx);
-    m_FreeIndices.push_back(cpuIdx);
+    m_FreeIndices.push_front(cpuIdx);
   }
 
 private:
@@ -209,7 +227,7 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
   D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
   UINT m_HeapHandleIncrement;
-  std::vector<UINT> m_FreeIndices;
+  std::deque<size_t> m_FreeIndices;
 };
 
 // ========== Constants
@@ -285,8 +303,8 @@ static ComPtr<ID3D12Resource> g_DepthStencilBuffer;
 static D3D12MA::Allocation* g_DepthStencilAllocation;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
-static ID3D12DescriptorHeap* g_SrvDescriptorHeap;  // TODO: ComPtr?
-static DescriptorHeapListAllocator g_SrvDescHeapAlloc; // better name for this?
+static ID3D12DescriptorHeap* g_SrvDescriptorHeap;
+static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>>
@@ -1319,7 +1337,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
   // Vertex Buffer
   {
-    const UINT64 vBufferSize = mesh->VertexBufferSize();
+    const size_t vBufferSize = mesh->VertexBufferSize();
 
     // create default heap
     // Default heap is memory on the GPU. Only the GPU has access to this
@@ -1394,7 +1412,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
   // Index Buffer
   {
     // m_CubeIndexCount = mesh->header.numIndices;
-    UINT64 iBufferSize = mesh->IndexBufferSize();
+    size_t iBufferSize = mesh->IndexBufferSize();
 
     // create default heap to hold index buffer
     D3D12MA::ALLOCATION_DESC indexBufferAllocDesc = {};

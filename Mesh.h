@@ -159,10 +159,6 @@ struct Mesh3D {
     indices.resize(header.numIndices);
     subsets.resize(header.numSubsets);
 
-    // if constexpr (std::is_same_v<T, SkinnedVertex>) {
-
-    //}
-
     fread(vertices.data(), sizeof(T), header.numVerts, fp);
     fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
@@ -170,9 +166,9 @@ struct Mesh3D {
     fclose(fp);
   }
 
-  uint64_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
+  size_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
 
-  uint64_t IndexBufferSize() const
+  size_t IndexBufferSize() const
   {
     return sizeof(uint16_t) * header.numIndices;
   }
