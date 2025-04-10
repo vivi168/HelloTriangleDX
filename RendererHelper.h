@@ -217,7 +217,6 @@ static std::wstring ConvertToWstring(std::string in)
   std::wstring out(wcstring);
   delete[] wcstring;
 
-  std::wcout << L"wide string:" << out << "\n";
   return out;
 }
 

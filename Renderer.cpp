@@ -64,14 +64,22 @@ struct HeapResource {
   void Transition(ID3D12GraphicsCommandList* pCmdList, D3D12_RESOURCE_STATES stateBefore,
                   D3D12_RESOURCE_STATES stateAfter);
 
-  // TODO without index + different name
-  void SetName(std::wstring baseName, int index = 0)
+  void SetName(std::string name)
   {
-    std::wstring name = L"Constant Buffer " + baseName +
-                        L" Upload Resource Heap - " + std::to_wstring(index);
+    std::wstring bufName = ConvertToWstring(name);
+    std::wstring allocName = bufName + L" (Allocation)";
 
-    resource->SetName(name.c_str());
-    allocation->SetName(name.c_str());
+    resource->SetName(bufName.c_str());
+    allocation->SetName(allocName.c_str());
+  }
+
+  void SetName(std::string name, int index)
+  {
+    std::wstring bufName = ConvertToWstring(name) + L" " + std::to_wstring(index);
+    std::wstring allocName = bufName + L" (Allocation)";
+
+    resource->SetName(bufName.c_str());
+    allocation->SetName(allocName.c_str());
   }
 
   void Reset()
@@ -108,7 +116,7 @@ struct Texture {
   } header;
 
   std::vector<uint8_t> pixels;
-  std::string name; // TODO: wstring
+  std::string name;
 
   HeapResource m_Buffer;
   HeapResource m_UploadBuffer;
@@ -987,6 +995,8 @@ static void InitFrameResources()
         &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
+    g_DepthStencilBuffer.SetName("Depth Stencil Buffer");
+
     D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
     depthStencilDesc.Format = DEPTH_STENCIL_FORMAT;
     depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -1076,11 +1086,11 @@ static void InitFrameResources()
       auto ctx = &g_FrameContext[i];
 
       ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
-      ctx->perModelConstants.SetName(L"(per model constants)", i);
+      ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
       ctx->perModelConstants.Map();
 
       ctx->boneTransformMatrices.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
-      ctx->boneTransformMatrices.SetName(L"(bone matrices)", i);
+      ctx->boneTransformMatrices.SetName("Bone Matrices Constant Buffer ", i);
       ctx->boneTransformMatrices.Map();
     }
   }
@@ -1367,7 +1377,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         &vertexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
         D3D12_RESOURCE_STATE_COPY_DEST);
 
-    geom.m_VertexBuffer.SetName(L"Vertex Buffer");
+    geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
 
     // create upload heap
     // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
@@ -1379,7 +1389,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     geom.m_VertexUploadBuffer.CreateResource(
         &vBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
 
-    geom.m_VertexUploadBuffer.SetName(L"Vertex Buffer Upload");
+    geom.m_VertexUploadBuffer.SetName("Vertex Buffer Upload: " + mesh->name);
 
     // store vertex buffer in upload heap
     D3D12_SUBRESOURCE_DATA vertexData = {};
@@ -1420,7 +1430,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         &indexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
         D3D12_RESOURCE_STATE_COPY_DEST);
 
-    geom.m_IndexBuffer.SetName(L"Index Buffer");
+    geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
 
     // create upload heap to upload index buffer
     D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
@@ -1429,7 +1439,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     geom.m_IndexUploadBuffer.CreateResource(
         &iBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
 
-    geom.m_IndexUploadBuffer.SetName(L"Index Buffer Upload");
+    geom.m_IndexUploadBuffer.SetName("Index Buffer Upload: " + mesh->name);
 
     // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
@@ -1475,6 +1485,7 @@ static Texture* CreateTexture(std::string name)
 
   tex.m_Buffer.CreateResource(&textureAllocDesc, &textureDesc,
                               D3D12_RESOURCE_STATE_COPY_DEST);
+  tex.m_Buffer.SetName("Texture: " + name);
 
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
