@@ -59,8 +59,10 @@ struct HeapResource {
     memcpy((BYTE*)address + offset, data, size);
   }
 
-  void Update(ID3D12Resource* pIntermediate, D3D12_SUBRESOURCE_DATA* data);
-  void Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
+  void CopyFrom(ID3D12GraphicsCommandList* pCmdList, ID3D12Resource* pIntermediate,
+                D3D12_SUBRESOURCE_DATA* data);
+  void Transition(ID3D12GraphicsCommandList* pCmdList, D3D12_RESOURCE_STATES stateBefore,
+                  D3D12_RESOURCE_STATES stateAfter);
 
   // TODO without index + different name
   void SetName(std::wstring baseName, int index = 0)
@@ -82,20 +84,20 @@ struct HeapResource {
 
 struct Geometry {
   HeapResource m_VertexBuffer;
-  HeapResource m_VertexBufferUpload;
+  HeapResource m_VertexUploadBuffer;
   D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
 
   HeapResource m_IndexBuffer;
-  HeapResource m_IndexBufferUpload;
+  HeapResource m_IndexUploadBuffer;
   D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
 
-  void Unload()
+  void Reset()
   {
     m_VertexBuffer.Reset();
-    m_VertexBufferUpload.Reset();
+    m_VertexUploadBuffer.Reset();
 
     m_IndexBuffer.Reset();
-    m_IndexBufferUpload.Reset();
+    m_IndexUploadBuffer.Reset();
   }
 };
 
@@ -106,11 +108,10 @@ struct Texture {
   } header;
 
   std::vector<uint8_t> pixels;
-  std::string name;
+  std::string name; // TODO: wstring
 
-  ComPtr<ID3D12Resource> resource;
-  D3D12MA::Allocation* textureAllocation = nullptr;
-  D3D12MA::Allocation* textureUploadAllocation = nullptr;
+  HeapResource m_Buffer;
+  HeapResource m_UploadBuffer;
 
   D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
   D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle;
@@ -128,11 +129,10 @@ struct Texture {
     fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
   }
 
-  void Unload()
+  void Reset()
   {
-    resource.Reset();
-    textureAllocation->Release();
-    textureAllocation = nullptr;
+    m_Buffer.Reset();
+    m_UploadBuffer.Reset();
   }
 
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
@@ -305,15 +305,14 @@ static UINT g_FrameIndex;
 static HANDLE g_FenceEvent;
 
 // Resources
+static ComPtr<ID3D12DescriptorHeap> g_SrvDescriptorHeap;
+static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
+
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
 static UINT g_RtvDescriptorSize;
 
-static ComPtr<ID3D12Resource> g_DepthStencilBuffer;
-static D3D12MA::Allocation* g_DepthStencilAllocation;
+static HeapResource g_DepthStencilBuffer;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
-
-static ID3D12DescriptorHeap* g_SrvDescriptorHeap;
-static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>>
@@ -338,20 +337,22 @@ void HeapResource::CreateResource(
       &allocation, IID_PPV_ARGS(&resource)));
 }
 
-void HeapResource::Update(ID3D12Resource* pIntermediate,
-                          D3D12_SUBRESOURCE_DATA* data)
+void HeapResource::CopyFrom(ID3D12GraphicsCommandList* pCmdList,
+                            ID3D12Resource* pIntermediate,
+                            D3D12_SUBRESOURCE_DATA* data)
 {
-  UINT64 r = UpdateSubresources(g_CommandList.Get(), resource.Get(),
-                                pIntermediate, 0, 0, 1, data);
+  UINT64 r = UpdateSubresources(pCmdList, resource.Get(), pIntermediate, 0, 0,
+                                1, data);
   assert(r);
 }
 
-// TODO: do transition from update directly?
-void HeapResource::Transition(D3D12_RESOURCE_STATES stateBefore,
+void HeapResource::Transition(ID3D12GraphicsCommandList* pCmdList,
+                              D3D12_RESOURCE_STATES stateBefore,
                               D3D12_RESOURCE_STATES stateAfter)
 {
-  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore, stateAfter);
-  g_CommandList->ResourceBarrier(1, &barrier);
+  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(),
+                                                      stateBefore, stateAfter);
+  pCmdList->ResourceBarrier(1, &barrier);
 }
 
 void InitWindow(UINT width, UINT height, std::wstring name)
@@ -403,9 +404,10 @@ void LoadAssets()
     WaitGPUIdle(g_FrameIndex);
 
     // TODO: need method + ensure not null
-    for (auto& [k, tex] : g_Textures) {
-      tex.textureUploadAllocation->Release();
-    }
+    // // TODO: can release upload buffer here
+    //for (auto& [k, tex] : g_Textures) {
+    //  tex.textureUploadAllocation->Release();
+    //}
 
     // TODO: need method + ensure not null
     // TODO: can release geom m_VertexBufferUpload & m_IndexBufferUpload here
@@ -550,7 +552,7 @@ void Render()
 
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
-  ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap};
+  ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
   g_CommandList->SetGraphicsRoot32BitConstants(
@@ -668,14 +670,14 @@ void Cleanup()
 
   // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
-    // TODO: do this from Unload()
+    // TODO: do this from Reset() ?
     g_SrvDescHeapAlloc.Free(tex.srvCpuDescHandle, tex.srvGpuDescHandle);
-    tex.Unload();
+    tex.Reset();
   }
 
   // TODO: need method + ensure not null
   for (auto& [k, geom] : g_Geometries) {
-    geom.Unload();
+    geom.Reset();
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
@@ -686,13 +688,10 @@ void Cleanup()
   g_CommandList.Reset();
   g_CommandQueue.Reset();
 
-  g_SrvDescriptorHeap->Release();
-  g_SrvDescriptorHeap = nullptr;
-  g_DepthStencilDescriptorHeap.Reset();
-  g_DepthStencilBuffer.Reset();
-  g_DepthStencilAllocation->Release();
-  g_DepthStencilAllocation = nullptr;
+  g_SrvDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
+  g_DepthStencilBuffer.Reset();
+  g_DepthStencilDescriptorHeap.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
@@ -984,19 +983,16 @@ static void InitFrameResources()
     depthStencilResourceDesc.MipLevels = 1;
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
-    CHECK_HR(g_Allocator->CreateResource(
+    g_DepthStencilBuffer.CreateResource(
         &depthStencilAllocDesc, &depthStencilResourceDesc,
-        D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue,
-        &g_DepthStencilAllocation, IID_PPV_ARGS(&g_DepthStencilBuffer)));
-    CHECK_HR(g_DepthStencilBuffer->SetName(L"Depth/Stencil Resource Heap"));
-    g_DepthStencilAllocation->SetName(L"Depth/Stencil Resource Heap");
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
     D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
     depthStencilDesc.Format = DEPTH_STENCIL_FORMAT;
     depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
     g_Device->CreateDepthStencilView(
-        g_DepthStencilBuffer.Get(), &depthStencilDesc,
+        g_DepthStencilBuffer.resource.Get(), &depthStencilDesc,
         g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
   }
 
@@ -1008,7 +1004,7 @@ static void InitFrameResources()
   CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc,
                                           IID_PPV_ARGS(&g_SrvDescriptorHeap)));
 
-  g_SrvDescHeapAlloc.Create(g_Device.Get(), g_SrvDescriptorHeap);
+  g_SrvDescHeapAlloc.Create(g_Device.Get(), g_SrvDescriptorHeap.Get());
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
@@ -1020,7 +1016,7 @@ static void InitFrameResources()
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_SrvDescriptorHeap;
+  initInfo.SrvDescriptorHeap = g_SrvDescriptorHeap.Get();
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
@@ -1084,7 +1080,7 @@ static void InitFrameResources()
       ctx->perModelConstants.Map();
 
       ctx->boneTransformMatrices.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
-      ctx->perModelConstants.SetName(L"(bone matrices)", i);
+      ctx->boneTransformMatrices.SetName(L"(bone matrices)", i);
       ctx->boneTransformMatrices.Map();
     }
   }
@@ -1380,10 +1376,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
     vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    geom.m_VertexBufferUpload.CreateResource(
+    geom.m_VertexUploadBuffer.CreateResource(
         &vBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
 
-    geom.m_VertexBufferUpload.SetName(L"Vertex Buffer Upload");
+    geom.m_VertexUploadBuffer.SetName(L"Vertex Buffer Upload");
 
     // store vertex buffer in upload heap
     D3D12_SUBRESOURCE_DATA vertexData = {};
@@ -1393,13 +1389,15 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
-    geom.m_VertexBuffer.Update(
-        geom.m_VertexBufferUpload.resource.Get(),  // TODO: helper for this?
+    geom.m_VertexBuffer.CopyFrom(
+        g_CommandList.Get(),
+        geom.m_VertexUploadBuffer.resource.Get(),
         &vertexData);
 
     // transition the vertex buffer data from copy destination state to vertex
     // buffer state
     geom.m_VertexBuffer.Transition(
+        g_CommandList.Get(),
         D3D12_RESOURCE_STATE_COPY_DEST,
         D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 
@@ -1428,10 +1426,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
     iBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-    geom.m_IndexBufferUpload.CreateResource(
+    geom.m_IndexUploadBuffer.CreateResource(
         &iBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
 
-    geom.m_IndexBufferUpload.SetName(L"Index Buffer Upload");
+    geom.m_IndexUploadBuffer.SetName(L"Index Buffer Upload");
 
     // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
@@ -1441,13 +1439,15 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     // we are now creating a command with the command list to copy the data from
     // the upload heap to the default heap
-    geom.m_IndexBuffer.Update(
-        geom.m_IndexBufferUpload.resource.Get(),  // TODO: helper for this?
+    geom.m_IndexBuffer.CopyFrom(
+        g_CommandList.Get(),
+        geom.m_IndexUploadBuffer.resource.Get(),
         &indexData);
 
     // transition the index buffer data from copy destination state to index
     // buffer state
-    geom.m_IndexBuffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST,
+    geom.m_IndexBuffer.Transition(g_CommandList.Get(),
+                                  D3D12_RESOURCE_STATE_COPY_DEST,
                                   D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
     // create a index buffer view
@@ -1472,14 +1472,9 @@ static Texture* CreateTexture(std::string name)
 
   D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
   textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-  CHECK_HR(g_Allocator->CreateResource(
-      &textureAllocDesc, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST,
-      nullptr,  // pOptimizedClearValue
-      &tex.textureAllocation, IID_PPV_ARGS(&tex.resource)));
 
-  std::wstring wName = ConvertToWstring(name);
-  tex.resource->SetName(wName.c_str());
-  tex.textureAllocation->SetName(wName.c_str());
+  tex.m_Buffer.CreateResource(&textureAllocDesc, &textureDesc,
+                              D3D12_RESOURCE_STATE_COPY_DEST);
 
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
@@ -1494,29 +1489,19 @@ static Texture* CreateTexture(std::string name)
   D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
   textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
-  ComPtr<ID3D12Resource> textureUpload;
-  CHECK_HR(g_Allocator->CreateResource(
+  tex.m_UploadBuffer.CreateResource(
       &textureUploadAllocDesc,
-      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize),
-      D3D12_RESOURCE_STATE_GENERIC_READ,
-      nullptr,  // pOptimizedClearValue
-      &tex.textureUploadAllocation, IID_PPV_ARGS(&textureUpload)));
-
-  textureUpload->SetName(L"textureUpload");
-  tex.textureUploadAllocation->SetName(L"textureUpload");
+      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = tex.pixels.data();
   textureSubresourceData.RowPitch = tex.BytesPerRow();
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
-  UpdateSubresources(g_CommandList.Get(), tex.resource.Get(),
-                     textureUpload.Get(), 0, 0, 1, &textureSubresourceData);
-
-  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      tex.resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  g_CommandList->ResourceBarrier(1, &barrier);
+  tex.m_Buffer.CopyFrom(g_CommandList.Get(), tex.m_UploadBuffer.resource.Get(),
+                        &textureSubresourceData);
+  tex.m_Buffer.Transition(g_CommandList.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -1526,7 +1511,7 @@ static Texture* CreateTexture(std::string name)
 
   g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle, &tex.srvGpuDescHandle);
 
-  g_Device->CreateShaderResourceView(tex.resource.Get(), &srvDesc,
+  g_Device->CreateShaderResourceView(tex.m_Buffer.resource.Get(), &srvDesc,
                                      tex.srvCpuDescHandle);
 
   g_Textures[name] = tex;
