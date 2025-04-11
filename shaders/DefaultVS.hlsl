@@ -7,7 +7,7 @@ cbuffer ObjectCb : register(b1)
   float4x4 NormalMatrix;
 };
 
-StructuredBuffer<float4x4> BoneMatrices : register(t1);
+StructuredBuffer<float4x4> BoneMatrices : register(t0);
 
 VS_OUTPUT main(VS_INPUT input)
 {

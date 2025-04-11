@@ -30,3 +30,8 @@ cbuffer FrameConstants : register(b0)
   float time;
   float deltaTime;
 };
+
+cbuffer MaterialConstants : register(b2)
+{
+  uint diffuseIndex;
+};

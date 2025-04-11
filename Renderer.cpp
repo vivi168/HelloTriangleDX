@@ -16,7 +16,7 @@ enum class PSO { Basic, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, DiffuseTex, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, Count };
 }
 
 struct Scene {
@@ -122,7 +122,8 @@ struct Texture {
   HeapResource m_UploadBuffer;
 
   D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
-  D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle;
+  //D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle; // TODO: uneeded in bindless model
+  UINT32 index;
 
   void Read(std::string filename)
   {
@@ -237,6 +238,8 @@ struct DescriptorHeapListAllocator {
     assert(cpuIdx == gpuIdx);
     m_FreeIndices.push_front(cpuIdx);
   }
+
+  void Free(UINT32 index) { m_FreeIndices.push_front(index); }
 
 private:
   ID3D12DescriptorHeap* m_Heap = nullptr;
@@ -587,8 +590,10 @@ void Render()
           RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       for (const auto& subset : mesh->subsets) {
-        g_CommandList->SetGraphicsRootDescriptorTable(
-            RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
+        //g_CommandList->SetGraphicsRootDescriptorTable(
+        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
+        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
+                                                     &subset.texture->index, 0);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -614,8 +619,10 @@ void Render()
           ctx->boneTransformMatrices.GpuAddress(bonesIndex));
 
       for (const auto& subset : mesh->subsets) {
-        g_CommandList->SetGraphicsRootDescriptorTable(
-            RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
+        //g_CommandList->SetGraphicsRootDescriptorTable(
+        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
+        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
+                                                     &subset.texture->index, 0);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -679,7 +686,7 @@ void Cleanup()
   // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
     // TODO: do this from Reset() ?
-    g_SrvDescHeapAlloc.Free(tex.srvCpuDescHandle, tex.srvGpuDescHandle);
+    g_SrvDescHeapAlloc.Free(tex.index);
     tex.Reset();
   }
 
@@ -1043,15 +1050,17 @@ static void InitFrameResources()
   {
     // Descriptor ranges
     // TODO: how to go bindless? for textures at least.
-    CD3DX12_DESCRIPTOR_RANGE descriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // t0
+    //CD3DX12_DESCRIPTOR_RANGE descriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);  // t1
 
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
-    rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(1); // t1
-    rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
+    rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
+    //rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
+    rootParameters[RootParameter::MaterialConstants].InitAsConstants(1, 2);  // b2 // TODO: materialConstantsSize + TODO reorder root signature
+
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1062,7 +1071,8 @@ static void InitFrameResources()
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
         D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
+        D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
         RootParameter::Count, rootParameters, 1, staticSamplers, flags);
 
@@ -1520,7 +1530,7 @@ static Texture* CreateTexture(std::string name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle, &tex.srvGpuDescHandle);
+  tex.index = g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle);
 
   g_Device->CreateShaderResourceView(tex.m_Buffer.resource.Get(), &srvDesc,
                                      tex.srvCpuDescHandle);

@@ -132,7 +132,7 @@ struct Subset {
   uint32_t start, count, vstart, pad;
   TEXTURENAME name;
 
-  Renderer::Texture* texture = nullptr;  // GPU data
+  Renderer::Texture* texture = nullptr;  // GPU data // TODO Material struct instead
 };
 
 template <typename T>
