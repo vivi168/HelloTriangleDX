@@ -22,8 +22,8 @@ enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, Mat
 struct Scene {
   struct SceneNode {
     Model3D* model;
-    size_t cbIndex;
-    std::vector<size_t> bonesIndices;
+    size_t cbIndex; // TODO: this is really an offset in the buffer
+    std::vector<size_t> bonesIndices; // TODO: these are offsets in the buffer
   };
 
   std::list<SceneNode> nodes;
@@ -93,7 +93,12 @@ struct HeapResource {
 struct Geometry {
   HeapResource m_VertexBuffer;
   HeapResource m_VertexUploadBuffer;
+
+  // TODO: bindful
   D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
+  // TODO: bindless
+  D3D12_CPU_DESCRIPTOR_HANDLE m_VertexBufferSrvCpuDescHandle;
+  UINT32 m_VertexBufferDescIndex;
 
   HeapResource m_IndexBuffer;
   HeapResource m_IndexUploadBuffer;
@@ -247,7 +252,7 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
   D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
   UINT m_HeapHandleIncrement;
-  std::deque<size_t> m_FreeIndices;
+  std::deque<size_t> m_FreeIndices; // TODO: go back to UINT32
 };
 
 // ========== Constants
@@ -284,8 +289,10 @@ static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
 
-static size_t g_CbNextIndex = 0;
-static size_t g_BonesNextIndex = 0;
+static size_t g_CbNextIndex = 0; // TODO: rename as offset
+                                 // TODO: add a struct to allocate / free indices
+static size_t g_BonesNextIndex = 0; // TODO: rename as offset
+                                    // use bindless for bone matrices?
 
 static UINT g_Width;
 static UINT g_Height;
@@ -550,7 +557,7 @@ void Render()
 
   g_CommandList->ClearDepthStencilView(
       g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-      D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+      D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
   if (g_Raster) {
@@ -563,6 +570,7 @@ void Render()
 
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
+  // TODO: use std::array?
   ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
 
@@ -581,7 +589,7 @@ void Render()
 
     for (auto mesh : node.model->meshes) {
       auto geom = mesh->geometry;
-      g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
+      //g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
       g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
       g_CommandList->IASetPrimitiveTopology(
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -592,8 +600,15 @@ void Render()
       for (const auto& subset : mesh->subsets) {
         //g_CommandList->SetGraphicsRootDescriptorTable(
         //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
-        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
-                                                     &subset.texture->index, 0);
+        struct {
+          UINT vbIndex;
+          UINT vOffset;
+          UINT texIndex;
+        } ronre = {geom->m_VertexBufferDescIndex,
+                   subset.vstart, subset.texture->index};
+        g_CommandList->SetGraphicsRoot32BitConstants(
+            RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
+            &ronre, 0);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -621,8 +636,15 @@ void Render()
       for (const auto& subset : mesh->subsets) {
         //g_CommandList->SetGraphicsRootDescriptorTable(
         //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
-        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
-                                                     &subset.texture->index, 0);
+        struct {
+          UINT vbIndex;
+          UINT vOffset;
+          UINT texIndex;
+        } ronre = {geom->m_VertexBufferDescIndex,
+                   subset.vstart, subset.texture->index};
+        g_CommandList->SetGraphicsRoot32BitConstants(
+            RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
+            &ronre, 0);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -929,7 +951,7 @@ static void InitFrameResources()
   GetAssetsPath(assetsPath, _countof(assetsPath));
   g_AssetsPath = assetsPath;
 
-  // RTV descriptor heap
+  // RTV
   {
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
     rtvHeapDesc.NumDescriptors = FRAME_BUFFER_COUNT;
@@ -966,7 +988,7 @@ static void InitFrameResources()
       CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
       g_FrameContext[i].renderTarget.Attach(res);
 
-      // the we "create" a render target view which binds the swap chain buffer
+      // then we "create" a render target view which binds the swap chain buffer
       // (ID3D12Resource[n]) to the rtv handle
       g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Get(),
                                        nullptr, rtvHandle);
@@ -976,7 +998,7 @@ static void InitFrameResources()
     }
   }
 
-  // DSV descriptor heap
+  // DSV
   {
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
     dsvHeapDesc.NumDescriptors = 1;
@@ -1059,7 +1081,7 @@ static void InitFrameResources()
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
     //rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
-    rootParameters[RootParameter::MaterialConstants].InitAsConstants(1, 2);  // b2 // TODO: materialConstantsSize + TODO reorder root signature
+    rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
 
 
     // Static sampler
@@ -1095,7 +1117,8 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
-      ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
+      // size of the resource heap. Must be a multiple of 64KB for single-textures and constant buffers
+      ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64)); // 1024 * 64 bytes = 64KB
       ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
       ctx->perModelConstants.Map();
 
@@ -1120,20 +1143,21 @@ static void InitFrameResources()
     // create input layout
     // The input layout is used by the Input Assembler so that it knows how to
     // read the vertex data bound to it.
-    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
+    // TODO: useless in case of bindless vertex buffer?
+    //const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+    //    {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+    //     D3D12_APPEND_ALIGNED_ELEMENT,
+    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    //    {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+    //     D3D12_APPEND_ALIGNED_ELEMENT,
+    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    //    {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
+    //     D3D12_APPEND_ALIGNED_ELEMENT,
+    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    //    {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
+    //     D3D12_APPEND_ALIGNED_ELEMENT,
+    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    //};
 
     // create a pipeline state object (PSO)
     // In a real application, you will have many pso's. for each different
@@ -1145,8 +1169,8 @@ static void InitFrameResources()
     // pso that only outputs data with the stream output, and not on a render
     // target, which means you would not need anything after the stream output.
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout.NumElements = _countof(inputLayout);
-    psoDesc.InputLayout.pInputElementDescs = inputLayout;
+    //psoDesc.InputLayout.NumElements = _countof(inputLayout);
+    //psoDesc.InputLayout.pInputElementDescs = inputLayout;
     psoDesc.pRootSignature = g_RootSignature.Get();
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
@@ -1425,6 +1449,25 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     geom.m_VertexBufferView.BufferLocation = geom.m_VertexBuffer.GpuAddress();
     geom.m_VertexBufferView.StrideInBytes = sizeof(T);
     geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
+
+    // create a descriptor for bindless
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Buffer.FirstElement = 0;  // Start at the beginning of the buffer
+    srvDesc.Buffer.NumElements =
+        mesh->vertices.size();  // Number of vertices in your buffer
+    srvDesc.Buffer.StructureByteStride =
+        sizeof(Vertex);  // Size of your Vertex structure
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+    geom.m_VertexBufferDescIndex =
+        g_SrvDescHeapAlloc.Alloc(&geom.m_VertexBufferSrvCpuDescHandle);
+
+    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.resource.Get(),
+                                       &srvDesc, geom.m_VertexBufferSrvCpuDescHandle);
+
   }
 
   // Index Buffer
@@ -1453,7 +1496,12 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
-    indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
+    if constexpr (std::is_same_v<T, Vertex>) {
+      indexData.pData = reinterpret_cast<BYTE*>(mesh->augmentedIndices.data());
+    } else {
+      indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
+    }
+    
     indexData.RowPitch = iBufferSize;
     indexData.SlicePitch = iBufferSize;
 
@@ -1472,7 +1520,11 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     // create a index buffer view
     geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
-    geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
+    if constexpr (std::is_same_v<T, Vertex>) {
+      geom.m_IndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+    } else {
+      geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
+    }
     geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
   }
 

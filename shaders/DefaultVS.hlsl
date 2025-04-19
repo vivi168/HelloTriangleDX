@@ -7,6 +7,14 @@ cbuffer ObjectCb : register(b1)
   float4x4 NormalMatrix;
 };
 
+struct Vertex
+{
+  float3 pos;
+  float3 normal;
+  float4 color;
+  float2 texCoord;
+};
+
 StructuredBuffer<float4x4> BoneMatrices : register(t0);
 
 VS_OUTPUT main(VS_INPUT input)
@@ -21,13 +29,21 @@ VS_OUTPUT main(VS_INPUT input)
                       mul(pos, BoneMatrices[input.boneIndices.z]) * input.boneWeights.z +
                       mul(pos, BoneMatrices[input.boneIndices.w]) * input.boneWeights.w;
   output.pos = mul(skinnedPos, WorldViewProj);
-#else
-  output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
-#endif
-
   output.color = input.color;
   output.texCoord = input.texCoord;
   float3 norm = mul(float4(input.normal, 1.0f), NormalMatrix).xyz;
   output.normal = normalize(norm);
+#else
+  StructuredBuffer<Vertex> vertices = ResourceDescriptorHeap[vbIndex];
+  Vertex vert = vertices[(input.vid >> 16) + vOffset];
+  output.pos = mul(float4(vert.pos, 1.0f), WorldViewProj);
+
+  output.color = vert.color;
+  output.texCoord = vert.texCoord;
+  float3 norm = mul(float4(vert.normal, 1.0f), NormalMatrix).xyz;
+  output.normal = normalize(norm);
+#endif
+
+
   return output;
 }
