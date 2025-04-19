@@ -146,6 +146,7 @@ struct Mesh3D {
   static_assert(std::is_base_of_v<Vertex, T>);
   std::vector<T> vertices;
   std::vector<uint16_t> indices;
+  std::vector<uint32_t> augmentedIndices;
   std::vector<Subset> subsets;
 
   std::string name;
@@ -170,6 +171,15 @@ struct Mesh3D {
     fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
+    if constexpr (std::is_same_v<T, Vertex>) {
+      augmentedIndices.reserve(header.numIndices);
+
+      for (auto& i : indices) {
+        // POC: show that SV_VertexID value is indeed pulled from index buffer
+        augmentedIndices.emplace_back(static_cast<uint32_t>(i << 16));
+      }
+    }
+
     fclose(fp);
   }
 
@@ -177,6 +187,9 @@ struct Mesh3D {
 
   size_t IndexBufferSize() const
   {
+    if constexpr (std::is_same_v<T, Vertex>) {
+      return sizeof(uint32_t) * header.numIndices;
+    }
     return sizeof(uint16_t) * header.numIndices;
   }
 
@@ -190,6 +203,7 @@ struct Mesh3D {
 struct Model3D {
   std::vector<Mesh3D<Vertex>*> meshes;
   std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
+  std::vector<Skin*> skins; // TODO: loop this and not meshes then skin when computing matrices.
   std::unordered_map<std::string, Animation*> animations;
   Animation* currentAnimation = nullptr;
 
