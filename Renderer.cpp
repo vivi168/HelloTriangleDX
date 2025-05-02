@@ -28,7 +28,7 @@ struct Scene {
 
   std::list<SceneNode> nodes;
   Camera* camera;
-} g_Scene;
+};
 
 // TODO: rename this ?
 struct ModelConstantBuffer {
@@ -37,20 +37,114 @@ struct ModelConstantBuffer {
   XMFLOAT4X4 NormalMatrix;
 };
 
+struct DescriptorHeapListAllocator {
+  void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
+  {
+    assert(m_Heap == nullptr && m_FreeIndices.empty());
+    m_Heap = heap;
+
+    D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
+    m_HeapType = desc.Type;
+    m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
+    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
+    m_HeapHandleIncrement =
+        device->GetDescriptorHandleIncrementSize(m_HeapType);
+
+    for (UINT i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
+  }
+
+  void Destroy()
+  {
+    m_Heap = nullptr;
+    m_FreeIndices.clear();
+  }
+
+  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
+             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
+  {
+    assert(m_FreeIndices.size() > 0);
+
+    UINT idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+    outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
+  }
+
+  UINT Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
+  {
+    assert(m_FreeIndices.size() > 0);
+
+    UINT idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+
+    return idx;
+  }
+
+  void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
+            D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
+  {
+    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) /
+                                    m_HeapHandleIncrement);
+    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) /
+                                    m_HeapHandleIncrement);
+
+    assert(cpuIdx == gpuIdx);
+    m_FreeIndices.push_front(cpuIdx);
+  }
+
+  void Free(UINT index) { m_FreeIndices.push_front(index); }
+
+private:
+  ID3D12DescriptorHeap* m_Heap = nullptr;
+  D3D12_DESCRIPTOR_HEAP_TYPE m_HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
+  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
+  UINT m_HeapHandleIncrement;
+  std::deque<UINT> m_FreeIndices;
+};
+
+struct HeapDescriptor
+{
+  UINT index;
+  D3D12_CPU_DESCRIPTOR_HANDLE handle;
+
+  void Alloc(DescriptorHeapListAllocator& allocator)
+  {
+    index = allocator.Alloc(&handle);
+  }
+};
+
 struct HeapResource {
-  ComPtr<ID3D12Resource> resource;
-  D3D12MA::Allocation* allocation;
-  void* address;
+  ID3D12Resource* Resource() const { return resource.Get(); };
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
   {
     return resource->GetGPUVirtualAddress() + offset;
   }
 
-  void CreateResource(const D3D12MA::ALLOCATION_DESC* allocDesc,
+  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
+  {
+    descriptor.Alloc(allocator);
+  }
+
+  UINT DescriptorIndex() const { return descriptor.index; }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const { return descriptor.handle; }
+
+  void CreateResource(D3D12MA::Allocator* allocator,
+                      const D3D12MA::ALLOCATION_DESC* allocDesc,
                       const D3D12_RESOURCE_DESC* pResourceDesc,
-                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
-                      const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr);
+                      D3D12_RESOURCE_STATES InitialResourceState =
+                          D3D12_RESOURCE_STATE_GENERIC_READ,
+                      const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
+  {
+    CHECK_HR(allocator->CreateResource(
+        allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
+        &allocation, IID_PPV_ARGS(&resource)));
+  }
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
 
@@ -90,26 +184,67 @@ struct HeapResource {
     allocation->Release();
     allocation = nullptr;
   }
+
+private:
+  ComPtr<ID3D12Resource> resource;
+  HeapDescriptor descriptor;
+  D3D12MA::Allocation* allocation;
+  void* address;
 };
 
 struct UploadedHeapResource {
-  void CreateResources(const D3D12_RESOURCE_DESC* pResourceDesc,
+  void CreateResources(D3D12MA::Allocator* allocator,
+                       const D3D12_RESOURCE_DESC* pResourceDesc,
                        const D3D12_RESOURCE_DESC* pResourceUploadDesc,
-                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr);
+                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
+  {
+    // create default heap
+    // Default heap is memory on the GPU. Only the GPU has access to this
+    // memory. To get data into this heap, we will have to upload the data using
+    // an upload heap
+    D3D12MA::ALLOCATION_DESC allocDesc = {};
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    buffer.CreateResource(allocator, &allocDesc, pResourceDesc,
+                          D3D12_RESOURCE_STATE_COPY_DEST, pOptimizedClearValue);
+    // create upload heap
+    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
+    // can read from it. We will upload the buffer using this heap to the
+    // default heap
+    D3D12MA::ALLOCATION_DESC uploadAllocDesc = {};
+    uploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+    uploadBuffer.CreateResource(allocator, &uploadAllocDesc,
+                                pResourceUploadDesc);
+  }
 
-  void Upload(ID3D12GraphicsCommandList* pCmdList,
-              D3D12_SUBRESOURCE_DATA* data);
+  void Upload(ID3D12GraphicsCommandList* pCmdList, D3D12_SUBRESOURCE_DATA* data)
+  {
+    UINT64 r = UpdateSubresources(pCmdList, Resource(), UploadResource(), 0, 0,
+                                  1, data);
+    assert(r);
+  }
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateAfter)
   {
     return buffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST, stateAfter);
   }
 
-  ID3D12Resource* Resource() const { return buffer.resource.Get(); };
+  ID3D12Resource* Resource() const { return buffer.Resource(); };
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
   {
     return buffer.GpuAddress(offset);
+  }
+
+  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
+  {
+    buffer.AllocDescriptor(allocator);
+  }
+
+  UINT DescriptorIndex() const { return buffer.DescriptorIndex(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const
+  {
+    return buffer.DescriptorHandle();
   }
 
   void SetName(std::string name) { buffer.SetName(name); }
@@ -124,18 +259,15 @@ private:
 
   ID3D12Resource* UploadResource() const
   {
-    return uploadBuffer.resource.Get();
+    return uploadBuffer.Resource();
   };
 };
 
 struct Geometry {
   UploadedHeapResource m_VertexBuffer;
 
-  // TODO: bindful
+  // TODO: bindful. soon to be useless.
   D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
-  // TODO: bindless
-  D3D12_CPU_DESCRIPTOR_HANDLE m_VertexBufferSrvCpuDescHandle;
-  UINT32 m_VertexBufferDescIndex;
 
   UploadedHeapResource m_IndexBuffer;
   D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
@@ -163,10 +295,6 @@ struct Texture {
   std::string name;
 
   UploadedHeapResource m_Buffer;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
-  //D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle; // TODO: uneeded in bindless model
-  UINT32 index;
 
   void Read(std::string filename)
   {
@@ -222,72 +350,6 @@ struct FrameContext {
     commandAllocator.Reset();
     fence.Reset();
   }
-};
-
-struct DescriptorHeapListAllocator {
-  void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
-  {
-    assert(m_Heap == nullptr && m_FreeIndices.empty());
-    m_Heap = heap;
-
-    D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
-    m_HeapType = desc.Type;
-    m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
-    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
-    m_HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(m_HeapType);
-
-    for (UINT i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
-  }
-
-  void Destroy()
-  {
-    m_Heap = nullptr;
-    m_FreeIndices.clear();
-  }
-
-  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
-             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
-  {
-    assert(m_FreeIndices.size() > 0);
-
-    UINT idx = m_FreeIndices.front();
-    m_FreeIndices.pop_front();
-
-    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
-    outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
-  }
-
-  UINT Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
-  {
-    assert(m_FreeIndices.size() > 0);
-
-    UINT idx = m_FreeIndices.front();
-    m_FreeIndices.pop_front();
-
-    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
-
-    return idx;
-  }
-
-  void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
-            D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
-  {
-    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
-    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
-
-    assert(cpuIdx == gpuIdx);
-    m_FreeIndices.push_front(cpuIdx);
-  }
-
-  void Free(UINT index) { m_FreeIndices.push_front(index); }
-
-private:
-  ID3D12DescriptorHeap* m_Heap = nullptr;
-  D3D12_DESCRIPTOR_HEAP_TYPE m_HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
-  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
-  UINT m_HeapHandleIncrement;
-  std::deque<UINT> m_FreeIndices;
 };
 
 // ========== Constants
@@ -374,54 +436,11 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 
 static std::unordered_map<std::string, Geometry> g_Geometries;
 static std::unordered_map<std::string, Texture> g_Textures;
+static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
-
-void HeapResource::CreateResource(
-    const D3D12MA::ALLOCATION_DESC* allocDesc,
-    const D3D12_RESOURCE_DESC* pResourceDesc,
-    D3D12_RESOURCE_STATES InitialResourceState,
-    const D3D12_CLEAR_VALUE* pOptimizedClearValue)
-{
-  CHECK_HR(g_Allocator->CreateResource(
-      allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
-      &allocation, IID_PPV_ARGS(&resource)));
-}
-
-void UploadedHeapResource::CreateResources(
-    const D3D12_RESOURCE_DESC* pResourceDesc,
-    const D3D12_RESOURCE_DESC* pResourceUploadDesc,
-    const D3D12_CLEAR_VALUE* pOptimizedClearValue)
-{
-  // create default heap
-  // Default heap is memory on the GPU. Only the GPU has access to this
-  // memory. To get data into this heap, we will have to upload the data using
-  // an upload heap
-  D3D12MA::ALLOCATION_DESC allocDesc = {};
-  allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-  buffer.CreateResource(&allocDesc, pResourceDesc,
-                        D3D12_RESOURCE_STATE_COPY_DEST,
-                        pOptimizedClearValue);
-  // create upload heap
-  // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
-  // can read from it. We will upload the buffer using this heap to the default
-  // heap
-  D3D12MA::ALLOCATION_DESC uploadAllocDesc = {};
-  uploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-  uploadBuffer.CreateResource(&uploadAllocDesc, pResourceUploadDesc);
-}
-
-void UploadedHeapResource::Upload(ID3D12GraphicsCommandList* pCmdList,
-                                  D3D12_SUBRESOURCE_DATA* data)
-{
-  UINT64 r = UpdateSubresources(pCmdList, Resource(),
-                                UploadResource(), 0, 0, 1, data);
-  assert(r);
-}
-
-
 
 void InitWindow(UINT width, UINT height, std::wstring name)
 {
@@ -626,7 +645,6 @@ void Render()
 
     for (auto mesh : node.model->meshes) {
       auto geom = mesh->geometry;
-      //g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
       g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
       g_CommandList->IASetPrimitiveTopology(
           D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -635,14 +653,12 @@ void Render()
           RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
       for (const auto& subset : mesh->subsets) {
-        //g_CommandList->SetGraphicsRootDescriptorTable(
-        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
         struct {
           UINT vbIndex;
           UINT vOffset;
           UINT texIndex;
-        } ronre = {geom->m_VertexBufferDescIndex,
-                   subset.vstart, subset.texture->index};
+        } ronre = {geom->m_VertexBuffer.DescriptorIndex(), subset.vstart,
+                   subset.texture->m_Buffer.DescriptorIndex()};
         g_CommandList->SetGraphicsRoot32BitConstants(
             RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
             &ronre, 0);
@@ -671,14 +687,12 @@ void Render()
           ctx->boneTransformMatrices.GpuAddress(bonesIndex));
 
       for (const auto& subset : mesh->subsets) {
-        //g_CommandList->SetGraphicsRootDescriptorTable(
-        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
         struct {
           UINT vbIndex;
           UINT vOffset;
           UINT texIndex;
-        } ronre = {geom->m_VertexBufferDescIndex,
-                   subset.vstart, subset.texture->index};
+        } ronre = {geom->m_VertexBuffer.DescriptorIndex(), subset.vstart,
+                   subset.texture->m_Buffer.DescriptorIndex()};
         g_CommandList->SetGraphicsRoot32BitConstants(
             RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
             &ronre, 0);
@@ -743,15 +757,14 @@ void Cleanup()
 
   WaitGPUIdle(0);
 
-  // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
-    // TODO: do this from Reset() ?
-    g_SrvDescHeapAlloc.Free(tex.index);
+    // TODO: do this from Texture#Reset() ?
+    g_SrvDescHeapAlloc.Free(tex.m_Buffer.DescriptorIndex());
     tex.Reset();
   }
 
-  // TODO: need method + ensure not null
   for (auto& [k, geom] : g_Geometries) {
+    // TODO: should free geometry Descriptor Indices
     geom.Reset();
   }
 
@@ -1059,7 +1072,7 @@ static void InitFrameResources()
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     g_DepthStencilBuffer.CreateResource(
-        &depthStencilAllocDesc, &depthStencilResourceDesc,
+        g_Allocator.Get(), &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
     g_DepthStencilBuffer.SetName("Depth Stencil Buffer");
@@ -1069,7 +1082,7 @@ static void InitFrameResources()
     depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
     g_Device->CreateDepthStencilView(
-        g_DepthStencilBuffer.resource.Get(), &depthStencilDesc,
+        g_DepthStencilBuffer.Resource(), &depthStencilDesc,
         g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
   }
 
@@ -1155,12 +1168,17 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
-      // size of the resource heap. Must be a multiple of 64KB for single-textures and constant buffers
-      ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64)); // 1024 * 64 bytes = 64KB
+      // size of the resource heap. Must be a multiple of 64KB for
+      // single-textures and constant buffers
+      ctx->perModelConstants.CreateResource(
+          g_Allocator.Get(), &allocDesc,
+          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));  // 1024 * 64 bytes = 64KB
       ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
       ctx->perModelConstants.Map();
 
-      ctx->boneTransformMatrices.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
+      ctx->boneTransformMatrices.CreateResource(
+          g_Allocator.Get(), &allocDesc,
+          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
       ctx->boneTransformMatrices.SetName("Bone Matrices Constant Buffer ", i);
       ctx->boneTransformMatrices.Map();
     }
@@ -1178,25 +1196,6 @@ static void InitFrameResources()
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
                                           vertexShaderBlob.size()};
 
-    // create input layout
-    // The input layout is used by the Input Assembler so that it knows how to
-    // read the vertex data bound to it.
-    // TODO: useless in case of bindless vertex buffer?
-    //const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-    //    {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-    //     D3D12_APPEND_ALIGNED_ELEMENT,
-    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    //    {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-    //     D3D12_APPEND_ALIGNED_ELEMENT,
-    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    //    {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
-    //     D3D12_APPEND_ALIGNED_ELEMENT,
-    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    //    {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-    //     D3D12_APPEND_ALIGNED_ELEMENT,
-    //     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    //};
-
     // create a pipeline state object (PSO)
     // In a real application, you will have many pso's. for each different
     // shader or different combinations of shaders, different blend states or
@@ -1207,12 +1206,12 @@ static void InitFrameResources()
     // pso that only outputs data with the stream output, and not on a render
     // target, which means you would not need anything after the stream output.
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    //psoDesc.InputLayout.NumElements = _countof(inputLayout);
-    //psoDesc.InputLayout.pInputElementDescs = inputLayout;
     psoDesc.pRootSignature = g_RootSignature.Get();
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
+                                   // TODO: for G buffer here set 4 RT
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
     psoDesc.SampleDesc.Count = 1;  // must be the same sample description as the
@@ -1223,7 +1222,6 @@ static void InitFrameResources()
     psoDesc.SampleMask = 0xffffffff;
     SetDefaultRasterizerDesc(psoDesc.RasterizerState);
     SetDefaultBlendDesc(psoDesc.BlendState);
-    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
     SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
 
     // create the pso
@@ -1441,7 +1439,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     const size_t vBufferSize = mesh->VertexBufferSize();
 
     geom.m_VertexBuffer.CreateResources(
-        &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
+        g_Allocator.Get(), &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
         &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
 
     geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
@@ -1471,12 +1469,9 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     srvDesc.Buffer.StructureByteStride = sizeof(T);
     srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-    geom.m_VertexBufferDescIndex =
-        g_SrvDescHeapAlloc.Alloc(&geom.m_VertexBufferSrvCpuDescHandle);
-
-    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(),
-                                       &srvDesc, geom.m_VertexBufferSrvCpuDescHandle);
-
+    geom.m_VertexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(), &srvDesc,
+                                       geom.m_VertexBuffer.DescriptorHandle());
   }
 
   // Index Buffer
@@ -1484,7 +1479,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     size_t iBufferSize = mesh->IndexBufferSize();
 
     geom.m_IndexBuffer.CreateResources(
-        &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
+        g_Allocator.Get(), &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
         &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
 
     geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
@@ -1532,7 +1527,8 @@ static Texture* CreateTexture(std::string name)
                                   &textureUploadBufferSize);  // pTotalBytes
 
   tex.m_Buffer.CreateResources(
-      &textureDesc, &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
+      g_Allocator.Get(), &textureDesc,
+      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
   tex.m_Buffer.SetName("Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
@@ -1550,10 +1546,9 @@ static Texture* CreateTexture(std::string name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  tex.index = g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle);
-
+  tex.m_Buffer.AllocDescriptor(g_SrvDescHeapAlloc);
   g_Device->CreateShaderResourceView(tex.m_Buffer.Resource(), &srvDesc,
-                                     tex.srvCpuDescHandle);
+                                     tex.m_Buffer.DescriptorHandle());
 
   g_Textures[name] = tex;
 
