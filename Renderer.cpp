@@ -59,10 +59,12 @@ struct HeapResource {
     memcpy((BYTE*)address + offset, data, size);
   }
 
-  void CopyFrom(ID3D12GraphicsCommandList* pCmdList, ID3D12Resource* pIntermediate,
-                D3D12_SUBRESOURCE_DATA* data);
-  void Transition(ID3D12GraphicsCommandList* pCmdList, D3D12_RESOURCE_STATES stateBefore,
-                  D3D12_RESOURCE_STATES stateAfter);
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore,
+                                    D3D12_RESOURCE_STATES stateAfter)
+  {
+    return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore,
+                                                stateAfter);
+  }
 
   void SetName(std::string name)
   {
@@ -90,9 +92,44 @@ struct HeapResource {
   }
 };
 
+struct UploadedHeapResource {
+  void CreateResources(const D3D12_RESOURCE_DESC* pResourceDesc,
+                       const D3D12_RESOURCE_DESC* pResourceUploadDesc,
+                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr);
+
+  void Upload(ID3D12GraphicsCommandList* pCmdList,
+              D3D12_SUBRESOURCE_DATA* data);
+
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateAfter)
+  {
+    return buffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST, stateAfter);
+  }
+
+  ID3D12Resource* Resource() const { return buffer.resource.Get(); };
+
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
+  {
+    return buffer.GpuAddress(offset);
+  }
+
+  void SetName(std::string name) { buffer.SetName(name); }
+
+  void Reset() { buffer.Reset(); }
+
+  void ResetUpload() { uploadBuffer.Reset(); }
+
+private:
+  HeapResource buffer;
+  HeapResource uploadBuffer;
+
+  ID3D12Resource* UploadResource() const
+  {
+    return uploadBuffer.resource.Get();
+  };
+};
+
 struct Geometry {
-  HeapResource m_VertexBuffer;
-  HeapResource m_VertexUploadBuffer;
+  UploadedHeapResource m_VertexBuffer;
 
   // TODO: bindful
   D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
@@ -100,17 +137,19 @@ struct Geometry {
   D3D12_CPU_DESCRIPTOR_HANDLE m_VertexBufferSrvCpuDescHandle;
   UINT32 m_VertexBufferDescIndex;
 
-  HeapResource m_IndexBuffer;
-  HeapResource m_IndexUploadBuffer;
+  UploadedHeapResource m_IndexBuffer;
   D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
 
   void Reset()
   {
     m_VertexBuffer.Reset();
-    m_VertexUploadBuffer.Reset();
-
     m_IndexBuffer.Reset();
-    m_IndexUploadBuffer.Reset();
+  }
+
+  void ResetUploadBuffers()
+  {
+    m_VertexBuffer.ResetUpload();
+    m_IndexBuffer.ResetUpload();
   }
 };
 
@@ -123,8 +162,7 @@ struct Texture {
   std::vector<uint8_t> pixels;
   std::string name;
 
-  HeapResource m_Buffer;
-  HeapResource m_UploadBuffer;
+  UploadedHeapResource m_Buffer;
 
   D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
   //D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle; // TODO: uneeded in bindless model
@@ -143,11 +181,8 @@ struct Texture {
     fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
   }
 
-  void Reset()
-  {
-    m_Buffer.Reset();
-    m_UploadBuffer.Reset();
-  }
+  void Reset() { m_Buffer.Reset(); }
+  void ResetUploadBuffer() { m_Buffer.ResetUpload(); }
 
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
 
@@ -201,7 +236,7 @@ struct DescriptorHeapListAllocator {
     m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
     m_HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(m_HeapType);
 
-    for (size_t i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
+    for (UINT i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
   }
 
   void Destroy()
@@ -215,18 +250,18 @@ struct DescriptorHeapListAllocator {
   {
     assert(m_FreeIndices.size() > 0);
 
-    size_t idx = m_FreeIndices.front();
+    UINT idx = m_FreeIndices.front();
     m_FreeIndices.pop_front();
 
     outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
     outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
   }
 
-  size_t Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
+  UINT Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
   {
     assert(m_FreeIndices.size() > 0);
 
-    size_t idx = m_FreeIndices.front();
+    UINT idx = m_FreeIndices.front();
     m_FreeIndices.pop_front();
 
     outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
@@ -237,14 +272,14 @@ struct DescriptorHeapListAllocator {
   void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
             D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
   {
-    size_t cpuIdx = (cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement;
-    size_t gpuIdx = (gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement;
+    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
+    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
 
     assert(cpuIdx == gpuIdx);
     m_FreeIndices.push_front(cpuIdx);
   }
 
-  void Free(UINT32 index) { m_FreeIndices.push_front(index); }
+  void Free(UINT index) { m_FreeIndices.push_front(index); }
 
 private:
   ID3D12DescriptorHeap* m_Heap = nullptr;
@@ -252,7 +287,7 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
   D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
   UINT m_HeapHandleIncrement;
-  std::deque<size_t> m_FreeIndices; // TODO: go back to UINT32
+  std::deque<UINT> m_FreeIndices;
 };
 
 // ========== Constants
@@ -355,23 +390,38 @@ void HeapResource::CreateResource(
       &allocation, IID_PPV_ARGS(&resource)));
 }
 
-void HeapResource::CopyFrom(ID3D12GraphicsCommandList* pCmdList,
-                            ID3D12Resource* pIntermediate,
-                            D3D12_SUBRESOURCE_DATA* data)
+void UploadedHeapResource::CreateResources(
+    const D3D12_RESOURCE_DESC* pResourceDesc,
+    const D3D12_RESOURCE_DESC* pResourceUploadDesc,
+    const D3D12_CLEAR_VALUE* pOptimizedClearValue)
 {
-  UINT64 r = UpdateSubresources(pCmdList, resource.Get(), pIntermediate, 0, 0,
-                                1, data);
+  // create default heap
+  // Default heap is memory on the GPU. Only the GPU has access to this
+  // memory. To get data into this heap, we will have to upload the data using
+  // an upload heap
+  D3D12MA::ALLOCATION_DESC allocDesc = {};
+  allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+  buffer.CreateResource(&allocDesc, pResourceDesc,
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        pOptimizedClearValue);
+  // create upload heap
+  // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
+  // can read from it. We will upload the buffer using this heap to the default
+  // heap
+  D3D12MA::ALLOCATION_DESC uploadAllocDesc = {};
+  uploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+  uploadBuffer.CreateResource(&uploadAllocDesc, pResourceUploadDesc);
+}
+
+void UploadedHeapResource::Upload(ID3D12GraphicsCommandList* pCmdList,
+                                  D3D12_SUBRESOURCE_DATA* data)
+{
+  UINT64 r = UpdateSubresources(pCmdList, Resource(),
+                                UploadResource(), 0, 0, 1, data);
   assert(r);
 }
 
-void HeapResource::Transition(ID3D12GraphicsCommandList* pCmdList,
-                              D3D12_RESOURCE_STATES stateBefore,
-                              D3D12_RESOURCE_STATES stateAfter)
-{
-  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(),
-                                                      stateBefore, stateAfter);
-  pCmdList->ResourceBarrier(1, &barrier);
-}
+
 
 void InitWindow(UINT width, UINT height, std::wstring name)
 {
@@ -407,32 +457,20 @@ void LoadAssets()
     for (auto mesh : node.model->skinnedMeshes) LoadMesh3D(mesh);
   }
 
-  // End of initial command list
-  {
-    g_CommandList->Close();
+  g_CommandList->Close();
 
-    // Now we execute the command list to upload the initial assets
-    // (triangle data)
-    ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
-    g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists),
-                                        ppCommandLists);
+  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-    // increment the fence value now, otherwise the buffer might not be uploaded
-    // by the time we start drawing
-    WaitGPUIdle(g_FrameIndex);
+  WaitGPUIdle(g_FrameIndex);
 
-    // TODO: need method + ensure not null
-    // // TODO: can release upload buffer here
-    //for (auto& [k, tex] : g_Textures) {
-    //  tex.textureUploadAllocation->Release();
-    //}
+  // Release upload buffers
+  for (auto& [k, tex] : g_Textures) {
+    tex.ResetUploadBuffer();
+  }
 
-    // TODO: need method + ensure not null
-    // TODO: can release geom m_VertexBufferUpload & m_IndexBufferUpload here
-    //for (auto& [k, geom] : g_Geometries) {
-    //  geom.vBufferUploadHeapAllocation->Release();
-    //  geom.iBufferUploadHeapAllocation->Release();
-    //}
+  for (auto& [k, geom] : g_Geometries) {
+    geom.ResetUploadBuffers();
   }
 }
 
@@ -570,9 +608,8 @@ void Render()
 
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
-  // TODO: use std::array?
-  ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap.Get()};
-  g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
+  std::array descriptorHeaps{g_SrvDescriptorHeap.Get()};
+  g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
 
   g_CommandList->SetGraphicsRoot32BitConstants(
       RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
@@ -668,10 +705,11 @@ void Render()
   // ==========
 
   // create an array of command lists (only one command list here)
-  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+  std::array ppCommandLists{
+      static_cast<ID3D12CommandList*>(g_CommandList.Get())};
 
   // execute the array of command lists
-  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+  g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
   // this command goes in at the end of our command queue. we will know when our
   // command queue has finished because the fence value will be set to
@@ -1396,56 +1434,29 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 {
   Geometry geom;
 
+  std::array<D3D12_RESOURCE_BARRIER, 2> postUploadBarriers;
+
   // Vertex Buffer
   {
     const size_t vBufferSize = mesh->VertexBufferSize();
 
-    // create default heap
-    // Default heap is memory on the GPU. Only the GPU has access to this
-    // memory. To get data into this heap, we will have to upload the data using
-    // an upload heap
-    D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
-    vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-    geom.m_VertexBuffer.CreateResource(
-        &vertexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
-        D3D12_RESOURCE_STATE_COPY_DEST);
+    geom.m_VertexBuffer.CreateResources(
+        &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
+        &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
 
     geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
 
-    // create upload heap
-    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
-    // can read from it. We will upload the vertex buffer using this heap to the
-    // default heap
-    D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
-    vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    geom.m_VertexUploadBuffer.CreateResource(
-        &vBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
-
-    geom.m_VertexUploadBuffer.SetName("Vertex Buffer Upload: " + mesh->name);
-
-    // store vertex buffer in upload heap
     D3D12_SUBRESOURCE_DATA vertexData = {};
     vertexData.pData = reinterpret_cast<BYTE*>(mesh->vertices.data());
     vertexData.RowPitch = vBufferSize;
     vertexData.SlicePitch = vBufferSize;
 
-    // we are now creating a command with the command list to copy the data from
-    // the upload heap to the default heap
-    geom.m_VertexBuffer.CopyFrom(
-        g_CommandList.Get(),
-        geom.m_VertexUploadBuffer.resource.Get(),
-        &vertexData);
-
-    // transition the vertex buffer data from copy destination state to vertex
-    // buffer state
-    geom.m_VertexBuffer.Transition(
-        g_CommandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_DEST,
+    geom.m_VertexBuffer.Upload(g_CommandList.Get(), &vertexData);
+    postUploadBarriers[0] = geom.m_VertexBuffer.Transition(
         D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-
+    
     // create a vertex buffer view
+    // TODO: useless when we go full bindless (missing: skinned models)
     geom.m_VertexBufferView.BufferLocation = geom.m_VertexBuffer.GpuAddress();
     geom.m_VertexBufferView.StrideInBytes = sizeof(T);
     geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
@@ -1455,78 +1466,46 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Buffer.FirstElement = 0;  // Start at the beginning of the buffer
-    srvDesc.Buffer.NumElements =
-        mesh->vertices.size();  // Number of vertices in your buffer
-    srvDesc.Buffer.StructureByteStride =
-        sizeof(Vertex);  // Size of your Vertex structure
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = mesh->vertices.size(); 
+    srvDesc.Buffer.StructureByteStride = sizeof(T);
     srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
     geom.m_VertexBufferDescIndex =
         g_SrvDescHeapAlloc.Alloc(&geom.m_VertexBufferSrvCpuDescHandle);
 
-    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.resource.Get(),
+    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(),
                                        &srvDesc, geom.m_VertexBufferSrvCpuDescHandle);
 
   }
 
   // Index Buffer
   {
-    // m_CubeIndexCount = mesh->header.numIndices;
     size_t iBufferSize = mesh->IndexBufferSize();
 
-    // create default heap to hold index buffer
-    D3D12MA::ALLOCATION_DESC indexBufferAllocDesc = {};
-    indexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-    geom.m_IndexBuffer.CreateResource(
-        &indexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
-        D3D12_RESOURCE_STATE_COPY_DEST);
+    geom.m_IndexBuffer.CreateResources(
+        &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
+        &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
 
     geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
 
-    // create upload heap to upload index buffer
-    D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
-    iBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    geom.m_IndexUploadBuffer.CreateResource(
-        &iBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
-
-    geom.m_IndexUploadBuffer.SetName("Index Buffer Upload: " + mesh->name);
-
-    // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
-    if constexpr (std::is_same_v<T, Vertex>) {
-      indexData.pData = reinterpret_cast<BYTE*>(mesh->augmentedIndices.data());
-    } else {
-      indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
-    }
-    
     indexData.RowPitch = iBufferSize;
     indexData.SlicePitch = iBufferSize;
+    indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
 
-    // we are now creating a command with the command list to copy the data from
-    // the upload heap to the default heap
-    geom.m_IndexBuffer.CopyFrom(
-        g_CommandList.Get(),
-        geom.m_IndexUploadBuffer.resource.Get(),
-        &indexData);
-
-    // transition the index buffer data from copy destination state to index
-    // buffer state
-    geom.m_IndexBuffer.Transition(g_CommandList.Get(),
-                                  D3D12_RESOURCE_STATE_COPY_DEST,
-                                  D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    geom.m_IndexBuffer.Upload(g_CommandList.Get(), &indexData);
+    postUploadBarriers[1] =
+        geom.m_IndexBuffer.Transition(D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
     // create a index buffer view
     geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
-    if constexpr (std::is_same_v<T, Vertex>) {
-      geom.m_IndexBufferView.Format = DXGI_FORMAT_R32_UINT;
-    } else {
-      geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
-    }
+    geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
     geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
   }
+
+  g_CommandList->ResourceBarrier(postUploadBarriers.size(),
+                                 postUploadBarriers.data());
 
   g_Geometries[mesh->name] = geom;
 
@@ -1542,13 +1521,6 @@ static Texture* CreateTexture(std::string name)
       CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
   textureDesc.MipLevels = 1;
 
-  D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
-  textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-  tex.m_Buffer.CreateResource(&textureAllocDesc, &textureDesc,
-                              D3D12_RESOURCE_STATE_COPY_DEST);
-  tex.m_Buffer.SetName("Texture: " + name);
-
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
                                   0,        // FirstSubresource
@@ -1559,22 +1531,18 @@ static Texture* CreateTexture(std::string name)
                                   nullptr,  // pRowSizeInBytes
                                   &textureUploadBufferSize);  // pTotalBytes
 
-  D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
-  textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-  tex.m_UploadBuffer.CreateResource(
-      &textureUploadAllocDesc,
-      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
+  tex.m_Buffer.CreateResources(
+      &textureDesc, &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
+  tex.m_Buffer.SetName("Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = tex.pixels.data();
   textureSubresourceData.RowPitch = tex.BytesPerRow();
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
-  tex.m_Buffer.CopyFrom(g_CommandList.Get(), tex.m_UploadBuffer.resource.Get(),
-                        &textureSubresourceData);
-  tex.m_Buffer.Transition(g_CommandList.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  tex.m_Buffer.Upload(g_CommandList.Get(), &textureSubresourceData);
+  auto barrier = tex.m_Buffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  g_CommandList->ResourceBarrier(1, &barrier);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -1584,7 +1552,7 @@ static Texture* CreateTexture(std::string name)
 
   tex.index = g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle);
 
-  g_Device->CreateShaderResourceView(tex.m_Buffer.resource.Get(), &srvDesc,
+  g_Device->CreateShaderResourceView(tex.m_Buffer.Resource(), &srvDesc,
                                      tex.srvCpuDescHandle);
 
   g_Textures[name] = tex;

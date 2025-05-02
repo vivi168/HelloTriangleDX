@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "DirectXMesh.h"
+
 #define MAX_TEXTURE_NAME_LEN 64
 typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
 
@@ -146,8 +148,13 @@ struct Mesh3D {
   static_assert(std::is_base_of_v<Vertex, T>);
   std::vector<T> vertices;
   std::vector<uint16_t> indices;
-  std::vector<uint32_t> augmentedIndices;
   std::vector<Subset> subsets;
+
+  // mesh shader specific
+  std::vector<DirectX::Meshlet> meshlets;
+  std::vector<uint8_t> uniqueVertexIB;
+  std::vector<DirectX::MeshletTriangle> primitiveIndices;
+  std::vector<std::pair<size_t, size_t>> meshletSubsets;
 
   std::string name;
   Renderer::Geometry* geometry = nullptr;  // GPU data
@@ -171,13 +178,44 @@ struct Mesh3D {
     fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
-    if constexpr (std::is_same_v<T, Vertex>) {
-      augmentedIndices.reserve(header.numIndices);
+    // TODO: build bounding sphere
+    // TODO: build meshlets
+    {
+      auto positions = std::make_unique<XMFLOAT3[]>(vertices.size());
+      std::vector<uint32_t> indices32(indices.size());
+      std::vector<std::pair<size_t, size_t>> subsets_st(subsets.size());
 
-      for (auto& i : indices) {
-        // POC: show that SV_VertexID value is indeed pulled from index buffer
-        augmentedIndices.emplace_back(static_cast<uint32_t>(i << 16));
+      for (size_t si = 0; si < subsets.size(); si++) {
+        const auto& subset = subsets[si];
+        subsets_st[si] =
+            std::make_pair<size_t, size_t>(subset.start / 3, subset.count / 3);
+
+        for (uint32_t i = 0; i < subset.count; i++) {
+          uint32_t gi = subset.start + i;
+
+          indices32[gi] = static_cast<uint32_t>(indices[gi]) + subset.vstart;
+          assert(indices32[gi] < vertices.size());
+        }
       }
+
+      for (size_t j = 0; j < vertices.size(); ++j)
+        positions[j] = vertices[j].position;
+
+      meshletSubsets.resize(header.numSubsets);
+
+      const std::pair<size_t, size_t> s = {0, indices32.size() / 3};
+      std::pair<size_t, size_t> issou;
+
+      // TODO: max 64v/124t
+      CHECK_HR(ComputeMeshlets(
+          indices32.data(), indices32.size() / 3,
+          positions.get(), vertices.size(),
+          subsets_st.data(), subsets_st.size(),
+          //&s, 1u,
+          nullptr,
+          meshlets, uniqueVertexIB, primitiveIndices,
+          //meshletSubsets.data()));
+          meshletSubsets.data()));
     }
 
     fclose(fp);
@@ -187,9 +225,6 @@ struct Mesh3D {
 
   size_t IndexBufferSize() const
   {
-    if constexpr (std::is_same_v<T, Vertex>) {
-      return sizeof(uint32_t) * header.numIndices;
-    }
     return sizeof(uint16_t) * header.numIndices;
   }
 

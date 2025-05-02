@@ -35,7 +35,7 @@ VS_OUTPUT main(VS_INPUT input)
   output.normal = normalize(norm);
 #else
   StructuredBuffer<Vertex> vertices = ResourceDescriptorHeap[vbIndex];
-  Vertex vert = vertices[(input.vid >> 16) + vOffset];
+  Vertex vert = vertices[input.vid  + vOffset];
   output.pos = mul(float4(vert.pos, 1.0f), WorldViewProj);
 
   output.color = vert.color;
