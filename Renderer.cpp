@@ -12,11 +12,11 @@ using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {
-enum class PSO { Basic, Skinned, ColliderSurface };
+enum class PSO { Basic, BasicMS, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshletConstants, Count };
 }
 
 struct Scene {
@@ -272,10 +272,21 @@ struct Geometry {
   UploadedHeapResource m_IndexBuffer;
   D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
 
+  // meshlets
+  UploadedHeapResource m_MeshletBuffer;
+  UploadedHeapResource m_MeshletIndexBuffer;
+  UploadedHeapResource m_MeshletPrimitiveBuffer;
+  UploadedHeapResource m_MeshletSubsetBuffer;
+
   void Reset()
   {
     m_VertexBuffer.Reset();
     m_IndexBuffer.Reset();
+
+    m_MeshletBuffer.Reset();
+    m_MeshletIndexBuffer.Reset();
+    m_MeshletPrimitiveBuffer.Reset();
+    m_MeshletSubsetBuffer.Reset();
   }
 
   void ResetUploadBuffers()
@@ -403,7 +414,7 @@ static std::wstring g_AssetsPath;
 static DXGIUsage* g_DXGIUsage = nullptr;
 static ComPtr<IDXGIAdapter1> g_Adapter;
 
-static ComPtr<ID3D12Device> g_Device;
+static ComPtr<ID3D12Device2> g_Device;
 static DXGI_ADAPTER_DESC1 g_AdapterDesc;
 static ComPtr<D3D12MA::Allocator> g_Allocator;
 // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
@@ -413,7 +424,7 @@ static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks;
 static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
 static ComPtr<ID3D12CommandQueue> g_CommandQueue;
-static ComPtr<ID3D12GraphicsCommandList> g_CommandList;
+static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
@@ -641,30 +652,26 @@ void Render()
 
   for (const auto node : g_Scene.nodes) {
     // static meshes
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
     for (auto mesh : node.model->meshes) {
       auto geom = mesh->geometry;
-      g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
-      g_CommandList->IASetPrimitiveTopology(
-          D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
       g_CommandList->SetGraphicsRootConstantBufferView(
           RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
-      for (const auto& subset : mesh->subsets) {
-        struct {
-          UINT vbIndex;
-          UINT vOffset;
-          UINT texIndex;
-        } ronre = {geom->m_VertexBuffer.DescriptorIndex(), subset.vstart,
-                   subset.texture->m_Buffer.DescriptorIndex()};
-        g_CommandList->SetGraphicsRoot32BitConstants(
-            RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
-            &ronre, 0);
-        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
-                                            subset.vstart, 0);
-      }
+      struct {
+        UINT vertexBufferId;
+        UINT meshletBufferId;
+        UINT indexBufferId;
+        UINT primBufferId;
+      } ronre = {geom->m_VertexBuffer.DescriptorIndex(),
+                 geom->m_MeshletBuffer.DescriptorIndex(),
+                 geom->m_MeshletIndexBuffer.DescriptorIndex(),
+                 geom->m_MeshletPrimitiveBuffer.DescriptorIndex()};
+      g_CommandList->SetGraphicsRoot32BitConstants(
+          RootParameter::PerMeshletConstants, sizeof(ronre) / sizeof(UINT),
+          &ronre, 0);
+      g_CommandList->DispatchMesh(mesh->meshlets.size(), 1, 1);
     }
 
     // skinned meshes
@@ -769,6 +776,7 @@ void Cleanup()
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
+  g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::Skinned].Reset();
   g_RootSignature.Reset();
 
@@ -872,7 +880,7 @@ static void InitD3D()
 
   // Create Device
   {
-    ID3D12Device* device = nullptr;
+    ID3D12Device2* device = nullptr;
     CHECK_HR(D3D12CreateDevice(g_Adapter.Get(), FEATURE_LEVEL,
                                IID_PPV_ARGS(&device)));
     g_Device.Attach(device);
@@ -881,6 +889,10 @@ static void InitD3D()
     CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
                                            &options5, sizeof(options5)));
     assert(options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
+    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7,
+                                           &options7, sizeof(options7)));
   }
 
 #ifdef ENABLE_DEBUG_LAYER
@@ -1121,19 +1133,15 @@ static void InitFrameResources()
 
   // Root Signature
   {
-    // Descriptor ranges
-    // TODO: how to go bindless? for textures at least.
-    //CD3DX12_DESCRIPTOR_RANGE descriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);  // t1
-
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
-    //rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
     rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
-
+    rootParameters[RootParameter::PerMeshletConstants].InitAsConstants(4, 3);  // b3 // TODO: rework root signature.
+    
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1165,6 +1173,8 @@ static void InitFrameResources()
     D3D12MA::ALLOCATION_DESC allocDesc = {};
     allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
 
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(1024 * 64);
+
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
@@ -1172,13 +1182,12 @@ static void InitFrameResources()
       // single-textures and constant buffers
       ctx->perModelConstants.CreateResource(
           g_Allocator.Get(), &allocDesc,
-          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));  // 1024 * 64 bytes = 64KB
+          &bufferDesc);  // 1024 * 64 bytes = 64KB
       ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
       ctx->perModelConstants.Map();
 
-      ctx->boneTransformMatrices.CreateResource(
-          g_Allocator.Get(), &allocDesc,
-          &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
+      ctx->boneTransformMatrices.CreateResource(g_Allocator.Get(), &allocDesc,
+                                                &bufferDesc);
       ctx->boneTransformMatrices.SetName("Bone Matrices Constant Buffer ", i);
       ctx->boneTransformMatrices.Map();
     }
@@ -1214,21 +1223,53 @@ static void InitFrameResources()
                                    // TODO: for G buffer here set 4 RT
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.SampleDesc.Count = 1;  // must be the same sample description as the
-                                   // swapchain and depth/stencil buffer
-    psoDesc.SampleDesc.Quality = 0;
-    // sample mask has to do with multi-sampling. 0xffffffff means point
-    // sampling is done
-    psoDesc.SampleMask = 0xffffffff;
-    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
-    SetDefaultBlendDesc(psoDesc.BlendState);
-    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
 
     // create the pso
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(g_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::Basic].Attach(pipelineStateObject);
+  }
+
+  // Mesh Shader Pipeline State for static objects
+  {
+    // Mesh Shader
+    auto meshShaderBlob = ReadData(GetAssetFullPath(L"MeshletMS.cso").c_str());
+    D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
+                                        meshShaderBlob.size()};
+
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"MeshletPS.cso").c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
+
+    D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.MS = meshShader;
+    psoDesc.PS = pixelShader;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
+
+    auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
+    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
+    streamDesc.pPipelineStateSubobjectStream = &psoStream;
+    streamDesc.SizeInBytes = sizeof(psoStream);
+
+    // create the pso
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreatePipelineState(&streamDesc,
+                                           IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::BasicMS].Attach(pipelineStateObject);
   }
 
   // Pipeline State for skinned objects
@@ -1268,15 +1309,14 @@ static void InitFrameResources()
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.SampleDesc.Quality = 0;
-    psoDesc.SampleMask = 0xffffffff;
-    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
-    SetDefaultBlendDesc(psoDesc.BlendState);
-    psoDesc.NumRenderTargets = 1;
-    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
 
     // Create the PSO
     ID3D12PipelineState* pipelineStateObject;
@@ -1432,15 +1472,15 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 {
   Geometry geom;
 
-  std::array<D3D12_RESOURCE_BARRIER, 2> postUploadBarriers;
+  std::array<D3D12_RESOURCE_BARRIER, 6> postUploadBarriers;
 
   // Vertex Buffer
   {
     const size_t vBufferSize = mesh->VertexBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vBufferSize);
 
-    geom.m_VertexBuffer.CreateResources(
-        g_Allocator.Get(), &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
-        &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
+    geom.m_VertexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                        &bufferDesc);
 
     geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
 
@@ -1451,8 +1491,8 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     geom.m_VertexBuffer.Upload(g_CommandList.Get(), &vertexData);
     postUploadBarriers[0] = geom.m_VertexBuffer.Transition(
-        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-    
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
     // create a vertex buffer view
     // TODO: useless when we go full bindless (missing: skinned models)
     geom.m_VertexBufferView.BufferLocation = geom.m_VertexBuffer.GpuAddress();
@@ -1465,7 +1505,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Buffer.FirstElement = 0;
-    srvDesc.Buffer.NumElements = mesh->vertices.size(); 
+    srvDesc.Buffer.NumElements = mesh->vertices.size();
     srvDesc.Buffer.StructureByteStride = sizeof(T);
     srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
@@ -1477,10 +1517,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
   // Index Buffer
   {
     size_t iBufferSize = mesh->IndexBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(iBufferSize);
 
-    geom.m_IndexBuffer.CreateResources(
-        g_Allocator.Get(), &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
-        &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
+    geom.m_IndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                       &bufferDesc);
 
     geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
 
@@ -1497,6 +1537,144 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
     geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
     geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
+  }
+
+  // Meshlet Buffer
+  {
+    const size_t bufferSize = mesh->MeshletBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                         &bufferDesc);
+    geom.m_MeshletBuffer.SetName("Meshlet Buffer: " + mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->meshlets.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[2] = geom.m_MeshletBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {.FirstElement = 0,
+                   .NumElements = static_cast<UINT>(mesh->meshlets.size()),
+                   .StructureByteStride = sizeof(Meshlet),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(geom.m_MeshletBuffer.Resource(),
+                                       &srvDesc,
+                                       geom.m_MeshletBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Index Buffer
+  {
+    const size_t bufferSize = mesh->MeshletIndexBufferSize();
+    const size_t roundedUp = DivRoundUp(bufferSize, 4);
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(roundedUp * 4);
+
+    geom.m_MeshletIndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                              &bufferDesc);
+    geom.m_MeshletIndexBuffer.SetName("Meshlet Index Buffer: " + mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->uniqueVertexIB.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletIndexBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[3] = geom.m_MeshletIndexBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = static_cast<UINT>(roundedUp),
+            .StructureByteStride = sizeof(UINT),
+            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletIndexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletIndexBuffer.Resource(), &srvDesc,
+        geom.m_MeshletIndexBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Primitive Buffer
+  {
+    const size_t bufferSize = mesh->MeshletPrimitiveBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletPrimitiveBuffer.CreateResources(g_Allocator.Get(),
+                                                  &bufferDesc, &bufferDesc);
+    geom.m_MeshletPrimitiveBuffer.SetName("Meshlet Primitive Buffer: " +
+                                          mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->primitiveIndices.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletPrimitiveBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[4] = geom.m_MeshletPrimitiveBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = static_cast<UINT>(mesh->primitiveIndices.size()),
+            .StructureByteStride = sizeof(MeshletTriangle),
+            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletPrimitiveBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletPrimitiveBuffer.Resource(), &srvDesc,
+        geom.m_MeshletPrimitiveBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Subset Buffer
+  {
+    const size_t bufferSize = mesh->MeshletSubsetBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletSubsetBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                               &bufferDesc);
+    geom.m_MeshletSubsetBuffer.SetName("Meshlet Subset Buffer: " + mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->meshletSubsets.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletSubsetBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[5] = geom.m_MeshletSubsetBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = static_cast<UINT>(mesh->meshletSubsets.size()),
+            .StructureByteStride = sizeof(MeshletSubset),
+            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletSubsetBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletSubsetBuffer.Resource(), &srvDesc,
+        geom.m_MeshletSubsetBuffer.DescriptorHandle());
   }
 
   g_CommandList->ResourceBarrier(postUploadBarriers.size(),
@@ -1526,9 +1704,8 @@ static Texture* CreateTexture(std::string name)
                                   nullptr,  // pRowSizeInBytes
                                   &textureUploadBufferSize);  // pTotalBytes
 
-  tex.m_Buffer.CreateResources(
-      g_Allocator.Get(), &textureDesc,
-      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
+  auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize);
+  tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc);
   tex.m_Buffer.SetName("Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};

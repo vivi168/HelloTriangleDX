@@ -93,10 +93,6 @@ inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
     }                                                                       \
   } while (false)
 
-const uint32_t VENDOR_ID_AMD = 0x1002;
-const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
-const uint32_t VENDOR_ID_INTEL = 0x8086;
-
 template <typename T>
 inline constexpr T AlignUp(T val, T align)
 {
@@ -104,6 +100,10 @@ inline constexpr T AlignUp(T val, T align)
 }
 
 static const D3D12_RANGE EMPTY_RANGE = {0, 0};
+
+const uint32_t VENDOR_ID_AMD = 0x1002;
+const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
+const uint32_t VENDOR_ID_INTEL = 0x8086;
 
 static const wchar_t* VendorIDToStr(uint32_t vendorID)
 {
@@ -157,57 +157,6 @@ static std::wstring SizeToStr(size_t size)
   return result;
 }
 
-static void SetDefaultRasterizerDesc(D3D12_RASTERIZER_DESC& outDesc)
-{
-  outDesc.FillMode = D3D12_FILL_MODE_SOLID;
-  outDesc.CullMode = D3D12_CULL_MODE_BACK;
-  outDesc.FrontCounterClockwise = FALSE;
-  outDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-  outDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-  outDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-  outDesc.DepthClipEnable = TRUE;
-  outDesc.MultisampleEnable = FALSE;
-  outDesc.AntialiasedLineEnable = FALSE;
-  outDesc.ForcedSampleCount = 0;
-  outDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-}
-
-static void SetDefaultBlendDesc(D3D12_BLEND_DESC& outDesc)
-{
-  outDesc.AlphaToCoverageEnable = FALSE;
-  outDesc.IndependentBlendEnable = FALSE;
-
-  const D3D12_RENDER_TARGET_BLEND_DESC defaultRenderTargetBlendDesc = {
-      FALSE,
-      FALSE,
-      D3D12_BLEND_ONE,
-      D3D12_BLEND_ZERO,
-      D3D12_BLEND_OP_ADD,
-      D3D12_BLEND_ONE,
-      D3D12_BLEND_ZERO,
-      D3D12_BLEND_OP_ADD,
-      D3D12_LOGIC_OP_NOOP,
-      D3D12_COLOR_WRITE_ENABLE_ALL};
-
-  for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
-    outDesc.RenderTarget[i] = defaultRenderTargetBlendDesc;
-}
-
-static void SetDefaultDepthStencilDesc(D3D12_DEPTH_STENCIL_DESC& outDesc)
-{
-  outDesc.DepthEnable = TRUE;
-  outDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-  outDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-  outDesc.StencilEnable = FALSE;
-  outDesc.StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK;
-  outDesc.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
-  const D3D12_DEPTH_STENCILOP_DESC defaultStencilOp = {
-      D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP,
-      D3D12_COMPARISON_FUNC_ALWAYS};
-  outDesc.FrontFace = defaultStencilOp;
-  outDesc.BackFace = defaultStencilOp;
-}
-
 static std::wstring ConvertToWstring(std::string in)
 {
   size_t newsize = std::strlen(in.c_str()) + 1;
@@ -218,6 +167,12 @@ static std::wstring ConvertToWstring(std::string in)
   delete[] wcstring;
 
   return out;
+}
+
+template <typename T, typename U>
+constexpr T DivRoundUp(T num, U denom)
+{
+  return (num + denom - 1) / denom;
 }
 
 struct GPUSelection {

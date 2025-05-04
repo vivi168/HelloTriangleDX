@@ -23,6 +23,7 @@
 #include "d3dx12_root_signature.h"
 #include "d3dx12_resource_helpers.h"
 #include "d3dx12_barriers.h"
+#include "d3dx12_pipeline_state_stream.h"
 
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"

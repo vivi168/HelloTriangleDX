@@ -137,6 +137,8 @@ struct Subset {
   Renderer::Texture* texture = nullptr;  // GPU data // TODO Material struct instead
 };
 
+using MeshletSubset = std::pair<size_t, size_t>; // offset, count
+
 template <typename T>
 struct Mesh3D {
   struct {
@@ -154,11 +156,11 @@ struct Mesh3D {
   std::vector<DirectX::Meshlet> meshlets;
   std::vector<uint8_t> uniqueVertexIB;
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
-  std::vector<std::pair<size_t, size_t>> meshletSubsets;
+  std::vector<MeshletSubset> meshletSubsets;
 
   std::string name;
   Renderer::Geometry* geometry = nullptr;  // GPU data
-  Skin* skin = nullptr;                 // in case of skinned mesh
+  Skin* skin = nullptr;                    // in case of skinned mesh
 
   void Read(std::string filename)
   {
@@ -181,9 +183,9 @@ struct Mesh3D {
     // TODO: build bounding sphere
     // TODO: build meshlets
     {
-      auto positions = std::make_unique<XMFLOAT3[]>(vertices.size());
+      auto positions = std::make_unique<DirectX::XMFLOAT3[]>(vertices.size());
       std::vector<uint32_t> indices32(indices.size());
-      std::vector<std::pair<size_t, size_t>> subsets_st(subsets.size());
+      std::vector<MeshletSubset> subsets_st(subsets.size());
 
       for (size_t si = 0; si < subsets.size(); si++) {
         const auto& subset = subsets[si];
@@ -203,19 +205,17 @@ struct Mesh3D {
 
       meshletSubsets.resize(header.numSubsets);
 
-      const std::pair<size_t, size_t> s = {0, indices32.size() / 3};
-      std::pair<size_t, size_t> issou;
-
-      // TODO: max 64v/124t
+      constexpr size_t maxPrims = 124;
+      constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
           indices32.data(), indices32.size() / 3,
           positions.get(), vertices.size(),
           subsets_st.data(), subsets_st.size(),
-          //&s, 1u,
           nullptr,
           meshlets, uniqueVertexIB, primitiveIndices,
-          //meshletSubsets.data()));
-          meshletSubsets.data()));
+          meshletSubsets.data(), maxVerts, maxPrims));
+
+      assert(uniqueVertexIB.size() % 4 == 0);
     }
 
     fclose(fp);
@@ -226,6 +226,20 @@ struct Mesh3D {
   size_t IndexBufferSize() const
   {
     return sizeof(uint16_t) * header.numIndices;
+  }
+
+  size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
+
+  size_t MeshletIndexBufferSize() const { return uniqueVertexIB.size(); }
+
+  size_t MeshletPrimitiveBufferSize() const
+  {
+    return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size();
+  }
+
+  size_t MeshletSubsetBufferSize() const
+  {
+    return sizeof(MeshletSubset) * meshletSubsets.size();
   }
 
   size_t SkinMatricesSize() const {
