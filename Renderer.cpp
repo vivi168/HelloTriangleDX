@@ -1575,8 +1575,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
   // Meshlet Index Buffer
   {
     const size_t bufferSize = mesh->MeshletIndexBufferSize();
-    const size_t roundedUp = DivRoundUp(bufferSize, 4);
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(roundedUp * 4);
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 
     geom.m_MeshletIndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
                                               &bufferDesc);
@@ -1596,11 +1595,11 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .Format = DXGI_FORMAT_UNKNOWN,
         .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
         .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {
-            .FirstElement = 0,
-            .NumElements = static_cast<UINT>(roundedUp),
-            .StructureByteStride = sizeof(UINT),
-            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+        .Buffer = {.FirstElement = 0,
+                   .NumElements =
+                       static_cast<UINT>(mesh->MeshletIndexBufferNumElements()),
+                   .StructureByteStride = sizeof(UINT),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
     geom.m_MeshletIndexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
     g_Device->CreateShaderResourceView(

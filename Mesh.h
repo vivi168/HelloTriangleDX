@@ -230,7 +230,15 @@ struct Mesh3D {
 
   size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
 
-  size_t MeshletIndexBufferSize() const { return uniqueVertexIB.size(); }
+  size_t MeshletIndexBufferNumElements() const
+  {
+    return DivRoundUp(uniqueVertexIB.size(), sizeof(UINT));
+  }
+
+  size_t MeshletIndexBufferSize() const
+  {
+    return MeshletIndexBufferNumElements() * sizeof(UINT);
+  }
 
   size_t MeshletPrimitiveBufferSize() const
   {
