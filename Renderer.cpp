@@ -636,10 +636,10 @@ void Render()
     g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
-
   std::array descriptorHeaps{g_SrvDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
+
+  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
   g_CommandList->SetGraphicsRoot32BitConstants(
       RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
