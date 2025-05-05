@@ -156,7 +156,7 @@ struct Mesh3D {
   std::vector<DirectX::Meshlet> meshlets;
   std::vector<uint8_t> uniqueVertexIB;
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
-  std::vector<uint32_t> meshletSubsetIndices; // map meshlet -> subset
+  std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
 
   std::string name;
   Renderer::Geometry* geometry = nullptr;  // GPU data
@@ -222,7 +222,7 @@ struct Mesh3D {
         auto end = start + meshletSubsets[i].second;
 
         for (uint32_t j = start; j < end; j++) {
-          meshletSubsetIndices[j] = i;
+          meshletSubsetIndices[j] = &subsets[i];
         }
       }
     }

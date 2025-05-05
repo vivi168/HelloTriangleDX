@@ -1661,10 +1661,9 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     std::vector<UINT> meshletMaterials(mesh->meshlets.size());
 
     for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
-      size_t si = mesh->meshletSubsetIndices[mi];
-      auto& subset = mesh->subsets[si];
+      auto subset = mesh->meshletSubsetIndices[mi];
 
-      meshletMaterials[mi] = subset.texture->m_Buffer.DescriptorIndex();
+      meshletMaterials[mi] = subset->texture->m_Buffer.DescriptorIndex();
     }
 
     // GPU buffer
