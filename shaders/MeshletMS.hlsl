@@ -11,6 +11,7 @@ cbuffer MeshletConstants : register(b3)
   uint meshletBufferId;
   uint indexBufferId;
   uint primBufferId;
+  uint materialBufferId;
 };
 
 struct Meshlet

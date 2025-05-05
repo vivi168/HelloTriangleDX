@@ -16,7 +16,7 @@ enum class PSO { Basic, BasicMS, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshletConstants, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, Count };
 }
 
 struct Scene {
@@ -278,7 +278,7 @@ struct Geometry {
   UploadedHeapResource m_MeshletBuffer;
   UploadedHeapResource m_MeshletIndexBuffer;
   UploadedHeapResource m_MeshletPrimitiveBuffer;
-  UploadedHeapResource m_MeshletSubsetBuffer;
+  UploadedHeapResource m_MeshletMaterialBuffer; // TODO: for now contains just a descriptor index of a texture
 
   void Reset()
   {
@@ -288,7 +288,7 @@ struct Geometry {
     m_MeshletBuffer.Reset();
     m_MeshletIndexBuffer.Reset();
     m_MeshletPrimitiveBuffer.Reset();
-    m_MeshletSubsetBuffer.Reset();
+    m_MeshletMaterialBuffer.Reset();
   }
 
   void ResetUploadBuffers()
@@ -299,7 +299,7 @@ struct Geometry {
     m_MeshletBuffer.ResetUpload();
     m_MeshletIndexBuffer.ResetUpload();
     m_MeshletPrimitiveBuffer.ResetUpload();
-    m_MeshletSubsetBuffer.ResetUpload();
+    m_MeshletMaterialBuffer.ResetUpload();
   }
 };
 
@@ -671,12 +671,14 @@ void Render()
         UINT meshletBufferId;
         UINT indexBufferId;
         UINT primBufferId;
+        UINT materialBufferId;
       } ronre = {geom->m_VertexBuffer.DescriptorIndex(),
                  geom->m_MeshletBuffer.DescriptorIndex(),
                  geom->m_MeshletIndexBuffer.DescriptorIndex(),
-                 geom->m_MeshletPrimitiveBuffer.DescriptorIndex()};
+                 geom->m_MeshletPrimitiveBuffer.DescriptorIndex(),
+                 geom->m_MeshletMaterialBuffer.DescriptorIndex()};
       g_CommandList->SetGraphicsRoot32BitConstants(
-          RootParameter::PerMeshletConstants, sizeof(ronre) / sizeof(UINT),
+          RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
           &ronre, 0);
       g_CommandList->DispatchMesh(mesh->meshlets.size(), 1, 1);
     }
@@ -1149,7 +1151,7 @@ static void InitFrameResources()
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
     rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
-    rootParameters[RootParameter::PerMeshletConstants].InitAsConstants(4, 3);  // b3 // TODO: rework root signature.
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(5, 3);  // b3 // TODO: rework root signature.
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1450,15 +1452,7 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
 template <typename T>
 static void LoadMesh3D(Mesh3D<T>* mesh)
 {
-  auto geomNeedle = g_Geometries.find(mesh->name);
-  if (geomNeedle == std::end(g_Geometries)) {
-    printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
-    mesh->geometry = CreateGeometry(mesh);
-  } else {
-    printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
-    mesh->geometry = &geomNeedle->second;
-  }
-
+  // first loop subsets and create textures (and soon to be materials)
   for (auto& subset : mesh->subsets) {
     // TODO: get assets path
     std::string name(subset.name);
@@ -1472,6 +1466,17 @@ static void LoadMesh3D(Mesh3D<T>* mesh)
       subset.texture = &needle->second;
       printf("TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
     }
+  }
+
+  // then we can create geometry. and have a buffer containing a descriptor
+  // index per meshlet to a material
+  auto geomNeedle = g_Geometries.find(mesh->name);
+  if (geomNeedle == std::end(g_Geometries)) {
+    printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
+    mesh->geometry = CreateGeometry(mesh);
+  } else {
+    printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
+    mesh->geometry = &geomNeedle->second;
   }
 }
 
@@ -1522,7 +1527,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
                                        geom.m_VertexBuffer.DescriptorHandle());
   }
 
-  // Index Buffer
+  // Index Buffer (not used by mesh shader pipeline)
   {
     size_t iBufferSize = mesh->IndexBufferSize();
     auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(iBufferSize);
@@ -1650,21 +1655,33 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         geom.m_MeshletPrimitiveBuffer.DescriptorHandle());
   }
 
-  // Meshlet Subset Buffer
+  // Meshlet Material Buffer
   {
-    const size_t bufferSize = mesh->MeshletSubsetBufferSize();
+    // CPU buffer
+    std::vector<UINT> meshletMaterials(mesh->meshlets.size());
+
+    for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
+      size_t si = mesh->meshletSubsetIndices[mi];
+      auto& subset = mesh->subsets[si];
+
+      meshletMaterials[mi] = subset.texture->m_Buffer.DescriptorIndex();
+    }
+
+    // GPU buffer
+    const size_t bufferSize = meshletMaterials.size() * sizeof(UINT);
     auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-    geom.m_MeshletSubsetBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                               &bufferDesc);
-    geom.m_MeshletSubsetBuffer.SetName("Meshlet Subset Buffer: " + mesh->name);
+    geom.m_MeshletMaterialBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                                 &bufferDesc);
+    geom.m_MeshletMaterialBuffer.SetName("Meshlet Material Buffer: " +
+                                         mesh->name);
 
     D3D12_SUBRESOURCE_DATA data{
-        .pData = reinterpret_cast<BYTE*>(mesh->meshletSubsets.data()),
+        .pData = reinterpret_cast<BYTE*>(meshletMaterials.data()),
         .RowPitch = static_cast<LONG_PTR>(bufferSize),
         .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
 
-    geom.m_MeshletSubsetBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[5] = geom.m_MeshletSubsetBuffer.Transition(
+    geom.m_MeshletMaterialBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[5] = geom.m_MeshletMaterialBuffer.Transition(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // descriptor
@@ -1672,16 +1689,15 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .Format = DXGI_FORMAT_UNKNOWN,
         .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
         .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {
-            .FirstElement = 0,
-            .NumElements = static_cast<UINT>(mesh->meshletSubsets.size()),
-            .StructureByteStride = sizeof(MeshletSubset),
-            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+        .Buffer = {.FirstElement = 0,
+                   .NumElements = static_cast<UINT>(meshletMaterials.size()),
+                   .StructureByteStride = sizeof(UINT),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
-    geom.m_MeshletSubsetBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_MeshletMaterialBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
     g_Device->CreateShaderResourceView(
-        geom.m_MeshletSubsetBuffer.Resource(), &srvDesc,
-        geom.m_MeshletSubsetBuffer.DescriptorHandle());
+        geom.m_MeshletMaterialBuffer.Resource(), &srvDesc,
+        geom.m_MeshletMaterialBuffer.DescriptorHandle());
   }
 
   g_CommandList->ResourceBarrier(postUploadBarriers.size(),

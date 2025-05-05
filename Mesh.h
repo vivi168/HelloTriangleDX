@@ -156,7 +156,7 @@ struct Mesh3D {
   std::vector<DirectX::Meshlet> meshlets;
   std::vector<uint8_t> uniqueVertexIB;
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
-  std::vector<MeshletSubset> meshletSubsets;
+  std::vector<uint32_t> meshletSubsetIndices; // map meshlet -> subset
 
   std::string name;
   Renderer::Geometry* geometry = nullptr;  // GPU data
@@ -181,7 +181,6 @@ struct Mesh3D {
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
     // TODO: build bounding sphere
-    // TODO: build meshlets
     {
       auto positions = std::make_unique<DirectX::XMFLOAT3[]>(vertices.size());
       std::vector<uint32_t> indices32(indices.size());
@@ -203,7 +202,7 @@ struct Mesh3D {
       for (size_t j = 0; j < vertices.size(); ++j)
         positions[j] = vertices[j].position;
 
-      meshletSubsets.resize(header.numSubsets);
+      std::vector<MeshletSubset> meshletSubsets(header.numSubsets);  
 
       constexpr size_t maxPrims = 124;
       constexpr size_t maxVerts = 64;
@@ -216,6 +215,16 @@ struct Mesh3D {
           meshletSubsets.data(), maxVerts, maxPrims));
 
       assert(uniqueVertexIB.size() % 4 == 0);
+
+      meshletSubsetIndices.resize(meshlets.size());
+      for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
+        auto start = meshletSubsets[i].first;
+        auto end = start + meshletSubsets[i].second;
+
+        for (uint32_t j = start; j < end; j++) {
+          meshletSubsetIndices[j] = i;
+        }
+      }
     }
 
     fclose(fp);
@@ -243,11 +252,6 @@ struct Mesh3D {
   size_t MeshletPrimitiveBufferSize() const
   {
     return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size();
-  }
-
-  size_t MeshletSubsetBufferSize() const
-  {
-    return sizeof(MeshletSubset) * meshletSubsets.size();
   }
 
   size_t SkinMatricesSize() const {
