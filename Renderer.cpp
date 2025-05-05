@@ -196,22 +196,24 @@ struct UploadedHeapResource {
   void CreateResources(D3D12MA::Allocator* allocator,
                        const D3D12_RESOURCE_DESC* pResourceDesc,
                        const D3D12_RESOURCE_DESC* pResourceUploadDesc,
+                       D3D12_RESOURCE_STATES InitialResourceState =
+                           D3D12_RESOURCE_STATE_COMMON,
                        const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
   {
     // create default heap
     // Default heap is memory on the GPU. Only the GPU has access to this
     // memory. To get data into this heap, we will have to upload the data using
     // an upload heap
-    D3D12MA::ALLOCATION_DESC allocDesc = {};
-    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12MA::CALLOCATION_DESC allocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
     buffer.CreateResource(allocator, &allocDesc, pResourceDesc,
-                          D3D12_RESOURCE_STATE_COPY_DEST, pOptimizedClearValue);
+                          InitialResourceState, pOptimizedClearValue);
     // create upload heap
     // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
     // can read from it. We will upload the buffer using this heap to the
     // default heap
-    D3D12MA::ALLOCATION_DESC uploadAllocDesc = {};
-    uploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12MA::CALLOCATION_DESC uploadAllocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
     uploadBuffer.CreateResource(allocator, &uploadAllocDesc,
                                 pResourceUploadDesc);
   }
@@ -798,6 +800,8 @@ void Cleanup()
     g_FrameContext[i].Reset();
   }
 
+  PrintStatsString();
+
   g_Allocator.Reset();
 
   if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
@@ -1080,8 +1084,8 @@ static void InitFrameResources()
     depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
-    D3D12MA::ALLOCATION_DESC depthStencilAllocDesc = {};
-    depthStencilAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12MA::CALLOCATION_DESC depthStencilAllocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
 
     D3D12_RESOURCE_DESC depthStencilResourceDesc =
         CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, g_Width, g_Height);
@@ -1146,7 +1150,6 @@ static void InitFrameResources()
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
     rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
     rootParameters[RootParameter::PerMeshletConstants].InitAsConstants(4, 3);  // b3 // TODO: rework root signature.
-    
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1175,8 +1178,8 @@ static void InitFrameResources()
 
   // per object CB
   {
-    D3D12MA::ALLOCATION_DESC allocDesc = {};
-    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12MA::CALLOCATION_DESC allocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
 
     auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(1024 * 64);
 
@@ -1709,7 +1712,8 @@ static Texture* CreateTexture(std::string name)
                                   &textureUploadBufferSize);  // pTotalBytes
 
   auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize);
-  tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc);
+  tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
   tex.m_Buffer.SetName("Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
