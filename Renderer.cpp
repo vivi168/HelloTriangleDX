@@ -293,6 +293,11 @@ struct Geometry {
   {
     m_VertexBuffer.ResetUpload();
     m_IndexBuffer.ResetUpload();
+
+    m_MeshletBuffer.ResetUpload();
+    m_MeshletIndexBuffer.ResetUpload();
+    m_MeshletPrimitiveBuffer.ResetUpload();
+    m_MeshletSubsetBuffer.ResetUpload();
   }
 };
 
