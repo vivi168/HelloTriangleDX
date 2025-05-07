@@ -372,7 +372,9 @@ struct FrameContext {
 
 // ========== Constants
 
+#ifdef _DEBUG
 #define ENABLE_DEBUG_LAYER true
+#endif
 
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
@@ -418,7 +420,7 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static DXGIUsage* g_DXGIUsage = nullptr;
+static IDXGIFactory4* g_Factory = nullptr;
 static ComPtr<IDXGIAdapter1> g_Adapter;
 
 static ComPtr<ID3D12Device2> g_Device;
@@ -467,10 +469,10 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_AspectRatio = static_cast<float>(width) / static_cast<float>(height);
 }
 
-void InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
+void InitAdapter(IDXGIFactory4* factory, IDXGIAdapter1* adapter)
 {
-  g_DXGIUsage = dxgiUsage;
-  assert(g_DXGIUsage);
+  g_Factory = factory;
+  assert(g_Factory);
 
   g_Adapter = adapter;
   assert(g_Adapter);
@@ -1009,8 +1011,8 @@ static void InitD3D()
     // The queue will be flushed once the swap chain is created. Give it the
     // swap chain description we created above and store the created swap chain
     // in a temp IDXGISwapChain interface
-    CHECK_HR(g_DXGIUsage->GetDXGIFactory()->CreateSwapChain(
-        g_CommandQueue.Get(), &swapChainDesc, &tempSwapChain));
+    CHECK_HR(g_Factory->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc,
+                                        &tempSwapChain));
 
     g_SwapChain.Attach(static_cast<IDXGISwapChain3*>(tempSwapChain));
 
