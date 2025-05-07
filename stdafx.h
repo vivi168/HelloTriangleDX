@@ -13,6 +13,7 @@
 
 #include <wrl.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 
 #include <initguid.h>
 #include <d3d12.h>
@@ -42,6 +43,7 @@
 #include <chrono>
 #include <string>
 #include <exception>
+#include <stdexcept>
 #include <deque>
 
 #include <cassert>
@@ -51,4 +53,26 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "RendererHelper.h"
+#define STRINGIZE(x) STRINGIZE2(x)
+#define STRINGIZE2(x) #x
+#define LINE_STRING STRINGIZE(__LINE__)
+#define CHECK_HR(expr)                                                      \
+  do {                                                                      \
+    if (FAILED(expr)) {                                                     \
+      assert(0 && #expr);                                                   \
+      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr \
+                                        " )");                              \
+    }                                                                       \
+  } while (false)
+
+template <typename T, typename U>
+inline constexpr T DivRoundUp(T num, U denom)
+{
+  return (num + denom - 1) / denom;
+}
+
+template <typename T, typename U>
+inline constexpr T AlignUp(T val, U align)
+{
+  return DivRoundUp(val, align) * align;
+}

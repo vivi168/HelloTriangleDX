@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Renderer.h"
+#include "RendererHelper.h"
 
 #include "Win32Application.h"
 

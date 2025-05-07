@@ -1,14 +1,5 @@
 #pragma once
 
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <chrono>
-#include <wrl.h>
-#include <shlwapi.h>
-
 inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
 {
   if (path == nullptr) {
@@ -71,38 +62,6 @@ inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
   inFile.close();
 
   return blob;
-}
-
-#define STRINGIZE(x) STRINGIZE2(x)
-#define STRINGIZE2(x) #x
-#define LINE_STRING STRINGIZE(__LINE__)
-#define CHECK_BOOL(expr)                                              \
-  do {                                                                \
-    if (!(expr)) {                                                    \
-      assert(0 && #expr);                                             \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): ( " #expr \
-                                        " ) == false");               \
-    }                                                                 \
-  } while (false)
-#define CHECK_HR(expr)                                                      \
-  do {                                                                      \
-    if (FAILED(expr)) {                                                     \
-      assert(0 && #expr);                                                   \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr \
-                                        " )");                              \
-    }                                                                       \
-  } while (false)
-
-template <typename T, typename U>
-inline constexpr T DivRoundUp(T num, U denom)
-{
-  return (num + denom - 1) / denom;
-}
-
-template <typename T, typename U>
-inline constexpr T AlignUp(T val, U align)
-{
-  return DivRoundUp(val, align) * align;
 }
 
 static const D3D12_RANGE EMPTY_RANGE = {0, 0};
