@@ -1,20 +1,16 @@
 struct VS_INPUT
 {
+#ifdef SKINNED
   float3 pos : POSITION;
   float3 normal : NORMAL;
   float4 color : COLOR;
   float2 texCoord : TEXCOORD;
-#ifdef SKINNED
+
   float4 boneWeights : WEIGHTS;
   uint4 boneIndices : BONEINDICES;
+#else
+  uint vid : SV_VertexID;
 #endif
-};
-
-struct VS_INPUT_TERRAIN
-{
-  float3 pos : POSITION;
-  float3 normal : NORMAL;
-  float2 texCoord : TEXCOORD;
 };
 
 struct VS_OUTPUT
@@ -33,5 +29,7 @@ cbuffer FrameConstants : register(b0)
 
 cbuffer MaterialConstants : register(b2)
 {
+  uint vbIndex;
+  uint vOffset;
   uint diffuseIndex;
 };
