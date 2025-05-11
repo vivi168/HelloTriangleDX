@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Renderer.h"
+#include "RendererHelper.h"
 
 #include "Win32Application.h"
 
@@ -12,23 +13,23 @@ using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {
-enum class PSO { Basic, Skinned, ColliderSurface };
+enum class PSO { Basic, BasicMS, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, Count };
 }
 
 struct Scene {
   struct SceneNode {
     Model3D* model;
-    size_t cbIndex;
-    std::vector<size_t> bonesIndices;
+    size_t cbIndex; // TODO: this is really an offset in the buffer
+    std::vector<size_t> bonesIndices; // TODO: these are offsets in the buffer
   };
 
   std::list<SceneNode> nodes;
   Camera* camera;
-} g_Scene;
+};
 
 // TODO: rename this ?
 struct ModelConstantBuffer {
@@ -37,20 +38,114 @@ struct ModelConstantBuffer {
   XMFLOAT4X4 NormalMatrix;
 };
 
+struct DescriptorHeapListAllocator {
+  void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
+  {
+    assert(m_Heap == nullptr && m_FreeIndices.empty());
+    m_Heap = heap;
+
+    D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
+    m_HeapType = desc.Type;
+    m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
+    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
+    m_HeapHandleIncrement =
+        device->GetDescriptorHandleIncrementSize(m_HeapType);
+
+    for (UINT i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
+  }
+
+  void Destroy()
+  {
+    m_Heap = nullptr;
+    m_FreeIndices.clear();
+  }
+
+  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
+             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
+  {
+    assert(m_FreeIndices.size() > 0);
+
+    UINT idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+    outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
+  }
+
+  UINT Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
+  {
+    assert(m_FreeIndices.size() > 0);
+
+    UINT idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
+
+    return idx;
+  }
+
+  void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
+            D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
+  {
+    UINT cpuIdx = static_cast<UINT>((cpuDescHandle.ptr - m_HeapStartCpu.ptr) /
+                                    m_HeapHandleIncrement);
+    UINT gpuIdx = static_cast<UINT>((gpuDescHandle.ptr - m_HeapStartGpu.ptr) /
+                                    m_HeapHandleIncrement);
+
+    assert(cpuIdx == gpuIdx);
+    m_FreeIndices.push_front(cpuIdx);
+  }
+
+  void Free(UINT index) { m_FreeIndices.push_front(index); }
+
+private:
+  ID3D12DescriptorHeap* m_Heap = nullptr;
+  D3D12_DESCRIPTOR_HEAP_TYPE m_HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
+  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
+  UINT m_HeapHandleIncrement;
+  std::deque<UINT> m_FreeIndices;
+};
+
+struct HeapDescriptor
+{
+  UINT index;
+  D3D12_CPU_DESCRIPTOR_HANDLE handle;
+
+  void Alloc(DescriptorHeapListAllocator& allocator)
+  {
+    index = allocator.Alloc(&handle);
+  }
+};
+
 struct HeapResource {
-  ComPtr<ID3D12Resource> resource;
-  D3D12MA::Allocation* allocation;
-  void* address;
+  ID3D12Resource* Resource() const { return resource.Get(); };
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
   {
     return resource->GetGPUVirtualAddress() + offset;
   }
 
-  void CreateResource(const D3D12MA::ALLOCATION_DESC* allocDesc,
+  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
+  {
+    descriptor.Alloc(allocator);
+  }
+
+  UINT DescriptorIndex() const { return descriptor.index; }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const { return descriptor.handle; }
+
+  void CreateResource(D3D12MA::Allocator* allocator,
+                      const D3D12MA::ALLOCATION_DESC* allocDesc,
                       const D3D12_RESOURCE_DESC* pResourceDesc,
-                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
-                      const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr);
+                      D3D12_RESOURCE_STATES InitialResourceState =
+                          D3D12_RESOURCE_STATE_GENERIC_READ,
+                      const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
+  {
+    CHECK_HR(allocator->CreateResource(
+        allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
+        &allocation, IID_PPV_ARGS(&resource)));
+  }
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
 
@@ -59,10 +154,12 @@ struct HeapResource {
     memcpy((BYTE*)address + offset, data, size);
   }
 
-  void CopyFrom(ID3D12GraphicsCommandList* pCmdList, ID3D12Resource* pIntermediate,
-                D3D12_SUBRESOURCE_DATA* data);
-  void Transition(ID3D12GraphicsCommandList* pCmdList, D3D12_RESOURCE_STATES stateBefore,
-                  D3D12_RESOURCE_STATES stateAfter);
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore,
+                                    D3D12_RESOURCE_STATES stateAfter)
+  {
+    return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore,
+                                                stateAfter);
+  }
 
   void SetName(std::string name)
   {
@@ -88,24 +185,122 @@ struct HeapResource {
     allocation->Release();
     allocation = nullptr;
   }
+
+private:
+  ComPtr<ID3D12Resource> resource;
+  HeapDescriptor descriptor;
+  D3D12MA::Allocation* allocation;
+  void* address;
+};
+
+struct UploadedHeapResource {
+  void CreateResources(D3D12MA::Allocator* allocator,
+                       const D3D12_RESOURCE_DESC* pResourceDesc,
+                       const D3D12_RESOURCE_DESC* pResourceUploadDesc,
+                       D3D12_RESOURCE_STATES InitialResourceState =
+                           D3D12_RESOURCE_STATE_COMMON,
+                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
+  {
+    // create default heap
+    // Default heap is memory on the GPU. Only the GPU has access to this
+    // memory. To get data into this heap, we will have to upload the data using
+    // an upload heap
+    D3D12MA::CALLOCATION_DESC allocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
+    buffer.CreateResource(allocator, &allocDesc, pResourceDesc,
+                          InitialResourceState, pOptimizedClearValue);
+    // create upload heap
+    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
+    // can read from it. We will upload the buffer using this heap to the
+    // default heap
+    D3D12MA::CALLOCATION_DESC uploadAllocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
+    uploadBuffer.CreateResource(allocator, &uploadAllocDesc,
+                                pResourceUploadDesc);
+  }
+
+  void Upload(ID3D12GraphicsCommandList* pCmdList, D3D12_SUBRESOURCE_DATA* data)
+  {
+    UINT64 r = UpdateSubresources(pCmdList, Resource(), UploadResource(), 0, 0,
+                                  1, data);
+    assert(r);
+  }
+
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateAfter)
+  {
+    return buffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST, stateAfter);
+  }
+
+  ID3D12Resource* Resource() const { return buffer.Resource(); };
+
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
+  {
+    return buffer.GpuAddress(offset);
+  }
+
+  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
+  {
+    buffer.AllocDescriptor(allocator);
+  }
+
+  UINT DescriptorIndex() const { return buffer.DescriptorIndex(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const
+  {
+    return buffer.DescriptorHandle();
+  }
+
+  void SetName(std::string name) { buffer.SetName(name); }
+
+  void Reset() { buffer.Reset(); }
+
+  void ResetUpload() { uploadBuffer.Reset(); }
+
+private:
+  HeapResource buffer;
+  HeapResource uploadBuffer;
+
+  ID3D12Resource* UploadResource() const
+  {
+    return uploadBuffer.Resource();
+  };
 };
 
 struct Geometry {
-  HeapResource m_VertexBuffer;
-  HeapResource m_VertexUploadBuffer;
+  UploadedHeapResource m_VertexBuffer;
+
+  // TODO: bindful. soon to be useless.
   D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
 
-  HeapResource m_IndexBuffer;
-  HeapResource m_IndexUploadBuffer;
+  UploadedHeapResource m_IndexBuffer;
   D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
+
+  // meshlets
+  UploadedHeapResource m_MeshletBuffer;
+  UploadedHeapResource m_MeshletIndexBuffer;
+  UploadedHeapResource m_MeshletPrimitiveBuffer;
+  UploadedHeapResource m_MeshletMaterialBuffer; // TODO: for now contains just a descriptor index of a texture
 
   void Reset()
   {
     m_VertexBuffer.Reset();
-    m_VertexUploadBuffer.Reset();
-
     m_IndexBuffer.Reset();
-    m_IndexUploadBuffer.Reset();
+
+    m_MeshletBuffer.Reset();
+    m_MeshletIndexBuffer.Reset();
+    m_MeshletPrimitiveBuffer.Reset();
+    m_MeshletMaterialBuffer.Reset();
+  }
+
+  void ResetUploadBuffers()
+  {
+    m_VertexBuffer.ResetUpload();
+    m_IndexBuffer.ResetUpload();
+
+    m_MeshletBuffer.ResetUpload();
+    m_MeshletIndexBuffer.ResetUpload();
+    m_MeshletPrimitiveBuffer.ResetUpload();
+    m_MeshletMaterialBuffer.ResetUpload();
   }
 };
 
@@ -118,12 +313,7 @@ struct Texture {
   std::vector<uint8_t> pixels;
   std::string name;
 
-  HeapResource m_Buffer;
-  HeapResource m_UploadBuffer;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE srvCpuDescHandle;
-  //D3D12_GPU_DESCRIPTOR_HANDLE srvGpuDescHandle; // TODO: uneeded in bindless model
-  UINT32 index;
+  UploadedHeapResource m_Buffer;
 
   void Read(std::string filename)
   {
@@ -138,11 +328,8 @@ struct Texture {
     fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
   }
 
-  void Reset()
-  {
-    m_Buffer.Reset();
-    m_UploadBuffer.Reset();
-  }
+  void Reset() { m_Buffer.Reset(); }
+  void ResetUploadBuffer() { m_Buffer.ResetUpload(); }
 
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
 
@@ -184,75 +371,11 @@ struct FrameContext {
   }
 };
 
-struct DescriptorHeapListAllocator {
-  void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
-  {
-    assert(m_Heap == nullptr && m_FreeIndices.empty());
-    m_Heap = heap;
-
-    D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
-    m_HeapType = desc.Type;
-    m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
-    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
-    m_HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(m_HeapType);
-
-    for (size_t i = 0; i < desc.NumDescriptors; i++) m_FreeIndices.push_back(i);
-  }
-
-  void Destroy()
-  {
-    m_Heap = nullptr;
-    m_FreeIndices.clear();
-  }
-
-  void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle,
-             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescHandle)
-  {
-    assert(m_FreeIndices.size() > 0);
-
-    size_t idx = m_FreeIndices.front();
-    m_FreeIndices.pop_front();
-
-    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
-    outGpuDescHandle->ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement);
-  }
-
-  size_t Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescHandle)
-  {
-    assert(m_FreeIndices.size() > 0);
-
-    size_t idx = m_FreeIndices.front();
-    m_FreeIndices.pop_front();
-
-    outCpuDescHandle->ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement);
-
-    return idx;
-  }
-
-  void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuDescHandle,
-            D3D12_GPU_DESCRIPTOR_HANDLE gpuDescHandle)
-  {
-    size_t cpuIdx = (cpuDescHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement;
-    size_t gpuIdx = (gpuDescHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement;
-
-    assert(cpuIdx == gpuIdx);
-    m_FreeIndices.push_front(cpuIdx);
-  }
-
-  void Free(UINT32 index) { m_FreeIndices.push_front(index); }
-
-private:
-  ID3D12DescriptorHeap* m_Heap = nullptr;
-  D3D12_DESCRIPTOR_HEAP_TYPE m_HeapType = D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES;
-  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu;
-  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu;
-  UINT m_HeapHandleIncrement;
-  std::deque<size_t> m_FreeIndices;
-};
-
 // ========== Constants
 
+#ifdef _DEBUG
 #define ENABLE_DEBUG_LAYER true
+#endif
 
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
@@ -284,8 +407,10 @@ static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
 
-static size_t g_CbNextIndex = 0;
-static size_t g_BonesNextIndex = 0;
+static size_t g_CbNextIndex = 0; // TODO: rename as offset
+                                 // TODO: add a struct to allocate / free indices
+static size_t g_BonesNextIndex = 0; // TODO: rename as offset
+                                    // use bindless for bone matrices?
 
 static UINT g_Width;
 static UINT g_Height;
@@ -296,10 +421,10 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static DXGIUsage* g_DXGIUsage = nullptr;
+static IDXGIFactory4* g_Factory = nullptr;
 static ComPtr<IDXGIAdapter1> g_Adapter;
 
-static ComPtr<ID3D12Device> g_Device;
+static ComPtr<ID3D12Device2> g_Device;
 static DXGI_ADAPTER_DESC1 g_AdapterDesc;
 static ComPtr<D3D12MA::Allocator> g_Allocator;
 // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
@@ -309,7 +434,7 @@ static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks;
 static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
 static ComPtr<ID3D12CommandQueue> g_CommandQueue;
-static ComPtr<ID3D12GraphicsCommandList> g_CommandList;
+static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
@@ -332,39 +457,11 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 
 static std::unordered_map<std::string, Geometry> g_Geometries;
 static std::unordered_map<std::string, Texture> g_Textures;
+static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
-
-void HeapResource::CreateResource(
-    const D3D12MA::ALLOCATION_DESC* allocDesc,
-    const D3D12_RESOURCE_DESC* pResourceDesc,
-    D3D12_RESOURCE_STATES InitialResourceState,
-    const D3D12_CLEAR_VALUE* pOptimizedClearValue)
-{
-  CHECK_HR(g_Allocator->CreateResource(
-      allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
-      &allocation, IID_PPV_ARGS(&resource)));
-}
-
-void HeapResource::CopyFrom(ID3D12GraphicsCommandList* pCmdList,
-                            ID3D12Resource* pIntermediate,
-                            D3D12_SUBRESOURCE_DATA* data)
-{
-  UINT64 r = UpdateSubresources(pCmdList, resource.Get(), pIntermediate, 0, 0,
-                                1, data);
-  assert(r);
-}
-
-void HeapResource::Transition(ID3D12GraphicsCommandList* pCmdList,
-                              D3D12_RESOURCE_STATES stateBefore,
-                              D3D12_RESOURCE_STATES stateAfter)
-{
-  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(),
-                                                      stateBefore, stateAfter);
-  pCmdList->ResourceBarrier(1, &barrier);
-}
 
 void InitWindow(UINT width, UINT height, std::wstring name)
 {
@@ -373,10 +470,10 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_AspectRatio = static_cast<float>(width) / static_cast<float>(height);
 }
 
-void InitAdapter(DXGIUsage* dxgiUsage, IDXGIAdapter1* adapter)
+void InitAdapter(IDXGIFactory4* factory, IDXGIAdapter1* adapter)
 {
-  g_DXGIUsage = dxgiUsage;
-  assert(g_DXGIUsage);
+  g_Factory = factory;
+  assert(g_Factory);
 
   g_Adapter = adapter;
   assert(g_Adapter);
@@ -400,32 +497,20 @@ void LoadAssets()
     for (auto mesh : node.model->skinnedMeshes) LoadMesh3D(mesh);
   }
 
-  // End of initial command list
-  {
-    g_CommandList->Close();
+  g_CommandList->Close();
 
-    // Now we execute the command list to upload the initial assets
-    // (triangle data)
-    ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
-    g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists),
-                                        ppCommandLists);
+  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-    // increment the fence value now, otherwise the buffer might not be uploaded
-    // by the time we start drawing
-    WaitGPUIdle(g_FrameIndex);
+  WaitGPUIdle(g_FrameIndex);
 
-    // TODO: need method + ensure not null
-    // // TODO: can release upload buffer here
-    //for (auto& [k, tex] : g_Textures) {
-    //  tex.textureUploadAllocation->Release();
-    //}
+  // Release upload buffers
+  for (auto& [k, tex] : g_Textures) {
+    tex.ResetUploadBuffer();
+  }
 
-    // TODO: need method + ensure not null
-    // TODO: can release geom m_VertexBufferUpload & m_IndexBufferUpload here
-    //for (auto& [k, geom] : g_Geometries) {
-    //  geom.vBufferUploadHeapAllocation->Release();
-    //  geom.iBufferUploadHeapAllocation->Release();
-    //}
+  for (auto& [k, geom] : g_Geometries) {
+    geom.ResetUploadBuffers();
   }
 }
 
@@ -550,7 +635,7 @@ void Render()
 
   g_CommandList->ClearDepthStencilView(
       g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-      D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+      D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
   if (g_Raster) {
@@ -561,10 +646,10 @@ void Render()
     g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
+  std::array descriptorHeaps{g_SrvDescriptorHeap.Get()};
+  g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
 
-  ID3D12DescriptorHeap* descriptorHeaps[] = {g_SrvDescriptorHeap.Get()};
-  g_CommandList->SetDescriptorHeaps(1, descriptorHeaps);
+  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
   g_CommandList->SetGraphicsRoot32BitConstants(
       RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
@@ -577,26 +662,28 @@ void Render()
 
   for (const auto node : g_Scene.nodes) {
     // static meshes
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Basic].Get());
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
     for (auto mesh : node.model->meshes) {
       auto geom = mesh->geometry;
-      g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
-      g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
-      g_CommandList->IASetPrimitiveTopology(
-          D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
       g_CommandList->SetGraphicsRootConstantBufferView(
           RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
-      for (const auto& subset : mesh->subsets) {
-        //g_CommandList->SetGraphicsRootDescriptorTable(
-        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
-        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
-                                                     &subset.texture->index, 0);
-        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
-                                            subset.vstart, 0);
-      }
+      struct {
+        UINT vertexBufferId;
+        UINT meshletBufferId;
+        UINT indexBufferId;
+        UINT primBufferId;
+        UINT materialBufferId;
+      } ronre = {geom->m_VertexBuffer.DescriptorIndex(),
+                 geom->m_MeshletBuffer.DescriptorIndex(),
+                 geom->m_MeshletIndexBuffer.DescriptorIndex(),
+                 geom->m_MeshletPrimitiveBuffer.DescriptorIndex(),
+                 geom->m_MeshletMaterialBuffer.DescriptorIndex()};
+      g_CommandList->SetGraphicsRoot32BitConstants(
+          RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
+          &ronre, 0);
+      g_CommandList->DispatchMesh(mesh->meshlets.size(), 1, 1);
     }
 
     // skinned meshes
@@ -619,10 +706,15 @@ void Render()
           ctx->boneTransformMatrices.GpuAddress(bonesIndex));
 
       for (const auto& subset : mesh->subsets) {
-        //g_CommandList->SetGraphicsRootDescriptorTable(
-        //    RootParameter::DiffuseTex, subset.texture->srvGpuDescHandle);
-        g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::MaterialConstants, 1,
-                                                     &subset.texture->index, 0);
+        struct {
+          UINT vbIndex;
+          UINT vOffset;
+          UINT texIndex;
+        } ronre = {geom->m_VertexBuffer.DescriptorIndex(), subset.vstart,
+                   subset.texture->m_Buffer.DescriptorIndex()};
+        g_CommandList->SetGraphicsRoot32BitConstants(
+            RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
+            &ronre, 0);
         g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
                                             subset.vstart, 0);
       }
@@ -646,10 +738,11 @@ void Render()
   // ==========
 
   // create an array of command lists (only one command list here)
-  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
+  std::array ppCommandLists{
+      static_cast<ID3D12CommandList*>(g_CommandList.Get())};
 
   // execute the array of command lists
-  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+  g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
   // this command goes in at the end of our command queue. we will know when our
   // command queue has finished because the fence value will be set to
@@ -683,19 +776,19 @@ void Cleanup()
 
   WaitGPUIdle(0);
 
-  // TODO: need method + ensure not null
   for (auto& [k, tex] : g_Textures) {
-    // TODO: do this from Reset() ?
-    g_SrvDescHeapAlloc.Free(tex.index);
+    // TODO: do this from Texture#Reset() ?
+    g_SrvDescHeapAlloc.Free(tex.m_Buffer.DescriptorIndex());
     tex.Reset();
   }
 
-  // TODO: need method + ensure not null
   for (auto& [k, geom] : g_Geometries) {
+    // TODO: should free geometry Descriptor Indices
     geom.Reset();
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
+  g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::Skinned].Reset();
   g_RootSignature.Reset();
 
@@ -711,6 +804,8 @@ void Cleanup()
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
   }
+
+  PrintStatsString();
 
   g_Allocator.Reset();
 
@@ -799,7 +894,7 @@ static void InitD3D()
 
   // Create Device
   {
-    ID3D12Device* device = nullptr;
+    ID3D12Device2* device = nullptr;
     CHECK_HR(D3D12CreateDevice(g_Adapter.Get(), FEATURE_LEVEL,
                                IID_PPV_ARGS(&device)));
     g_Device.Attach(device);
@@ -808,6 +903,10 @@ static void InitD3D()
     CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
                                            &options5, sizeof(options5)));
     assert(options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
+    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7,
+                                           &options7, sizeof(options7)));
   }
 
 #ifdef ENABLE_DEBUG_LAYER
@@ -913,8 +1012,8 @@ static void InitD3D()
     // The queue will be flushed once the swap chain is created. Give it the
     // swap chain description we created above and store the created swap chain
     // in a temp IDXGISwapChain interface
-    CHECK_HR(g_DXGIUsage->GetDXGIFactory()->CreateSwapChain(
-        g_CommandQueue.Get(), &swapChainDesc, &tempSwapChain));
+    CHECK_HR(g_Factory->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc,
+                                        &tempSwapChain));
 
     g_SwapChain.Attach(static_cast<IDXGISwapChain3*>(tempSwapChain));
 
@@ -929,7 +1028,7 @@ static void InitFrameResources()
   GetAssetsPath(assetsPath, _countof(assetsPath));
   g_AssetsPath = assetsPath;
 
-  // RTV descriptor heap
+  // RTV
   {
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
     rtvHeapDesc.NumDescriptors = FRAME_BUFFER_COUNT;
@@ -966,7 +1065,7 @@ static void InitFrameResources()
       CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
       g_FrameContext[i].renderTarget.Attach(res);
 
-      // the we "create" a render target view which binds the swap chain buffer
+      // then we "create" a render target view which binds the swap chain buffer
       // (ID3D12Resource[n]) to the rtv handle
       g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Get(),
                                        nullptr, rtvHandle);
@@ -976,7 +1075,7 @@ static void InitFrameResources()
     }
   }
 
-  // DSV descriptor heap
+  // DSV
   {
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
     dsvHeapDesc.NumDescriptors = 1;
@@ -990,8 +1089,8 @@ static void InitFrameResources()
     depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
     depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
-    D3D12MA::ALLOCATION_DESC depthStencilAllocDesc = {};
-    depthStencilAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12MA::CALLOCATION_DESC depthStencilAllocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
 
     D3D12_RESOURCE_DESC depthStencilResourceDesc =
         CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, g_Width, g_Height);
@@ -999,7 +1098,7 @@ static void InitFrameResources()
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     g_DepthStencilBuffer.CreateResource(
-        &depthStencilAllocDesc, &depthStencilResourceDesc,
+        g_Allocator.Get(), &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
     g_DepthStencilBuffer.SetName("Depth Stencil Buffer");
@@ -1009,7 +1108,7 @@ static void InitFrameResources()
     depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
     g_Device->CreateDepthStencilView(
-        g_DepthStencilBuffer.resource.Get(), &depthStencilDesc,
+        g_DepthStencilBuffer.Resource(), &depthStencilDesc,
         g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
   }
 
@@ -1048,19 +1147,14 @@ static void InitFrameResources()
 
   // Root Signature
   {
-    // Descriptor ranges
-    // TODO: how to go bindless? for textures at least.
-    //CD3DX12_DESCRIPTOR_RANGE descriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);  // t1
-
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
-    //rootParameters[RootParameter::DiffuseTex].InitAsDescriptorTable(1, &descriptorRange);
-    rootParameters[RootParameter::MaterialConstants].InitAsConstants(1, 2);  // b2 // TODO: materialConstantsSize + TODO reorder root signature
-
+    rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(5, 3);  // b3 // TODO: rework root signature.
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1089,17 +1183,24 @@ static void InitFrameResources()
 
   // per object CB
   {
-    D3D12MA::ALLOCATION_DESC allocDesc = {};
-    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12MA::CALLOCATION_DESC allocDesc =
+        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
+
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(1024 * 64);
 
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       auto ctx = &g_FrameContext[i];
 
-      ctx->perModelConstants.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
+      // size of the resource heap. Must be a multiple of 64KB for
+      // single-textures and constant buffers
+      ctx->perModelConstants.CreateResource(
+          g_Allocator.Get(), &allocDesc,
+          &bufferDesc);  // 1024 * 64 bytes = 64KB
       ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
       ctx->perModelConstants.Map();
 
-      ctx->boneTransformMatrices.CreateResource(&allocDesc, &CD3DX12_RESOURCE_DESC::Buffer(1024 * 64));
+      ctx->boneTransformMatrices.CreateResource(g_Allocator.Get(), &allocDesc,
+                                                &bufferDesc);
       ctx->boneTransformMatrices.SetName("Bone Matrices Constant Buffer ", i);
       ctx->boneTransformMatrices.Map();
     }
@@ -1117,24 +1218,6 @@ static void InitFrameResources()
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
                                           vertexShaderBlob.size()};
 
-    // create input layout
-    // The input layout is used by the Input Assembler so that it knows how to
-    // read the vertex data bound to it.
-    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-
     // create a pipeline state object (PSO)
     // In a real application, you will have many pso's. for each different
     // shader or different combinations of shaders, different blend states or
@@ -1145,30 +1228,61 @@ static void InitFrameResources()
     // pso that only outputs data with the stream output, and not on a render
     // target, which means you would not need anything after the stream output.
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout.NumElements = _countof(inputLayout);
-    psoDesc.InputLayout.pInputElementDescs = inputLayout;
     psoDesc.pRootSignature = g_RootSignature.Get();
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
+                                   // TODO: for G buffer here set 4 RT
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.SampleDesc.Count = 1;  // must be the same sample description as the
-                                   // swapchain and depth/stencil buffer
-    psoDesc.SampleDesc.Quality = 0;
-    // sample mask has to do with multi-sampling. 0xffffffff means point
-    // sampling is done
-    psoDesc.SampleMask = 0xffffffff;
-    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
-    SetDefaultBlendDesc(psoDesc.BlendState);
-    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
-    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
 
     // create the pso
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(g_Device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::Basic].Attach(pipelineStateObject);
+  }
+
+  // Mesh Shader Pipeline State for static objects
+  {
+    // Mesh Shader
+    auto meshShaderBlob = ReadData(GetAssetFullPath(L"MeshletMS.cso").c_str());
+    D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
+                                        meshShaderBlob.size()};
+
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"MeshletPS.cso").c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
+                                         pixelShaderBlob.size()};
+
+    D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.MS = meshShader;
+    psoDesc.PS = pixelShader;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
+
+    auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
+    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
+    streamDesc.pPipelineStateSubobjectStream = &psoStream;
+    streamDesc.SizeInBytes = sizeof(psoStream);
+
+    // create the pso
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreatePipelineState(&streamDesc,
+                                           IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::BasicMS].Attach(pipelineStateObject);
   }
 
   // Pipeline State for skinned objects
@@ -1208,15 +1322,14 @@ static void InitFrameResources()
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.SampleDesc.Count = 1;
-    psoDesc.SampleDesc.Quality = 0;
-    psoDesc.SampleMask = 0xffffffff;
-    SetDefaultRasterizerDesc(psoDesc.RasterizerState);
-    SetDefaultBlendDesc(psoDesc.BlendState);
-    psoDesc.NumRenderTargets = 1;
-    SetDefaultDepthStencilDesc(psoDesc.DepthStencilState);
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
 
     // Create the PSO
     ID3D12PipelineState* pipelineStateObject;
@@ -1342,15 +1455,7 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
 template <typename T>
 static void LoadMesh3D(Mesh3D<T>* mesh)
 {
-  auto geomNeedle = g_Geometries.find(mesh->name);
-  if (geomNeedle == std::end(g_Geometries)) {
-    printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
-    mesh->geometry = CreateGeometry(mesh);
-  } else {
-    printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
-    mesh->geometry = &geomNeedle->second;
-  }
-
+  // first loop subsets and create textures (and soon to be materials)
   for (auto& subset : mesh->subsets) {
     // TODO: get assets path
     std::string name(subset.name);
@@ -1365,6 +1470,17 @@ static void LoadMesh3D(Mesh3D<T>* mesh)
       printf("TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
     }
   }
+
+  // then we can create geometry. and have a buffer containing a descriptor
+  // index per meshlet to a material
+  auto geomNeedle = g_Geometries.find(mesh->name);
+  if (geomNeedle == std::end(g_Geometries)) {
+    printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
+    mesh->geometry = CreateGeometry(mesh);
+  } else {
+    printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
+    mesh->geometry = &geomNeedle->second;
+  }
 }
 
 template <typename T>
@@ -1372,109 +1488,222 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 {
   Geometry geom;
 
+  std::array<D3D12_RESOURCE_BARRIER, 6> postUploadBarriers;
+
   // Vertex Buffer
   {
     const size_t vBufferSize = mesh->VertexBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vBufferSize);
 
-    // create default heap
-    // Default heap is memory on the GPU. Only the GPU has access to this
-    // memory. To get data into this heap, we will have to upload the data using
-    // an upload heap
-    D3D12MA::ALLOCATION_DESC vertexBufferAllocDesc = {};
-    vertexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-    geom.m_VertexBuffer.CreateResource(
-        &vertexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize),
-        D3D12_RESOURCE_STATE_COPY_DEST);
+    geom.m_VertexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                        &bufferDesc);
 
     geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
 
-    // create upload heap
-    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
-    // can read from it. We will upload the vertex buffer using this heap to the
-    // default heap
-    D3D12MA::ALLOCATION_DESC vBufferUploadAllocDesc = {};
-    vBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    geom.m_VertexUploadBuffer.CreateResource(
-        &vBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vBufferSize));
-
-    geom.m_VertexUploadBuffer.SetName("Vertex Buffer Upload: " + mesh->name);
-
-    // store vertex buffer in upload heap
     D3D12_SUBRESOURCE_DATA vertexData = {};
     vertexData.pData = reinterpret_cast<BYTE*>(mesh->vertices.data());
     vertexData.RowPitch = vBufferSize;
     vertexData.SlicePitch = vBufferSize;
 
-    // we are now creating a command with the command list to copy the data from
-    // the upload heap to the default heap
-    geom.m_VertexBuffer.CopyFrom(
-        g_CommandList.Get(),
-        geom.m_VertexUploadBuffer.resource.Get(),
-        &vertexData);
-
-    // transition the vertex buffer data from copy destination state to vertex
-    // buffer state
-    geom.m_VertexBuffer.Transition(
-        g_CommandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    geom.m_VertexBuffer.Upload(g_CommandList.Get(), &vertexData);
+    postUploadBarriers[0] = geom.m_VertexBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // create a vertex buffer view
+    // TODO: useless when we go full bindless (missing: skinned models)
     geom.m_VertexBufferView.BufferLocation = geom.m_VertexBuffer.GpuAddress();
     geom.m_VertexBufferView.StrideInBytes = sizeof(T);
     geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
+
+    // create a descriptor for bindless
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = mesh->vertices.size();
+    srvDesc.Buffer.StructureByteStride = sizeof(T);
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+    geom.m_VertexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(), &srvDesc,
+                                       geom.m_VertexBuffer.DescriptorHandle());
   }
 
-  // Index Buffer
+  // Index Buffer (not used by mesh shader pipeline)
   {
-    // m_CubeIndexCount = mesh->header.numIndices;
     size_t iBufferSize = mesh->IndexBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(iBufferSize);
 
-    // create default heap to hold index buffer
-    D3D12MA::ALLOCATION_DESC indexBufferAllocDesc = {};
-    indexBufferAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-    geom.m_IndexBuffer.CreateResource(
-        &indexBufferAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize),
-        D3D12_RESOURCE_STATE_COPY_DEST);
+    geom.m_IndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                       &bufferDesc);
 
     geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
 
-    // create upload heap to upload index buffer
-    D3D12MA::ALLOCATION_DESC iBufferUploadAllocDesc = {};
-    iBufferUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-    geom.m_IndexUploadBuffer.CreateResource(
-        &iBufferUploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(iBufferSize));
-
-    geom.m_IndexUploadBuffer.SetName("Index Buffer Upload: " + mesh->name);
-
-    // store index buffer in upload heap
     D3D12_SUBRESOURCE_DATA indexData = {};
-    indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
     indexData.RowPitch = iBufferSize;
     indexData.SlicePitch = iBufferSize;
+    indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
 
-    // we are now creating a command with the command list to copy the data from
-    // the upload heap to the default heap
-    geom.m_IndexBuffer.CopyFrom(
-        g_CommandList.Get(),
-        geom.m_IndexUploadBuffer.resource.Get(),
-        &indexData);
-
-    // transition the index buffer data from copy destination state to index
-    // buffer state
-    geom.m_IndexBuffer.Transition(g_CommandList.Get(),
-                                  D3D12_RESOURCE_STATE_COPY_DEST,
-                                  D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    geom.m_IndexBuffer.Upload(g_CommandList.Get(), &indexData);
+    postUploadBarriers[1] =
+        geom.m_IndexBuffer.Transition(D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
     // create a index buffer view
     geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
     geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
     geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
   }
+
+  // Meshlet Buffer
+  {
+    const size_t bufferSize = mesh->MeshletBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                         &bufferDesc);
+    geom.m_MeshletBuffer.SetName("Meshlet Buffer: " + mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->meshlets.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[2] = geom.m_MeshletBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {.FirstElement = 0,
+                   .NumElements = static_cast<UINT>(mesh->meshlets.size()),
+                   .StructureByteStride = sizeof(Meshlet),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(geom.m_MeshletBuffer.Resource(),
+                                       &srvDesc,
+                                       geom.m_MeshletBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Index Buffer
+  {
+    const size_t bufferSize = mesh->MeshletIndexBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+    geom.m_MeshletIndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                              &bufferDesc);
+    geom.m_MeshletIndexBuffer.SetName("Meshlet Index Buffer: " + mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->uniqueVertexIB.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletIndexBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[3] = geom.m_MeshletIndexBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {.FirstElement = 0,
+                   .NumElements =
+                       static_cast<UINT>(mesh->MeshletIndexBufferNumElements()),
+                   .StructureByteStride = sizeof(UINT),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletIndexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletIndexBuffer.Resource(), &srvDesc,
+        geom.m_MeshletIndexBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Primitive Buffer
+  {
+    const size_t bufferSize = mesh->MeshletPrimitiveBufferSize();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletPrimitiveBuffer.CreateResources(g_Allocator.Get(),
+                                                  &bufferDesc, &bufferDesc);
+    geom.m_MeshletPrimitiveBuffer.SetName("Meshlet Primitive Buffer: " +
+                                          mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(mesh->primitiveIndices.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletPrimitiveBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[4] = geom.m_MeshletPrimitiveBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = static_cast<UINT>(mesh->primitiveIndices.size()),
+            .StructureByteStride = sizeof(MeshletTriangle),
+            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletPrimitiveBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletPrimitiveBuffer.Resource(), &srvDesc,
+        geom.m_MeshletPrimitiveBuffer.DescriptorHandle());
+  }
+
+  // Meshlet Material Buffer
+  {
+    // CPU buffer
+    std::vector<UINT> meshletMaterials(mesh->meshlets.size());
+
+    for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
+      auto subset = mesh->meshletSubsetIndices[mi];
+
+      meshletMaterials[mi] = subset->texture->m_Buffer.DescriptorIndex();
+    }
+
+    // GPU buffer
+    const size_t bufferSize = meshletMaterials.size() * sizeof(UINT);
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    geom.m_MeshletMaterialBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
+                                                 &bufferDesc);
+    geom.m_MeshletMaterialBuffer.SetName("Meshlet Material Buffer: " +
+                                         mesh->name);
+
+    D3D12_SUBRESOURCE_DATA data{
+        .pData = reinterpret_cast<BYTE*>(meshletMaterials.data()),
+        .RowPitch = static_cast<LONG_PTR>(bufferSize),
+        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
+
+    geom.m_MeshletMaterialBuffer.Upload(g_CommandList.Get(), &data);
+    postUploadBarriers[5] = geom.m_MeshletMaterialBuffer.Transition(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {.FirstElement = 0,
+                   .NumElements = static_cast<UINT>(meshletMaterials.size()),
+                   .StructureByteStride = sizeof(UINT),
+                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+
+    geom.m_MeshletMaterialBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    g_Device->CreateShaderResourceView(
+        geom.m_MeshletMaterialBuffer.Resource(), &srvDesc,
+        geom.m_MeshletMaterialBuffer.DescriptorHandle());
+  }
+
+  g_CommandList->ResourceBarrier(postUploadBarriers.size(),
+                                 postUploadBarriers.data());
 
   g_Geometries[mesh->name] = geom;
 
@@ -1490,13 +1719,6 @@ static Texture* CreateTexture(std::string name)
       CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
   textureDesc.MipLevels = 1;
 
-  D3D12MA::ALLOCATION_DESC textureAllocDesc = {};
-  textureAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-
-  tex.m_Buffer.CreateResource(&textureAllocDesc, &textureDesc,
-                              D3D12_RESOURCE_STATE_COPY_DEST);
-  tex.m_Buffer.SetName("Texture: " + name);
-
   UINT64 textureUploadBufferSize;
   g_Device->GetCopyableFootprints(&textureDesc,
                                   0,        // FirstSubresource
@@ -1507,22 +1729,19 @@ static Texture* CreateTexture(std::string name)
                                   nullptr,  // pRowSizeInBytes
                                   &textureUploadBufferSize);  // pTotalBytes
 
-  D3D12MA::ALLOCATION_DESC textureUploadAllocDesc = {};
-  textureUploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-
-  tex.m_UploadBuffer.CreateResource(
-      &textureUploadAllocDesc,
-      &CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize));
+  auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize);
+  tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
+  tex.m_Buffer.SetName("Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = tex.pixels.data();
   textureSubresourceData.RowPitch = tex.BytesPerRow();
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
-  tex.m_Buffer.CopyFrom(g_CommandList.Get(), tex.m_UploadBuffer.resource.Get(),
-                        &textureSubresourceData);
-  tex.m_Buffer.Transition(g_CommandList.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  tex.m_Buffer.Upload(g_CommandList.Get(), &textureSubresourceData);
+  auto barrier = tex.m_Buffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  g_CommandList->ResourceBarrier(1, &barrier);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -1530,10 +1749,9 @@ static Texture* CreateTexture(std::string name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  tex.index = g_SrvDescHeapAlloc.Alloc(&tex.srvCpuDescHandle);
-
-  g_Device->CreateShaderResourceView(tex.m_Buffer.resource.Get(), &srvDesc,
-                                     tex.srvCpuDescHandle);
+  tex.m_Buffer.AllocDescriptor(g_SrvDescHeapAlloc);
+  g_Device->CreateShaderResourceView(tex.m_Buffer.Resource(), &srvDesc,
+                                     tex.m_Buffer.DescriptorHandle());
 
   g_Textures[name] = tex;
 

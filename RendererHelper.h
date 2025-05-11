@@ -1,14 +1,5 @@
 #pragma once
 
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <chrono>
-#include <wrl.h>
-#include <shlwapi.h>
-
 inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
 {
   if (path == nullptr) {
@@ -73,37 +64,11 @@ inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
   return blob;
 }
 
-#define STRINGIZE(x) STRINGIZE2(x)
-#define STRINGIZE2(x) #x
-#define LINE_STRING STRINGIZE(__LINE__)
-#define CHECK_BOOL(expr)                                              \
-  do {                                                                \
-    if (!(expr)) {                                                    \
-      assert(0 && #expr);                                             \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): ( " #expr \
-                                        " ) == false");               \
-    }                                                                 \
-  } while (false)
-#define CHECK_HR(expr)                                                      \
-  do {                                                                      \
-    if (FAILED(expr)) {                                                     \
-      assert(0 && #expr);                                                   \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr \
-                                        " )");                              \
-    }                                                                       \
-  } while (false)
+static const D3D12_RANGE EMPTY_RANGE = {0, 0};
 
 const uint32_t VENDOR_ID_AMD = 0x1002;
 const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
 const uint32_t VENDOR_ID_INTEL = 0x8086;
-
-template <typename T>
-inline constexpr T AlignUp(T val, T align)
-{
-  return (val + align - 1) / align * align;
-}
-
-static const D3D12_RANGE EMPTY_RANGE = {0, 0};
 
 static const wchar_t* VendorIDToStr(uint32_t vendorID)
 {
@@ -157,57 +122,6 @@ static std::wstring SizeToStr(size_t size)
   return result;
 }
 
-static void SetDefaultRasterizerDesc(D3D12_RASTERIZER_DESC& outDesc)
-{
-  outDesc.FillMode = D3D12_FILL_MODE_SOLID;
-  outDesc.CullMode = D3D12_CULL_MODE_BACK;
-  outDesc.FrontCounterClockwise = FALSE;
-  outDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-  outDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-  outDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-  outDesc.DepthClipEnable = TRUE;
-  outDesc.MultisampleEnable = FALSE;
-  outDesc.AntialiasedLineEnable = FALSE;
-  outDesc.ForcedSampleCount = 0;
-  outDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-}
-
-static void SetDefaultBlendDesc(D3D12_BLEND_DESC& outDesc)
-{
-  outDesc.AlphaToCoverageEnable = FALSE;
-  outDesc.IndependentBlendEnable = FALSE;
-
-  const D3D12_RENDER_TARGET_BLEND_DESC defaultRenderTargetBlendDesc = {
-      FALSE,
-      FALSE,
-      D3D12_BLEND_ONE,
-      D3D12_BLEND_ZERO,
-      D3D12_BLEND_OP_ADD,
-      D3D12_BLEND_ONE,
-      D3D12_BLEND_ZERO,
-      D3D12_BLEND_OP_ADD,
-      D3D12_LOGIC_OP_NOOP,
-      D3D12_COLOR_WRITE_ENABLE_ALL};
-
-  for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
-    outDesc.RenderTarget[i] = defaultRenderTargetBlendDesc;
-}
-
-static void SetDefaultDepthStencilDesc(D3D12_DEPTH_STENCIL_DESC& outDesc)
-{
-  outDesc.DepthEnable = TRUE;
-  outDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-  outDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-  outDesc.StencilEnable = FALSE;
-  outDesc.StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK;
-  outDesc.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
-  const D3D12_DEPTH_STENCILOP_DESC defaultStencilOp = {
-      D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP,
-      D3D12_COMPARISON_FUNC_ALWAYS};
-  outDesc.FrontFace = defaultStencilOp;
-  outDesc.BackFace = defaultStencilOp;
-}
-
 static std::wstring ConvertToWstring(std::string in)
 {
   size_t newsize = std::strlen(in.c_str()) + 1;
@@ -219,80 +133,3 @@ static std::wstring ConvertToWstring(std::string in)
 
   return out;
 }
-
-struct GPUSelection {
-  UINT32 Index = UINT32_MAX;
-  std::wstring Substring;
-};
-
-class DXGIUsage
-{
-public:
-  void Init() { CHECK_HR(CreateDXGIFactory1(IID_PPV_ARGS(&m_DXGIFactory))); }
-
-  IDXGIFactory4* GetDXGIFactory() const { return m_DXGIFactory; }
-
-  void PrintAdapterList() const
-  {
-    UINT index = 0;
-    IDXGIAdapter1* adapter;
-
-    while (m_DXGIFactory->EnumAdapters1(index, &adapter) !=
-           DXGI_ERROR_NOT_FOUND) {
-      DXGI_ADAPTER_DESC1 desc;
-      adapter->GetDesc1(&desc);
-
-      const bool isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
-      const wchar_t* const suffix = isSoftware ? L" (SOFTWARE)" : L"";
-      wprintf(L"Adapter %u: %s%s\n", index, desc.Description, suffix);
-
-      index++;
-    }
-  }
-  // If failed, returns null pointer.
-  IDXGIAdapter1* CreateAdapter(const GPUSelection& gpuSelection) const
-  {
-    IDXGIAdapter1* adapter = NULL;
-
-    if (gpuSelection.Index != UINT32_MAX) {
-      // Cannot specify both index and name.
-      if (!gpuSelection.Substring.empty()) {
-        return NULL;
-      }
-
-      CHECK_HR(m_DXGIFactory->EnumAdapters1(gpuSelection.Index, &adapter));
-      return adapter;
-    }
-
-    if (!gpuSelection.Substring.empty()) {
-      IDXGIAdapter1* tmpAdapter;
-
-      for (UINT i = 0;
-           m_DXGIFactory->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND;
-           i++) {
-        DXGI_ADAPTER_DESC1 desc;
-        tmpAdapter->GetDesc1(&desc);
-
-        if (StrStrI(desc.Description, gpuSelection.Substring.c_str())) {
-          // Second matching adapter found - error.
-          if (adapter) {
-            return NULL;
-          }
-
-          // First matching adapter found.
-          adapter = tmpAdapter;
-        }
-      }
-
-      // Found or not, return it.
-      return adapter;
-    }
-
-    // Select first one.
-    m_DXGIFactory->EnumAdapters1(0, &adapter);
-    return adapter;
-  }
-
-private:
-  IDXGIFactory4* m_DXGIFactory;
-};
