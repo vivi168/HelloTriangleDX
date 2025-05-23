@@ -526,7 +526,7 @@ void Update(float time, float dt)
 
   // Per object constant buffer
   {
-    const XMMATRIX projection = XMMatrixPerspectiveFovLH(
+    const XMMATRIX projection = XMMatrixPerspectiveFovRH(
         45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
 
     XMMATRIX view = g_Scene.camera->LookAt();
@@ -1237,6 +1237,7 @@ static void InitFrameResources()
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
@@ -1268,6 +1269,7 @@ static void InitFrameResources()
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;
@@ -1326,6 +1328,7 @@ static void InitFrameResources()
     psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     psoDesc.SampleMask = UINT_MAX;

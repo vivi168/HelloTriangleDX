@@ -53,7 +53,7 @@ struct {
 
 Player::Player()
 {
-  lookYaw = XM_PIDIV2;
+  lookYaw = -XM_PIDIV2;
   lookPitch = 0.0f;
   floorNormalY = 1.0f;
 
@@ -63,6 +63,7 @@ Player::Player()
   currentState = State::Standing;
 }
 
+// TODO: DRY this with camera (Controller class?)
 void Player::ProcessKeyboard(float dt)
 {
   if (Input::IsHeld(Input::KB::Up)) {
@@ -72,10 +73,10 @@ void Player::ProcessKeyboard(float dt)
     lookPitch -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Left)) {
-    lookYaw += PLAYER_ROT_SPEED * dt;
+    lookYaw -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Right)) {
-    lookYaw -= PLAYER_ROT_SPEED * dt;
+    lookYaw += PLAYER_ROT_SPEED * dt;
   }
 
   // TODO: align this with Camera.cpp
@@ -90,8 +91,8 @@ void Player::ProcessKeyboard(float dt)
 
   float forwardX = cosf(lookYaw);
   float forwardZ = sinf(lookYaw);
-  float rightX = sinf(lookYaw);
-  float rightZ = -cosf(lookYaw);
+  float rightX = -sinf(lookYaw);
+  float rightZ = cosf(lookYaw);
 
   velocity = {0.f, 0.f, 0.f};
 
