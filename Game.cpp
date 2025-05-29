@@ -53,7 +53,7 @@ struct {
 
 Player::Player()
 {
-  lookYaw = XM_PIDIV2;
+  lookYaw = -XM_PIDIV2;
   lookPitch = 0.0f;
   floorNormalY = 1.0f;
 
@@ -63,6 +63,7 @@ Player::Player()
   currentState = State::Standing;
 }
 
+// TODO: DRY this with camera (Controller class?)
 void Player::ProcessKeyboard(float dt)
 {
   if (Input::IsHeld(Input::KB::Up)) {
@@ -72,10 +73,10 @@ void Player::ProcessKeyboard(float dt)
     lookPitch -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Left)) {
-    lookYaw += PLAYER_ROT_SPEED * dt;
+    lookYaw -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Right)) {
-    lookYaw -= PLAYER_ROT_SPEED * dt;
+    lookYaw += PLAYER_ROT_SPEED * dt;
   }
 
   // TODO: align this with Camera.cpp
@@ -90,8 +91,8 @@ void Player::ProcessKeyboard(float dt)
 
   float forwardX = cosf(lookYaw);
   float forwardZ = sinf(lookYaw);
-  float rightX = sinf(lookYaw);
-  float rightZ = -cosf(lookYaw);
+  float rightX = -sinf(lookYaw);
+  float rightZ = cosf(lookYaw);
 
   velocity = {0.f, 0.f, 0.f};
 
@@ -177,7 +178,7 @@ void Game::Init()
 
   treeMesh.Read("assets/tree.objb");
   yukaMesh.Read("assets/yuka.objb");
-  houseMesh.Read("assets/tower.objb");
+  //houseMesh.Read("assets/tower.objb");
   terrainMesh.Read("assets/terrain.objb");
   cubeMesh.Read("assets/cube.objb");
   unitCubeMesh.Read("assets/plateform.objb");
@@ -208,7 +209,7 @@ void Game::Init()
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
   yuka.meshes.push_back(&yukaMesh);
-  house.meshes.push_back(&houseMesh);
+  //house.meshes.push_back(&houseMesh);
   terrain.meshes.push_back(&terrainMesh);
   cube.meshes.push_back(&cubeMesh);
   cylinder.meshes.push_back(&cylinderMesh);
@@ -234,7 +235,7 @@ void Game::Init()
   bigTree.Translate(-7.f, 0.0f, 14.f);
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
-  house.Translate(20.f, 0.f, 50.f);
+  //house.Translate(20.f, 0.f, 50.f);
   stairs.Translate(-50.f, 0.f, 20.f);
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
@@ -257,7 +258,7 @@ void Game::Init()
   Renderer::AppendToScene(&bigTree);
   Renderer::AppendToScene(&smallTree);
   Renderer::AppendToScene(&yuka);
-  Renderer::AppendToScene(&house);
+  //Renderer::AppendToScene(&house);
   Renderer::AppendToScene(&terrain);
   Renderer::AppendToScene(&cube);
   Renderer::AppendToScene(&cylinder);
@@ -266,12 +267,12 @@ void Game::Init()
 
   Renderer::AppendToScene(&human);
   Renderer::AppendToScene(&boar);
-  //Renderer::AppendToScene(&sponza);
+  Renderer::AppendToScene(&sponza);
   Renderer::AppendToScene(&cesium);
 
   // static
   collider.AppendModel(&terrain);
-  collider.AppendModel(&house);
+  //collider.AppendModel(&house);
   collider.AppendModel(&yuka);
   collider.AppendModel(&stairs);
 
