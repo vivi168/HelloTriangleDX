@@ -16,7 +16,7 @@
 #include <shlwapi.h>
 
 #include <initguid.h>
-#include <d3d12.h>
+#include <d3d12.h> // TODO: this is in fact coming DirectX-Headers.
 #include <dxgi1_6.h>
 #include <DirectXMath.h>
 
@@ -52,6 +52,10 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+
+static_assert(sizeof(WORD) == 2);
+static_assert(sizeof(DWORD) == 4);
+static_assert(sizeof(UINT) == 4);
 
 #define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x

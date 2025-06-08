@@ -11,6 +11,7 @@ from raw import RawImage
 from typing import List
 
 MAX_TEXTURE_NAME_LEN = 64
+SKIP_TEXTURES = True
 
 
 class Vec2:
@@ -79,6 +80,15 @@ class Vertex:
     def pack(self):
         return self.position.pack_f32() + self.normal.pack_f32() + Vec4().pack() + self.uv.pack_f32()
 
+    def pack_positions(self):
+        return self.position.pack_f32()
+
+    def pack_normals(self):
+        return self.normal.pack_f32()
+
+    def pack_uvs(self):
+        return self.uv.pack_f32()
+
     def __str__(self):
         return "({}) ({}) ({})".format(self.position, self.normal, self.uv)
 
@@ -106,6 +116,13 @@ class SkinnedVertex(Vertex):
 
         return vertex_data + weights_data + indices_data
 
+    def pack_weights_and_indices(self):
+        padded_weights = list(self.weights) + [0.0] * (MAX_WEIGHTS - len(self.weights))
+        padded_indices = list(self.joint_indices) + [0] * (MAX_WEIGHTS - len(self.joint_indices))
+        weights_data = struct.pack("<BBBB", *padded_weights[:MAX_WEIGHTS])
+        indices_data = struct.pack("<BBBB", *padded_indices[:MAX_WEIGHTS])
+
+        return weights_data + indices_data
 
 class Triangle:
     def __init__(self, vi1=0, vi2=0, vi3=0):
@@ -126,7 +143,7 @@ class Material:
 
         raw_texture = "{}.raw".format(os.path.splitext(os.path.basename(texture))[0])
         if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:  # null terminated
-            exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture)), MAX_TEXTURE_NAME_LEN)
+            exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_TEXTURE_NAME_LEN))
         self.original_texture_name = texture
         self.texture_name = raw_texture
 
@@ -161,6 +178,8 @@ class Mesh:
         self.vertices: List[Vertex] = []
         self.tris: List[Triangle] = []
         self.subsets: List[Subset] = []
+        self.skinned = False
+        self.parent_node = -1
 
         self.translation = translation
         self.scale = scale
@@ -169,10 +188,24 @@ class Mesh:
         data = bytearray()
 
         # print(len(self.vertices), len(self.tris) * 3, len(self.subsets))
+        # TODO: add parent_node and bounding box
         data += struct.pack("<III", len(self.vertices), len(self.tris) * 3, len(self.subsets))
 
+        positions_data = bytearray()
+        normals_data = bytearray()
+        uvs_data = bytearray()
+        weights_and_indices = bytearray()
+
         for v in self.vertices:
-            data += v.pack()
+            # data += v.pack()
+            positions_data += v.pack_positions()
+            normals_data += v.pack_normals()
+            uvs_data += v.pack_uvs()
+
+            if self.skinned:
+                weights_and_indices += v.pack_weights_and_indices()
+
+        data += (positions_data + normals_data + uvs_data + weights_and_indices)
 
         for t in self.tris:
             data += t.pack()
@@ -184,9 +217,13 @@ class Mesh:
             f.write(data)
 
     def convert_textures(self):
+        if SKIP_TEXTURES:
+            return
+
         for s in self.subsets:
             m = s.material
             # print("{} -> {}".format(m.original_texture_name, m.texture_name))
+            # TODO: use DDS instead of uncompressed RAW loul
             m.convert_texture()
 
 
@@ -296,6 +333,13 @@ class GLTFConvert:
         self.nodes = self.gltf["nodes"]
         self.mesh_nodes = [i for i, n in enumerate(self.nodes) if "mesh" in n]
         self.skin_nodes = [i for i, n in enumerate(self.nodes) if "skin" in n]
+        self.mesh_parent_nodes = {}
+        for i, n in enumerate(self.nodes):
+            if "children" in n:
+                for mn in self.mesh_nodes:
+                    if mn in n['children']:
+                        self.mesh_parent_nodes[mn] = i
+
         self.skin_indices = list(set([self.nodes[n]["skin"] for n in self.skin_nodes]))
         self.meshes = self.gltf["meshes"]
         self.skins = self.gltf.get("skins", [])
@@ -366,6 +410,7 @@ class GLTFConvert:
 
         material = self.materials[material_id]
         pbr_mr = material["pbrMetallicRoughness"]
+        # import pdb; pdb.set_trace()
         base_color_texture_info = pbr_mr["baseColorTexture"]
 
         texture = self.textures[base_color_texture_info["index"]]
@@ -375,11 +420,12 @@ class GLTFConvert:
 
         return Material(os.path.join(self.cwd, file))
 
-    def process_mesh(self, mi):
+    def process_mesh(self, mi, skinned):
         mesh = self.meshes[mi]
 
         primitives = mesh["primitives"]
         m = Mesh()
+        m.skinned = skinned
 
         istart = 0
         vstart = 0
@@ -419,7 +465,7 @@ class GLTFConvert:
             normals = [Vec3(v[0], v[1], v[2]) for v in values]
 
             # if attributes.get('TANGENT', None) is not None:
-            #     pass # TODO
+            #     pass # TODO compute if not present
 
             # if attributes.get('COLOR_0', None) is not None:
             #     pass # TODO
@@ -432,7 +478,7 @@ class GLTFConvert:
 
             assert len(positions) == len(normals) == len(uvs) == num_vertices
 
-            if self.skinned:
+            if skinned:
                 assert attributes.get("JOINTS_0") is not None
                 assert attributes.get("WEIGHTS_0") is not None
 
@@ -554,13 +600,17 @@ class GLTFConvert:
             filename = "{}_mesh_{}.mesh".format(self.original_filename, i + 1)
             print("mesh #{}: {}".format(i + 1, filename), end="")
 
-            if self.skinned:
+            skinned = self.skinned and node.get("skin") is not None
+
+            if skinned:
                 skin_idx = self.skin_indices.index(node["skin"])
                 print(" (-> skin #{})".format(skin_idx + 1))
             else:
                 print()
 
-            m = self.process_mesh(node["mesh"])
+            m = self.process_mesh(node["mesh"], skinned)
+            if self.skinned:
+                m.parent_node = self.mesh_parent_nodes[ni]
             m.pack(filename)
             m.convert_textures()
 
@@ -569,6 +619,7 @@ class GLTFConvert:
 
         nodes_static_transforms = {}
         missing_bones = set()
+        bh = {}
 
         # skins
         for i in self.skin_indices:

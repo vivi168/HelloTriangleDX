@@ -148,18 +148,23 @@ struct Mesh3D {
   } header;
 
   static_assert(std::is_base_of_v<Vertex, T>);
-  std::vector<T> vertices;
-  std::vector<uint16_t> indices;
+  std::vector<T> vertices; // TODO: TMP
+  std::vector<uint16_t> indices; // TODO: TMP
   std::vector<Subset> subsets;
+
+  std::vector<DirectX::XMFLOAT3> positions;
+  std::vector<DirectX::XMFLOAT3> normals;
+  std::vector<DirectX::XMFLOAT2> uvs;
+  std::vector<DirectX::XMUINT2> blendWeightsAndIndices;
 
   // mesh shader specific
   std::vector<DirectX::Meshlet> meshlets;
-  std::vector<uint8_t> uniqueVertexIB;
+  std::vector<uint8_t> uniqueVertexIndices; // underlying indices are uint32
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
   std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
 
   std::string name;
-  Renderer::Geometry* geometry = nullptr;  // GPU data
+  Renderer::Geometry* geometry = nullptr;  // GPU data // TODO: TMP
   Skin* skin = nullptr;                    // in case of skinned mesh
 
   void Read(std::string filename)
@@ -172,17 +177,48 @@ struct Mesh3D {
 
     fread(&header, sizeof(header), 1, fp);
 
-    vertices.resize(header.numVerts);
+    //vertices.resize(header.numVerts); TODO: TMP
+    positions.resize(header.numVerts);
+    normals.resize(header.numVerts);
+    uvs.resize(header.numVerts);
+    if constexpr (std::is_same_v<T, SkinnedVertex>) {
+      blendWeightsAndIndices.resize(header.numVerts);
+    }
     indices.resize(header.numIndices);
     subsets.resize(header.numSubsets);
 
-    fread(vertices.data(), sizeof(T), header.numVerts, fp);
+    fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
+    fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
+    fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
+    if constexpr (std::is_same_v<T, SkinnedVertex>) {
+      fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
+    }
+    // fread(vertices.data(), sizeof(T), header.numVerts, fp);
+    // TODO: TMP
+    {
+      for (int i = 0; i < header.numVerts; i++) {
+        T v;
+        v.position = positions[i];
+        v.normal = normals[i];
+        v.uv = uvs[i];
+
+        if constexpr (std::is_same_v<T, SkinnedVertex>) {
+          auto wj = blendWeightsAndIndices[i];
+          memcpy(v.weights, &wj.x, MAX_WEIGHTS);
+          memcpy(v.joints, &wj.y, MAX_WEIGHTS);
+        }
+
+        vertices.push_back(v);
+
+      }
+    }
     fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
     // TODO: build bounding sphere
+    // TODO: move this out of runtime
     {
-      auto positions = std::make_unique<DirectX::XMFLOAT3[]>(vertices.size());
+      // TODO: modify gltf.py export to have 32 bits indices.
       std::vector<uint32_t> indices32(indices.size());
       std::vector<MeshletSubset> subsets_st(subsets.size());
 
@@ -199,22 +235,19 @@ struct Mesh3D {
         }
       }
 
-      for (size_t j = 0; j < vertices.size(); ++j)
-        positions[j] = vertices[j].position;
-
       std::vector<MeshletSubset> meshletSubsets(header.numSubsets);  
 
       constexpr size_t maxPrims = 124;
       constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
           indices32.data(), indices32.size() / 3,
-          positions.get(), vertices.size(),
+          positions.data(), vertices.size(),
           subsets_st.data(), subsets_st.size(),
           nullptr,
-          meshlets, uniqueVertexIB, primitiveIndices,
+          meshlets, uniqueVertexIndices, primitiveIndices,
           meshletSubsets.data(), maxVerts, maxPrims));
 
-      assert(uniqueVertexIB.size() % 4 == 0);
+      assert(uniqueVertexIndices.size() % 4 == 0);
 
       meshletSubsetIndices.resize(meshlets.size());
       for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
@@ -222,6 +255,9 @@ struct Mesh3D {
         auto end = start + meshletSubsets[i].second;
 
         for (uint32_t j = start; j < end; j++) {
+          // TODO: this is dangerous. if subsets changes (push_back(),...) all pointers are invalidated.
+          // instead store an index ? if we do this offline, we won't have a choice
+          // if we do it offline, add a fifth member to Meshlet struct?
           meshletSubsetIndices[j] = &subsets[i];
         }
       }
@@ -230,7 +266,25 @@ struct Mesh3D {
     fclose(fp);
   }
 
+  // TODO: TMP
   size_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
+
+  size_t PositionsBufferSize() const
+  {
+    return sizeof(positions[0]) * header.numVerts;
+  }
+  size_t NormalsBufferSize() const
+  {
+    return sizeof(normals[0]) * header.numVerts;
+  }
+  size_t UvsBufferSize() const
+  {
+    return sizeof(uvs[0]) * header.numVerts;
+  }
+  size_t BlendWeightsAndIndicesBufferSize() const
+  {
+    return sizeof(blendWeightsAndIndices[0]) * header.numVerts;
+  }
 
   size_t IndexBufferSize() const
   {
@@ -241,7 +295,7 @@ struct Mesh3D {
 
   size_t MeshletIndexBufferNumElements() const
   {
-    return DivRoundUp(uniqueVertexIB.size(), sizeof(UINT));
+    return DivRoundUp(uniqueVertexIndices.size(), sizeof(UINT));
   }
 
   size_t MeshletIndexBufferSize() const
