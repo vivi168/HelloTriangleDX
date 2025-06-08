@@ -1,3 +1,23 @@
+cbuffer FrameConstants : register(b0)
+{
+  float time;
+  float deltaTime;
+
+  uint vertexPositionsBufferId;
+  uint vertexNormalsBufferId;
+  // TODO: tangents
+  uint vertexUVsBufferId;
+  // TODO: blend
+
+  uint meshletsBufferId;
+  uint visibleMeshletsBufferId;
+  uint meshletUniqueIndicesBufferId;
+  uint meshletsPrimitivesBufferId;
+  uint meshletMaterialsBufferId;
+  // TODO: materials
+  uint instancesBufferId;
+};
+
 cbuffer ObjectCb : register(b1)
 {
   float4x4 WorldViewProj;
@@ -7,11 +27,29 @@ cbuffer ObjectCb : register(b1)
 
 cbuffer MeshletConstants : register(b3)
 {
+  uint instanceBufferId;
   uint vertexBufferId;
   uint meshletBufferId;
   uint indexBufferId;
   uint primBufferId;
   uint materialBufferId;
+};
+
+struct MeshInstance {
+  float4x4 WorldViewProj;
+  float4x4 WorldMatrix;
+  float4x4 NormalMatrix;
+
+  uint positionsBufferId;
+  uint normalsBufferId;
+  // TODO: tangents
+  uint uvsBufferId;
+
+  uint meshletBufferId;
+  uint indexBufferId;
+  uint primBufferId;
+  uint materialBufferId;
+  uint pad;
 };
 
 struct Meshlet

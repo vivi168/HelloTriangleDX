@@ -1,5 +1,6 @@
 cbuffer MeshletConstants : register(b3)
 {
+  uint instanceBufferId;
   uint vertexBufferId;
   uint meshletBufferId;
   uint indexBufferId;
