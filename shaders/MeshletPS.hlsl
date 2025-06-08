@@ -17,7 +17,7 @@ struct MS_OUTPUT
 
 SamplerState s0 : register(s0);
 
-float4 main(MS_OUTPUT input) : SV_TARGET
+float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
   uint meshletIndex = input.meshletIndex;
 
@@ -30,11 +30,17 @@ float4 main(MS_OUTPUT input) : SV_TARGET
   if (diffuseColor.a == 0)
     discard;
   
-  float4 meshletColor = float4(
-            float(meshletIndex & 1),
-            float(meshletIndex & 3) / 4,
-            float(meshletIndex & 7) / 8,
-            1.0f);
+  //float4 meshletColor = float4(
+  //          float(meshletIndex & 1),
+  //          float(meshletIndex & 3) / 4,
+  //          float(meshletIndex & 7) / 8,
+  //          1.0f);
+
+  //float4 primitiveColor = float4(
+  //          float(primitiveId & 1),
+  //          float(primitiveId & 3) / 4,
+  //          float(primitiveId & 7) / 8,
+  //          1.0f);
 
   return diffuseColor;
 }

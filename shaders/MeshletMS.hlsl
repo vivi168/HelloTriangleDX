@@ -73,13 +73,19 @@ MS_OUTPUT GetVertexAttributes(uint meshletIndex, uint vertexIndex)
   return vout;
 }
 
+struct PRIM_OUT
+{
+  uint PrimitiveId : SV_PrimitiveID;
+};
+
 [NumThreads(128, 1, 1)]
 [OutputTopology("triangle")]
 void main(
     uint gtid : SV_GroupThreadID,
     uint gid : SV_GroupID,
     out indices uint3 tris[124],
-    out vertices MS_OUTPUT verts[64]
+    out vertices MS_OUTPUT verts[64],
+    out primitives PRIM_OUT prims[124]
 )
 {
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletBufferId];
@@ -90,6 +96,7 @@ void main(
   if (gtid < m.PrimCount)
   {
     tris[gtid] = GetPrimitive(m, gtid);
+    prims[gtid].PrimitiveId = gtid;
   }
 
   if (gtid < m.VertCount)
