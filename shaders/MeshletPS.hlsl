@@ -2,20 +2,6 @@ cbuffer FrameConstants : register(b0)
 {
   float time;
   float deltaTime;
-
-  uint vertexPositionsBufferId;
-  uint vertexNormalsBufferId;
-  // TODO: tangents
-  uint vertexUVsBufferId;
-  // TODO: blend
-
-  uint meshletsBufferId;
-  uint visibleMeshletsBufferId;
-  uint meshletUniqueIndicesBufferId;
-  uint meshletsPrimitivesBufferId;
-  uint meshletMaterialsBufferId;
-  // TODO: materials
-  uint instancesBufferId;
 };
 
 cbuffer MeshletConstants : register(b3)
@@ -27,6 +13,24 @@ cbuffer MeshletConstants : register(b3)
   uint indexBufferId;
   uint primBufferId;
   uint materialBufferId;
+};
+
+cbuffer BuffersDescriptorIndices : register(b4)
+{
+  uint vertexPositionsBufferId;
+  uint vertexNormalsBufferId;
+  // TODO: tangents
+  uint vertexUVsBufferId;
+  // TODO: blend
+
+  uint meshletsBufferId;
+  uint visibleMeshletsBufferId;
+  uint meshletUniqueIndicesBufferId;
+  uint meshletsPrimitivesBufferId;
+  uint meshletMaterialsBufferId;
+
+  // TODO: materials
+  uint instancesBufferId;
 };
 
 struct MeshInstance {

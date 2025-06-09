@@ -17,7 +17,7 @@ enum class PSO { Basic, BasicMS, Skinned, ColliderSurface };
 
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, Count };
+enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, BuffersDescriptorIndices, Count };
 }
 
 struct Material {
@@ -415,20 +415,6 @@ struct FrameContext {
   struct {
     float time;
     float deltaTime;
-
-    UINT vertexPositionsBufferId;
-    UINT vertexNormalsBufferId;
-    // TODO: tangents
-    UINT vertexUVsBufferId;
-    // TODO: blend
-
-    UINT meshletsBufferId;
-    UINT visibleMeshletsBufferId;
-    UINT meshletUniqueIndicesBufferId;
-    UINT meshletsPrimitivesBufferId;
-    UINT meshletMaterialsBufferId;
-    // TODO: materials
-    UINT instancesBufferId;
   } frameConstants;
 
   static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
@@ -548,6 +534,28 @@ struct MeshStore {
   void UpdateInstance(const void* data, size_t size, UINT offset)
   {
     m_Instances.Copy(offset, data, size);
+  }
+
+  static constexpr size_t NumHandles = 9;
+
+  std::array<UINT, 9> BuffersDescriptorIndices() const
+  {
+    std::array<UINT, 9> h;
+
+    h[0] = m_VertexPositions.DescriptorIndex();
+    h[1] = m_VertexNormals.DescriptorIndex();
+    // TODO: tangents
+    h[2] = m_VertexUVs.DescriptorIndex();
+    // TODO: blend
+    h[3] = m_Meshlets.DescriptorIndex();
+    h[4] = m_VisibleMeshlets.DescriptorIndex();
+    h[5] = m_MeshletUniqueIndices.DescriptorIndex();
+    h[6] = m_MeshletPrimitives.DescriptorIndex();
+    h[7] = m_MeshletMaterials.DescriptorIndex();
+    // TODO: materials
+    h[8] = m_Instances.DescriptorIndex();
+
+    return h;
   }
 
   UploadedHeapResource m_VertexPositions;
@@ -781,20 +789,6 @@ void Update(float time, float dt)
   {
     ctx->frameConstants.time = time;
     ctx->frameConstants.deltaTime = dt;
-
-    // TODO: do this only once at the start
-    ctx->frameConstants.vertexPositionsBufferId = g_MeshStore.m_VertexPositions.DescriptorIndex();
-    ctx->frameConstants.vertexNormalsBufferId = g_MeshStore.m_VertexNormals.DescriptorIndex();
-    // TODO: tangents
-    ctx->frameConstants.vertexUVsBufferId = g_MeshStore.m_VertexUVs.DescriptorIndex();
-    // TODO: blend
-    ctx->frameConstants.meshletsBufferId = g_MeshStore.m_Meshlets.DescriptorIndex();
-    ctx->frameConstants.visibleMeshletsBufferId = g_MeshStore.m_VisibleMeshlets.DescriptorIndex();
-    ctx->frameConstants.meshletUniqueIndicesBufferId = g_MeshStore.m_MeshletUniqueIndices.DescriptorIndex();
-    ctx->frameConstants.meshletsPrimitivesBufferId = g_MeshStore.m_MeshletPrimitives.DescriptorIndex();
-    ctx->frameConstants.meshletMaterialsBufferId = g_MeshStore.m_MeshletMaterials.DescriptorIndex();
-    // TODO: materials
-    ctx->frameConstants.instancesBufferId = g_MeshStore.m_Instances.DescriptorIndex();
   }
 
   // Per object constant buffer
@@ -934,6 +928,8 @@ void Render()
 
   g_CommandList->SetGraphicsRoot32BitConstants(
       RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
+  auto h = g_MeshStore.BuffersDescriptorIndices();
+  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices, MeshStore::NumHandles, h.data(), 0);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
@@ -1513,6 +1509,7 @@ static void InitFrameResources()
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
     rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
     rootParameters[RootParameter::PerMeshConstants].InitAsConstants(6, 3);  // b3 // TODO: rework root signature.
+    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumHandles, 4);  // b4 // TODO: rework root signature.
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
