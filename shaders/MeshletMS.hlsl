@@ -18,6 +18,7 @@ cbuffer FrameConstants : register(b0)
   uint instancesBufferId;
 };
 
+// TODO: TMP
 cbuffer ObjectCb : register(b1)
 {
   float4x4 WorldViewProj;
@@ -27,7 +28,8 @@ cbuffer ObjectCb : register(b1)
 
 cbuffer MeshletConstants : register(b3)
 {
-  uint instanceBufferId;
+  uint instanceBufferOffset;
+  // TOODO: TMP below useless
   uint vertexBufferId;
   uint meshletBufferId;
   uint indexBufferId;
@@ -40,15 +42,15 @@ struct MeshInstance {
   float4x4 WorldMatrix;
   float4x4 NormalMatrix;
 
-  uint positionsBufferId;
-  uint normalsBufferId;
+  uint positionsBufferOffset;
+  uint normalsBufferOffset;
   // TODO: tangents
-  uint uvsBufferId;
+  uint uvsBufferOffset;
 
-  uint meshletBufferId;
-  uint indexBufferId;
-  uint primBufferId;
-  uint materialBufferId;
+  uint meshletBufferOffset;
+  uint indexBufferOffset;
+  uint primBufferOffset;
+  uint materialBufferOffset;
   uint pad;
 };
 
@@ -83,7 +85,7 @@ uint3 UnpackPrimitive(uint primitive)
 
 uint3 GetPrimitive(Meshlet m, uint gtid)
 {
-  StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[primBufferId];
+  StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[meshletsPrimitivesBufferId];
   
   return UnpackPrimitive(PrimitiveIndices[m.PrimOffset + gtid]);
 }
@@ -91,22 +93,26 @@ uint3 GetPrimitive(Meshlet m, uint gtid)
 uint GetVertexIndex(Meshlet m, uint localIndex)
 {
   localIndex = m.VertOffset + localIndex;
-  StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[indexBufferId];
+  StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[meshletUniqueIndicesBufferId];
   
   return UniqueVertexIndices[localIndex];
 }
 
-MS_OUTPUT GetVertexAttributes(uint meshletIndex, uint vertexIndex)
+MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex)
 {
-  StructuredBuffer<Vertex> Vertices = ResourceDescriptorHeap[vertexBufferId];
-  Vertex v = Vertices[vertexIndex];
-
+  StructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
+  StructuredBuffer<float3> normals = ResourceDescriptorHeap[vertexNormalsBufferId];
+  StructuredBuffer<float3> uvs = ResourceDescriptorHeap[vertexUVsBufferId];
+  float3 position = positions[mi.positionsBufferOffset + vertexIndex];
+  float3 normal = normals[mi.normalsBufferOffset + vertexIndex];
+  float2 uv = uvs[mi.uvsBufferOffset + vertexIndex];
+  
   MS_OUTPUT vout;
-  vout.pos = mul(float4(v.pos, 1.0f), WorldViewProj);
-  float3 norm = mul(float4(v.normal, 1.0f), NormalMatrix).xyz;
+  vout.pos = mul(float4(position, 1.0f), WorldViewProj);
+  float3 norm = mul(float4(normal, 1.0f), NormalMatrix).xyz;
   vout.normal = normalize(norm);
-  vout.meshletIndex = meshletIndex;
-  vout.texCoord = v.texCoord;
+  vout.meshletIndex = mi.meshletBufferOffset + meshletIndex;
+  vout.texCoord = uv;
 
   return vout;
 }
@@ -126,20 +132,23 @@ void main(
     out primitives PRIM_OUT prims[124]
 )
 {
-  StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletBufferId];
-  Meshlet m = meshlets[gid];
+  StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
+  MeshInstance mi = meshInstances[instanceBufferOffset];
+
+  StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
+  Meshlet m = meshlets[mi.meshletBufferOffset + gid];
   
   SetMeshOutputCounts(m.VertCount, m.PrimCount);
 
   if (gtid < m.PrimCount)
   {
-    tris[gtid] = GetPrimitive(m, gtid);
+    tris[gtid] = GetPrimitive(m, mi.primBufferOffset + gtid);
     prims[gtid].PrimitiveId = gtid;
   }
 
   if (gtid < m.VertCount)
   {
-    uint vertexIndex = GetVertexIndex(m, gtid);
-    verts[gtid] = GetVertexAttributes(gid, vertexIndex);
+    uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
+    verts[gtid] = GetVertexAttributes(mi, gid, vertexIndex);
   }
 }

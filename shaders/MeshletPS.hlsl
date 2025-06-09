@@ -1,11 +1,49 @@
+cbuffer FrameConstants : register(b0)
+{
+  float time;
+  float deltaTime;
+
+  uint vertexPositionsBufferId;
+  uint vertexNormalsBufferId;
+  // TODO: tangents
+  uint vertexUVsBufferId;
+  // TODO: blend
+
+  uint meshletsBufferId;
+  uint visibleMeshletsBufferId;
+  uint meshletUniqueIndicesBufferId;
+  uint meshletsPrimitivesBufferId;
+  uint meshletMaterialsBufferId;
+  // TODO: materials
+  uint instancesBufferId;
+};
+
 cbuffer MeshletConstants : register(b3)
 {
-  uint instanceBufferId;
+  uint instanceBufferOffset;
+  // TOODO: TMP below useless
   uint vertexBufferId;
   uint meshletBufferId;
   uint indexBufferId;
   uint primBufferId;
   uint materialBufferId;
+};
+
+struct MeshInstance {
+  float4x4 WorldViewProj;
+  float4x4 WorldMatrix;
+  float4x4 NormalMatrix;
+
+  uint positionsBufferOffset;
+  uint normalsBufferOffset;
+  // TODO: tangents
+  uint uvsBufferOffset;
+
+  uint meshletBufferOffset;
+  uint indexBufferOffset;
+  uint primBufferOffset;
+  uint materialBufferOffset;
+  uint pad;
 };
 
 struct MS_OUTPUT
@@ -20,9 +58,12 @@ SamplerState s0 : register(s0);
 
 float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+  StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
+  MeshInstance mi = meshInstances[instanceBufferOffset];
+
   uint meshletIndex = input.meshletIndex;
 
-  StructuredBuffer<uint> MaterialIndices = ResourceDescriptorHeap[materialBufferId];
+  StructuredBuffer<uint> MaterialIndices = ResourceDescriptorHeap[meshletMaterialsBufferId];
   uint materialId = MaterialIndices[meshletIndex];
 
   Texture2D tex = ResourceDescriptorHeap[NonUniformResourceIndex(materialId)];

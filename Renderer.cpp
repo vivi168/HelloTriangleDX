@@ -578,7 +578,7 @@ struct MeshStore {
     UINT visibleMeshletsBuffer = 0;
     UINT uniqueIndicesBuffer = 0;
     UINT primitivesBuffer = 0;
-    UINT meshletMaterialsBuffer = 0;
+    UINT meshletMaterialsBuffer = 0; // TODO: useless, same as meshletsBuffer
 
     // meta data
     UINT materialsBuffer = 0;
@@ -992,19 +992,17 @@ void Render()
       g_CommandList->SetGraphicsRootConstantBufferView(
           RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
 
+      // TODO: TMP TO VALIDATE POC
+      auto mi = g_Scene.meshInstanceMap[mesh->name][0];
+
       struct {
-        UINT instanceBufferId;
+        UINT instanceBufferOffset;
         UINT vertexBufferId;
         UINT meshletBufferId;
         UINT indexBufferId;
         UINT primBufferId;
         UINT materialBufferId;
-      } ronre = {0,
-                 geom->m_VertexBuffer.DescriptorIndex(),
-                 geom->m_MeshletBuffer.DescriptorIndex(),
-                 geom->m_MeshletIndexBuffer.DescriptorIndex(),
-                 geom->m_MeshletPrimitiveBuffer.DescriptorIndex(),
-                 geom->m_MeshletMaterialBuffer.DescriptorIndex()};
+      } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data)};
       g_CommandList->SetGraphicsRoot32BitConstants(
           RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
           &ronre, 0);
@@ -1890,7 +1888,7 @@ static void InitFrameResources()
                                               .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numMaterials),
+                                                         .NumElements = static_cast<UINT>(numMeshlets),
                                                          .StructureByteStride = sizeof(UINT),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
       g_MeshStore.m_MeshletMaterials.AllocDescriptor(g_SrvDescHeapAlloc);
