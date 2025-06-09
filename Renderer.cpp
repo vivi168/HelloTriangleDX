@@ -727,7 +727,7 @@ void LoadAssets()
   // TODO: mesh store method
   {
     // TODO transition mesh store buffer for upload
-    
+
     std::array<D3D12_RESOURCE_BARRIER, 8> uploadBarriers;
 
     // vertex data
@@ -944,7 +944,7 @@ void Render()
     g_CommandList->ResourceBarrier(1, &b1);
 
     // TODO: rewrite this transition/barrier management mechanism
-  for (const auto node : g_Scene.nodes) {
+    for (const auto node : g_Scene.nodes) {
       for (auto mi : node.meshInstances) {
 
         g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
@@ -958,47 +958,21 @@ void Render()
   }
 
   // then draw
-  //g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
-  //for (const auto& [k, v] : g_Scene.meshInstanceMap) {
-  //  for (const auto mi : v) {
-  //    // TODO: get rid of unused things
-  //    struct {
-  //      UINT instanceBufferId;
-  //      UINT vertexBufferId;
-  //      UINT meshletBufferId;
-  //      UINT indexBufferId;
-  //      UINT primBufferId;
-  //      UINT materialBufferId;
-  //    } ronre = {.instanceBufferId = mi->instanceBufferOffset / sizeof(MeshInstance::data)};
-  //    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
-  //                                                 &ronre, 0);
+  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
+  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
+    // TODO: how to group instances of a same mesh into one DispatchMesh? Use CountY for instances.size() ?
+    // but then, how do we access the correct offset in instance buffer?
+    for (const auto mi : instances) {
+      g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerMeshConstants,
+                                                  mi->instanceBufferOffset / sizeof(MeshInstance::data), 0);
 
-  //    g_CommandList->DispatchMesh(mi->numMeshlets, 1, 1);
-  //  }
-  //}
+      g_CommandList->DispatchMesh(mi->numMeshlets, 1, 1);
+    }
+  }
 
   // TODO: TMP
+  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
   for (const auto node : g_Scene.nodes) {
-    // static meshes
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
-
-    for (auto mesh : node.model->meshes) {
-      auto geom = mesh->geometry;
-      g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
-
-      // TODO: TMP TO VALIDATE POC
-      auto mi = g_Scene.meshInstanceMap[mesh->name][0];
-
-
-      g_CommandList->SetGraphicsRoot32BitConstant(
-          RootParameter::PerMeshConstants, mi->instanceBufferOffset / sizeof(MeshInstance::data), 0);
-      g_CommandList->DispatchMesh(mesh->meshlets.size(), 1, 1);
-    }
-
-    // skinned meshes
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
-
     size_t i = 0;
     for (auto mesh : node.model->skinnedMeshes) {
       auto geom = mesh->geometry;
