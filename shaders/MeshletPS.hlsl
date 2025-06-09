@@ -7,12 +7,6 @@ cbuffer FrameConstants : register(b0)
 cbuffer MeshletConstants : register(b3)
 {
   uint instanceBufferOffset;
-  // TOODO: TMP below useless
-  uint vertexBufferId;
-  uint meshletBufferId;
-  uint indexBufferId;
-  uint primBufferId;
-  uint materialBufferId;
 };
 
 cbuffer BuffersDescriptorIndices : register(b4)
@@ -46,8 +40,7 @@ struct MeshInstance {
   uint meshletBufferOffset;
   uint indexBufferOffset;
   uint primBufferOffset;
-  uint materialBufferOffset;
-  uint pad;
+  uint2 pad;
 };
 
 struct MS_OUTPUT

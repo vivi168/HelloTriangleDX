@@ -44,8 +44,7 @@ struct MeshInstance {
       UINT meshletsBuffer;
       UINT uniqueIndicesBuffer;
       UINT primitivesBuffer;
-      UINT meshletMaterialsBuffer;
-      UINT pad;
+      UINT pad[2];
     } offsets;
   } data;  // upload this struct on the GPU in MeshInstanceBuffer
 
@@ -586,7 +585,7 @@ struct MeshStore {
     UINT visibleMeshletsBuffer = 0;
     UINT uniqueIndicesBuffer = 0;
     UINT primitivesBuffer = 0;
-    UINT meshletMaterialsBuffer = 0; // TODO: useless, same as meshletsBuffer
+    UINT meshletMaterialsBuffer = 0;
 
     // meta data
     UINT materialsBuffer = 0;
@@ -835,8 +834,8 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(model->WorldMatrix()));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
+      }
     }
-  }
   }
 
   // ImGui
@@ -981,7 +980,7 @@ void Render()
   // TODO: TMP
   for (const auto node : g_Scene.nodes) {
     // static meshes
-  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
     for (auto mesh : node.model->meshes) {
       auto geom = mesh->geometry;
@@ -991,17 +990,9 @@ void Render()
       // TODO: TMP TO VALIDATE POC
       auto mi = g_Scene.meshInstanceMap[mesh->name][0];
 
-      struct {
-        UINT instanceBufferOffset;
-        UINT vertexBufferId;
-        UINT meshletBufferId;
-        UINT indexBufferId;
-        UINT primBufferId;
-        UINT materialBufferId;
-      } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data)};
-      g_CommandList->SetGraphicsRoot32BitConstants(
-          RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
-          &ronre, 0);
+
+      g_CommandList->SetGraphicsRoot32BitConstant(
+          RootParameter::PerMeshConstants, mi->instanceBufferOffset / sizeof(MeshInstance::data), 0);
       g_CommandList->DispatchMesh(mesh->meshlets.size(), 1, 1);
     }
 
@@ -1505,10 +1496,10 @@ static void InitFrameResources()
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
-    rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1
+    rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1 TODO: TMP: soon useless (use instance buffer)
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
-    rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: use variable (materialConstantsSize) + TODO reorder root signature
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(6, 3);  // b3 // TODO: rework root signature.
+    rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: TMP: useless when we remove VS pipeline
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(1, 3);  // b3 // TODO: rework root signature.
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumHandles, 4);  // b4 // TODO: rework root signature.
 
     // Static sampler
@@ -1725,7 +1716,7 @@ static void InitFrameResources()
       g_MeshStore.m_VertexPositions.AllocDescriptor(g_SrvDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexPositions.Resource(), &srvDesc,
                                          g_MeshStore.m_VertexPositions.DescriptorHandle());
-}
+    }
 
     // Normals buffer
     {
@@ -2101,8 +2092,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
             // and this index should be an index into the correct Material.
             meshletMaterials[mi] = subset->texture->m_Buffer.DescriptorIndex();
           }
-          mi->data.offsets.meshletMaterialsBuffer =
-              g_MeshStore.CopyMeshletMaterials(meshletMaterials.data(), meshletMaterials.size() * sizeof(UINT)) / sizeof(UINT);
+          auto o = g_MeshStore.CopyMeshletMaterials(meshletMaterials.data(), meshletMaterials.size() * sizeof(UINT)) / sizeof(UINT);
+          assert(o == mi->data.offsets.meshletsBuffer);
         }
       } else {
         auto i = it->second[0];

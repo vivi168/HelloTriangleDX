@@ -4,23 +4,9 @@ cbuffer FrameConstants : register(b0)
   float deltaTime;
 };
 
-// TODO: TMP
-cbuffer ObjectCb : register(b1)
-{
-  float4x4 WorldViewProj;
-  float4x4 WorldMatrix;
-  float4x4 NormalMatrix;
-};
-
 cbuffer MeshletConstants : register(b3)
 {
   uint instanceBufferOffset;
-  // TOODO: TMP below useless
-  uint vertexBufferId;
-  uint meshletBufferId;
-  uint indexBufferId;
-  uint primBufferId;
-  uint materialBufferId;
 };
 
 cbuffer BuffersDescriptorIndices : register(b4)
@@ -53,8 +39,7 @@ struct MeshInstance {
   uint meshletBufferOffset;
   uint indexBufferOffset;
   uint primBufferOffset;
-  uint materialBufferOffset;
-  uint pad;
+  uint2 pad;
 };
 
 struct Meshlet
@@ -109,10 +94,10 @@ MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexInd
   float3 position = positions[mi.positionsBufferOffset + vertexIndex];
   float3 normal = normals[mi.normalsBufferOffset + vertexIndex];
   float2 uv = uvs[mi.uvsBufferOffset + vertexIndex];
-  
+
   MS_OUTPUT vout;
-  vout.pos = mul(float4(position, 1.0f), WorldViewProj);
-  float3 norm = mul(float4(normal, 1.0f), NormalMatrix).xyz;
+  vout.pos = mul(float4(position, 1.0f), mi.WorldViewProj);
+  float3 norm = mul(float4(normal, 1.0f), mi.NormalMatrix).xyz;
   vout.normal = normalize(norm);
   vout.meshletIndex = mi.meshletBufferOffset + meshletIndex;
   vout.texCoord = uv;
