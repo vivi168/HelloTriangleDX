@@ -7,6 +7,8 @@ cbuffer FrameConstants : register(b0)
 cbuffer MeshletConstants : register(b3)
 {
   uint instanceBufferOffset;
+  uint numMeshlets;
+  uint numInstances;
 };
 
 cbuffer BuffersDescriptorIndices : register(b4)
@@ -114,17 +116,17 @@ struct PRIM_OUT
 [OutputTopology("triangle")]
 void main(
     uint gtid : SV_GroupThreadID,
-    uint gid : SV_GroupID,
+    uint3 gid : SV_GroupID,
     out indices uint3 tris[124],
     out vertices MS_OUTPUT verts[64],
     out primitives PRIM_OUT prims[124]
 )
 {
   StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[instanceBufferOffset];
+  MeshInstance mi = meshInstances[instanceBufferOffset + gid.y];
 
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
-  Meshlet m = meshlets[mi.meshletBufferOffset + gid];
+  Meshlet m = meshlets[mi.meshletBufferOffset + gid.x];
   
   SetMeshOutputCounts(m.VertCount, m.PrimCount);
 
@@ -137,6 +139,6 @@ void main(
   if (gtid < m.VertCount)
   {
     uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
-    verts[gtid] = GetVertexAttributes(mi, gid, vertexIndex);
+    verts[gtid] = GetVertexAttributes(mi, gid.x, vertexIndex);
   }
 }

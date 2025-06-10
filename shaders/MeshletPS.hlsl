@@ -4,9 +4,12 @@ cbuffer FrameConstants : register(b0)
   float deltaTime;
 };
 
+// TODO: DRY everything
 cbuffer MeshletConstants : register(b3)
 {
   uint instanceBufferOffset;
+  uint numMeshlets;
+  uint numInstances;
 };
 
 cbuffer BuffersDescriptorIndices : register(b4)

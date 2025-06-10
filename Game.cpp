@@ -32,6 +32,8 @@ static Animation cesiumAnim, knightAnim, humanAnim;
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
     unitCube, knight, human, sponza, cesium;
 
+static std::vector<Model3D> trees;
+
 static Camera camera;
 static Collider collider;
 static Player player;
@@ -207,6 +209,23 @@ void Game::Init()
   cesiumMesh.skin = &cesiumSkin;
   cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
 
+  // TODO: why from certain threshold skinned models are bugging completely?
+  trees.resize(900);
+  for (int y = 0; y < 30; y++) {
+    for (int x = 0; x < 30; x++) {
+      int i = y * 30 + x;
+
+      trees[i].meshes.push_back(&treeMesh);
+      trees[i].Scale(10.f);
+      trees[i].Translate(-500 + x * 30, -10.f, -500.f + y * 30.f);
+
+      printf("TREE %d - [%f %f]\n", i, x, y);
+
+      Renderer::AppendToScene(&trees[i]);
+    }
+  }
+  
+
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
   yuka.meshes.push_back(&yukaMesh);
@@ -259,8 +278,8 @@ void Game::Init()
   cesium.Scale(5.f);
   cesium.Rotate(-XM_PIDIV2, 0.0f, 0.0f);
 
-  Renderer::AppendToScene(&bigTree);
-  Renderer::AppendToScene(&smallTree);
+  //Renderer::AppendToScene(&bigTree);
+  //Renderer::AppendToScene(&smallTree);
   Renderer::AppendToScene(&yuka);
   Renderer::AppendToScene(&terrain);
   Renderer::AppendToScene(&cube);

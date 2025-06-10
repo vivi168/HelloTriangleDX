@@ -49,7 +49,7 @@ struct MeshInstance {
   } data;  // upload this struct on the GPU in MeshInstanceBuffer
 
   UINT instanceBufferOffset;
-  UINT numMeshlets; // TODO: TMP find better way
+  UINT numMeshlets;
 };
 
 // only used for compute shader skinning pass
@@ -724,6 +724,13 @@ void LoadAssets()
     for (auto mesh : node.model->skinnedMeshes) LoadMesh3D(mesh);
   }
 
+  // Allocate instances
+  for (const auto node : g_Scene.nodes) {
+    for (auto mi : node.meshInstances) {
+      mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
+    }
+  }
+
   // TODO: mesh store method
   {
     // TODO transition mesh store buffer for upload
@@ -959,16 +966,28 @@ void Render()
 
   // then draw
   g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
-  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
-    // TODO: how to group instances of a same mesh into one DispatchMesh? Use CountY for instances.size() ?
-    // but then, how do we access the correct offset in instance buffer?
-    for (const auto mi : instances) {
-      g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerMeshConstants,
-                                                  mi->instanceBufferOffset / sizeof(MeshInstance::data), 0);
+  //for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
+  //  // TODO: how to group instances of a same mesh into one DispatchMesh? Use CountY for instances.size() ?
+  //  // but then, how do we access the correct offset in instance buffer?
+  //  for (const auto mi : instances) {
+  //    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerMeshConstants,
+  //                                                mi->instanceBufferOffset / sizeof(MeshInstance::data), 0);
 
-      g_CommandList->DispatchMesh(mi->numMeshlets, 1, 1);
+  //    g_CommandList->DispatchMesh(mi->numMeshlets, 1, 1);
+  //  }
+  //}
+  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
+    auto mi = instances[0];
+    struct {
+      UINT firstInstanceBufferOffset;
+      UINT numMeshlets;
+      UINT numInstances;
+    } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
+    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT), &ronre,
+                                                 0);
+
+    g_CommandList->DispatchMesh(mi->numMeshlets, instances.size(), 1);
     }
-  }
 
   // TODO: TMP
   g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
@@ -1473,7 +1492,7 @@ static void InitFrameResources()
     rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1 TODO: TMP: soon useless (use instance buffer)
     rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
     rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: TMP: useless when we remove VS pipeline
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(1, 3);  // b3 // TODO: rework root signature.
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(3, 3);  // b3 // TODO: rework root signature.
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumHandles, 4);  // b4 // TODO: rework root signature.
 
     // Static sampler
@@ -1667,7 +1686,7 @@ static void InitFrameResources()
     static constexpr size_t numMeshlets = 50'000;
     static constexpr size_t numIndices = 10'000'000;
     static constexpr size_t numPrimitives = 3'000'000;
-    static constexpr size_t numInstances = 100;
+    static constexpr size_t numInstances = 10000;
     static constexpr size_t numMaterials = 100;
 
     // Positions buffer
@@ -2019,9 +2038,10 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
     }
   }
 
-  // TODO: TMP
+  // TODO: TMP. only skinned vertex
   // then we can create geometry. and have a buffer containing a descriptor
   // index per meshlet to a material
+  if constexpr (std::is_same_v<T, SkinnedVertex>) {
   auto it = g_Geometries.find(mesh->name);
   if (it == std::end(g_Geometries)) {
     printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
@@ -2030,10 +2050,10 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
     printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
     mesh->geometry = &it->second;
   }
-
+  }
   // Create MeshInstance
-  // TODO: TMP only normal meshes for now
-  if constexpr (std::is_same_v<T, Vertex>) {
+  // TODO: TMP only static meshes for now. then skinned.
+  else if constexpr (std::is_same_v<T, Vertex>) {
     auto mi = std::make_shared<MeshInstance>();
 
     {
@@ -2077,7 +2097,6 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
       }
     }
 
-    mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
     mi->numMeshlets = mesh->meshlets.size();
 
     g_Scene.meshInstanceMap[mesh->name].push_back(mi);
