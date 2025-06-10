@@ -209,11 +209,12 @@ void Game::Init()
   cesiumMesh.skin = &cesiumSkin;
   cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
 
-  // TODO: why from certain threshold skinned models are bugging completely?
-  trees.resize(900);
-  for (int y = 0; y < 30; y++) {
-    for (int x = 0; x < 30; x++) {
-      int i = y * 30 + x;
+  int ntree = 99;
+
+  trees.resize(ntree * ntree);
+  for (int y = 0; y < ntree; y++) {
+    for (int x = 0; x < ntree; x++) {
+      int i = y * ntree + x;
 
       trees[i].meshes.push_back(&treeMesh);
       trees[i].Scale(10.f);

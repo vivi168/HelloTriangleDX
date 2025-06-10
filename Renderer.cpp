@@ -1173,11 +1173,15 @@ void SetSceneCamera(Camera* cam) { g_Scene.camera = cam; }
 
 void AppendToScene(Model3D* model)
 {
-  size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
-
   Scene::SceneNode node;
   node.model = model;
+
+  // TMP: hack this for now. won't need cb indices and such when we
+  // render everything with mesh shader and do compute shader skinning.
+  if (model->skinnedMeshes.size() > 0) {
+    size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
   node.cbIndex = cbIndex;
+  }
 
   for (auto mesh : model->skinnedMeshes) {
     size_t boneIndex = g_BonesNextIndex;
