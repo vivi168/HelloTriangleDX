@@ -39,11 +39,12 @@ void Skin::ReadStaticTransforms(std::string filename)
 
 XMMATRIX Animation::Interpolate(int boneId, Skin* skin)
 {
-  if (bonesKeyframes.find(boneId) == bonesKeyframes.end()) {
+  auto it = bonesKeyframes.find(boneId);
+  if (it == std::end(bonesKeyframes)) {
     return XMLoadFloat4x4(&skin->staticTransforms[boneId]);
   }
 
-  auto keyframes = bonesKeyframes[boneId];
+  auto keyframes = it->second;
 
   float startTime = keyframes.front().time;
   float endTime = keyframes.back().time;
