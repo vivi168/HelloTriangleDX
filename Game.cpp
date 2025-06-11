@@ -225,7 +225,7 @@ void Game::Init()
       Renderer::AppendToScene(&trees[i]);
     }
   }
-  
+
 
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);

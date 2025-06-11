@@ -71,12 +71,13 @@ float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
 
   if (diffuseColor.a == 0)
     discard;
-  
+
   //float4 meshletColor = float4(
   //          float(meshletIndex & 1),
   //          float(meshletIndex & 3) / 4,
   //          float(meshletIndex & 7) / 8,
   //          1.0f);
+  //return meshletColor;
 
   //float4 primitiveColor = float4(
   //          float(primitiveId & 1),

@@ -235,7 +235,7 @@ struct Mesh3D {
         }
       }
 
-      std::vector<MeshletSubset> meshletSubsets(header.numSubsets);  
+      std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
 
       constexpr size_t maxPrims = 124;
       constexpr size_t maxVerts = 64;

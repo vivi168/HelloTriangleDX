@@ -987,7 +987,7 @@ void Render()
                                                  0);
 
     g_CommandList->DispatchMesh(mi->numMeshlets, instances.size(), 1);
-    }
+  }
 
   // TODO: TMP
   g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
@@ -1180,7 +1180,7 @@ void AppendToScene(Model3D* model)
   // render everything with mesh shader and do compute shader skinning.
   if (model->skinnedMeshes.size() > 0) {
     size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
-  node.cbIndex = cbIndex;
+    node.cbIndex = cbIndex;
   }
 
   for (auto mesh : model->skinnedMeshes) {
@@ -2046,14 +2046,14 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
   // then we can create geometry. and have a buffer containing a descriptor
   // index per meshlet to a material
   if constexpr (std::is_same_v<T, SkinnedVertex>) {
-  auto it = g_Geometries.find(mesh->name);
-  if (it == std::end(g_Geometries)) {
-    printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
-    mesh->geometry = CreateGeometry(mesh);
-  } else {
-    printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
-    mesh->geometry = &it->second;
-  }
+    auto it = g_Geometries.find(mesh->name);
+    if (it == std::end(g_Geometries)) {
+      printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
+      mesh->geometry = CreateGeometry(mesh);
+    } else {
+      printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
+      mesh->geometry = &it->second;
+    }
   }
   // Create MeshInstance
   // TODO: TMP only static meshes for now. then skinned.
