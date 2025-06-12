@@ -308,10 +308,18 @@ struct Mesh3D {
     return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size();
   }
 
-  size_t SkinMatricesSize() const {
+  size_t SkinMatricesBufferSize() const
+  {
     if (!skin) return 0;
 
     return sizeof(DirectX::XMFLOAT4X4) * skin->header.numJoints;
+  }
+
+  size_t SkinMatricesSize() const
+  {
+    if (!skin) return 0;
+
+    return skin->header.numJoints;
   }
 };
 

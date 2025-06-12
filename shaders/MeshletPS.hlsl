@@ -4,7 +4,7 @@ cbuffer FrameConstants : register(b0)
   float deltaTime;
 };
 
-// TODO: DRY everything
+// TODO: DRY everything!!
 cbuffer MeshletConstants : register(b3)
 {
   uint instanceBufferOffset;
@@ -18,7 +18,6 @@ cbuffer BuffersDescriptorIndices : register(b4)
   uint vertexNormalsBufferId;
   // TODO: tangents
   uint vertexUVsBufferId;
-  // TODO: blend
 
   uint meshletsBufferId;
   uint visibleMeshletsBufferId;

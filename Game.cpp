@@ -209,7 +209,7 @@ void Game::Init()
   cesiumMesh.skin = &cesiumSkin;
   cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
 
-  int ntree = 99;
+  int ntree = 9;
 
   trees.resize(ntree * ntree);
   for (int y = 0; y < ntree; y++) {
@@ -218,7 +218,7 @@ void Game::Init()
 
       trees[i].meshes.push_back(&treeMesh);
       trees[i].Scale(10.f);
-      trees[i].Translate(-500 + x * 30, -10.f, -500.f + y * 30.f);
+      trees[i].Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
 
       printf("TREE %d - [%f %f]\n", i, x, y);
 

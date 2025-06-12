@@ -17,7 +17,6 @@ cbuffer BuffersDescriptorIndices : register(b4)
   uint vertexNormalsBufferId;
   // TODO: tangents
   uint vertexUVsBufferId;
-  // TODO: blend
 
   uint meshletsBufferId;
   uint visibleMeshletsBufferId;
