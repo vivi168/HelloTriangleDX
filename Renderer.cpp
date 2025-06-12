@@ -892,7 +892,11 @@ void Update(float time, float dt)
           XMMatrixInverse(nullptr, model->WorldMatrix());
       XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
 
-      ctx->perModelConstants.Copy(node.cbIndex, &cb, sizeof(cb));
+      // TMP: hack this for now. won't need cb indices and such when we
+      // render everything with mesh shader and do compute shader skinning.
+      if (model->skinnedMeshes.size() > 0) {
+        ctx->perModelConstants.Copy(node.cbIndex, &cb, sizeof(cb));
+      }
       // TODO: TMP END
 
       for (auto mi : node.meshInstances) {
