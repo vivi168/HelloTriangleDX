@@ -53,7 +53,7 @@ struct MeshInstance {
 
   UINT instanceBufferOffset;
   UINT numMeshlets;
-  SkinnedMeshInstance* skinnedMeshInstance = nullptr; // not null if skinned mesh
+  std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
 };
 
 // only used for compute shader skinning pass
@@ -61,28 +61,32 @@ struct SkinnedMeshInstance {
   struct {
     UINT basePositionsBuffer;
     UINT baseNormalsBuffer;
-    UINT boneMatricesBuffer;
     UINT blendWeightsAndIndicesBuffer;
+    UINT boneMatricesBuffer;
   } offsets;
 
   UINT numBoneMatrices;
-  MeshInstance* meshInstance = nullptr; // should never be null
+  std::shared_ptr<MeshInstance> meshInstance = nullptr;  // should never be null
+
+  size_t BoneMatricesBufferSize() const { return sizeof(XMFLOAT4X4) * numBoneMatrices; }
 };
 
 struct Scene {
   struct SceneNode {
     Model3D* model;
     std::vector<std::shared_ptr<MeshInstance>> meshInstances;
+    std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // should be per Skin, not per Model...
     size_t cbIndex;  // TODO: TMP this is really an offset in the buffer
     std::vector<size_t> bonesIndices;  // TODO: TMP these are offsets in the buffer
                                        // TODO: useless, create buffer on default heap + assign descriptor index to SkinnedGeometry
   };
 
-  std::list<SceneNode> nodes;
+  std::vector<SceneNode> nodes;
 
   // TODO: Mesh3D* instead of string? (use inheritance instead of generic programming)
   std::unordered_map<std::string, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
-  std::vector<std::unique_ptr<SkinnedMeshInstance>> skinnedMeshInstances;
+  std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // TODO: map for this as well? to help cache coherence when dispatching? group by skin ? or mesh ?
+
 
   Camera* camera;
 };
@@ -573,11 +577,16 @@ struct MeshStore {
 
     return offset;
   }
-  // TODO: void UpdateBoneMatrices
+
+  void UpdateBoneMatrices(const void* data, size_t size, UINT offset)
+  {
+    m_BoneMatrices.Copy(offset, data, size);
+  }
 
   static constexpr size_t NumDescriptorIndices = 9;
+  static constexpr size_t NumComputeDescriptorIndices = 4;
 
-  // TODO: struct for this?
+  // TODO: struct for these 2? enum?
   std::array<UINT, NumDescriptorIndices> BuffersDescriptorIndices() const
   {
     std::array<UINT, NumDescriptorIndices> h;
@@ -595,7 +604,17 @@ struct MeshStore {
     // TODO: materials
     h[8] = m_Instances.DescriptorIndex();
 
-    // TODO: bone matrices
+    return h;
+  }
+
+  std::array<UINT, NumComputeDescriptorIndices> ComputeBuffersDescriptorIndices() const
+  {
+    std::array<UINT, NumComputeDescriptorIndices> h;
+
+    h[0] = m_VertexPositions.DescriptorIndex();
+    h[1] = m_VertexNormals.DescriptorIndex();
+    h[2] = m_VertexBlendWeightsAndIndices.DescriptorIndex();
+    h[3] = m_BoneMatrices.DescriptorIndex();
 
     return h;
   }
@@ -774,22 +793,28 @@ void LoadAssets()
       node.meshInstances.push_back(mi);
     }
     for (auto mesh : node.model->skinnedMeshes) {
-      LoadMesh3D(mesh);
+      auto mi = LoadMesh3D(mesh);
+
+      // TODO: node.meshInstances.push_back(mi);
+      if (mi->skinnedMeshInstance) {
+        node.skinnedMeshInstances.push_back(mi->skinnedMeshInstance);
+      }
     }
   }
 
-  // Allocate instances
-  for (const auto node : g_Scene.nodes) {
-    for (auto mi : node.meshInstances) {
+  // Allocate instances in a contiguous manner
+  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
+    for (auto mi : instances) {
       mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
     }
   }
 
   // TODO: mesh store method
+  // We should ideally ensure that what we want to copy is not empty/null
   {
     // TODO transition mesh store buffer for upload
-
-    std::array<D3D12_RESOURCE_BARRIER, 9> uploadBarriers;
+    // TODO: enum or something for these indices
+    std::array<D3D12_RESOURCE_BARRIER, 10> uploadBarriers;
 
     // vertex data
     g_MeshStore.m_VertexPositions.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.positionsBuffer);
@@ -823,6 +848,9 @@ void LoadAssets()
     // TODO: materials
     g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
     uploadBarriers[8] = g_MeshStore.m_Instances.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
+    uploadBarriers[9] = g_MeshStore.m_BoneMatrices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_CommandList->ResourceBarrier(uploadBarriers.size(), uploadBarriers.data());
   }
@@ -877,6 +905,12 @@ void Update(float time, float dt)
           auto bonesIndex = node.bonesIndices[i++];
           ctx->boneTransformMatrices.Copy(bonesIndex, matrices.data(),
                                           sizeof(XMFLOAT4X4) * matrices.size());
+
+          for (auto smi : node.skinnedMeshInstances) {
+            // TODO: should be by skin, we duplicate unecessary data. (see todo above, don't loop skinnedMesh)
+            g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
+                                           smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4));
+          }
         }
       }  // else identity matrices ?
 
@@ -903,6 +937,8 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(model->WorldMatrix()));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
+
+        g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
       }
     }
   }
@@ -1005,25 +1041,17 @@ void Render()
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
-  // TODO: FIXME!! should do this from Update really...
-  // need a new command list?
+  // Actually copy data from upload heap to default heap
   {
-    // we re-upload everything..., is there better way? should we store matrices separatly from indices?
-    auto b1 = g_MeshStore.m_Instances.TransitionBackFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(1, &b1);
-
-    // TODO: rewrite this transition/barrier management mechanism
-    for (const auto node : g_Scene.nodes) {
-      for (auto mi : node.meshInstances) {
-
-        g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
-      }
-    }
+    std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
 
     g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
-    auto b2 = g_MeshStore.m_Instances.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    preRenderBarriers[0] = g_MeshStore.m_Instances.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    g_CommandList->ResourceBarrier(1, &b2);
+    g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
+    preRenderBarriers[1] = g_MeshStore.m_BoneMatrices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
   }
 
   // then draw
@@ -1077,14 +1105,19 @@ void Render()
   ImGui::Render();
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
 
+  std::array<D3D12_RESOURCE_BARRIER, 3> postRenderBarriers;
   // transition the "g_FrameIndex" render target from the render target state to
   // the present state. If the debug layer is enabled, you will receive a
   // warning if present is called on the render target when it's not in the
   // present state
-  auto renderTargetToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+  postRenderBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
       ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
       D3D12_RESOURCE_STATE_PRESENT);
-  g_CommandList->ResourceBarrier(1, &renderTargetToPresentBarrier);
+
+  // transition buffers back to COPY_DEST for next frame
+  postRenderBarriers[1] = g_MeshStore.m_Instances.TransitionBackFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  postRenderBarriers[2] = g_MeshStore.m_BoneMatrices.TransitionBackFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
 
   CHECK_HR(g_CommandList->Close());
 
@@ -1174,6 +1207,9 @@ void Cleanup()
 
     g_MeshStore.m_Instances.Reset();
     g_MeshStore.m_Instances.ResetUpload();
+
+    g_MeshStore.m_BoneMatrices.Reset();
+    g_MeshStore.m_BoneMatrices.ResetUpload();
   }
 
   g_PipelineStateObjects[PSO::Basic].Reset();
@@ -1751,6 +1787,7 @@ static void InitFrameResources()
     static constexpr size_t numPrimitives = 3'000'000;
     static constexpr size_t numInstances = 10000;
     static constexpr size_t numMaterials = 100;
+    static constexpr size_t numMatrices = 1000;
 
     // Positions buffer
     {
@@ -1983,6 +2020,28 @@ static void InitFrameResources()
       g_Device->CreateShaderResourceView(g_MeshStore.m_Instances.Resource(), &srvDesc,
                                          g_MeshStore.m_Instances.DescriptorHandle());
     }
+
+    // Bone Matrices buffer
+    {
+      size_t bufSiz = numMatrices * sizeof(XMFLOAT4X4);
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+
+      g_MeshStore.m_BoneMatrices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_BoneMatrices.SetName("Bone Matrices Store");
+      g_MeshStore.m_BoneMatrices.Map();
+
+      // descriptor
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                              .Buffer = {.FirstElement = 0,
+                                                         .NumElements = static_cast<UINT>(numMatrices),
+                                                         .StructureByteStride = sizeof(XMFLOAT4X4),
+                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      g_MeshStore.m_BoneMatrices.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_MeshStore.m_BoneMatrices.Resource(), &srvDesc,
+                                         g_MeshStore.m_BoneMatrices.DescriptorHandle());
+    }
   }
 }
 
@@ -2144,20 +2203,21 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
         mi->data.offsets.positionsBuffer = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.offsets.normalsBuffer = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
 
-        auto smi = std::make_unique<SkinnedMeshInstance>();
+        auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets.basePositionsBuffer =
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         smi->offsets.baseNormalsBuffer =
             g_MeshStore.CopyNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
         smi->offsets.blendWeightsAndIndicesBuffer =
             g_MeshStore.CopyBWI(mesh->blendWeightsAndIndices.data(), mesh->BlendWeightsAndIndicesBufferSize()) / sizeof(XMUINT2);
+
         smi->numBoneMatrices = mesh->SkinMatricesSize();
-        // TODO: need to reserve a new bone matrice buffer
+        smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(mesh->SkinMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 
-        smi->meshInstance = mi.get();
-        mi->skinnedMeshInstance = smi.get();
+        smi->meshInstance = mi;
+        mi->skinnedMeshInstance = smi;
 
-        g_Scene.skinnedMeshInstances.push_back(std::move(smi));
+        g_Scene.skinnedMeshInstances.push_back(smi);
       } else {
         mi->data.offsets.positionsBuffer =
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
@@ -2199,15 +2259,15 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
         mi->data.offsets.positionsBuffer = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.offsets.normalsBuffer = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
 
-        auto smi = std::make_unique<SkinnedMeshInstance>();
+        auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets = i->skinnedMeshInstance->offsets;
         smi->numBoneMatrices = i->skinnedMeshInstance->numBoneMatrices;
-        // TODO: need to reserve a new bone matrice buffer
+        smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(smi->BoneMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 
-        smi->meshInstance = mi.get();
-        mi->skinnedMeshInstance = smi.get();
+        smi->meshInstance = mi;
+        mi->skinnedMeshInstance = smi;
 
-        g_Scene.skinnedMeshInstances.push_back(std::move(smi));
+        g_Scene.skinnedMeshInstances.push_back(smi);
       }
     }
   }
@@ -2217,6 +2277,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
   // TODO: TMP only append static meshes for now
   if constexpr (std::is_same_v<T, Vertex>) {
     g_Scene.meshInstanceMap[mesh->name].push_back(mi);
+    //g_Scene.meshInstances.push_back(mi);
   }
 
   return mi;
