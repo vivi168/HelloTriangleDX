@@ -13,11 +13,17 @@ using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {
-enum class PSO { Basic, BasicMS, Skinned, ColliderSurface, ComputeSkinning };
+enum class PSO { Basic, BasicMS, Skinned, ColliderSurface, SkinningCS };
 
+// TODO: clean this
 namespace RootParameter
 {
 enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, BuffersDescriptorIndices, Count };
+}
+
+namespace SkinningCSRootParameter
+{
+enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 }
 
 struct Material {
@@ -69,6 +75,23 @@ struct SkinnedMeshInstance {
   std::shared_ptr<MeshInstance> meshInstance = nullptr;  // should never be null
 
   size_t BoneMatricesBufferSize() const { return sizeof(XMFLOAT4X4) * numBoneMatrices; }
+
+  static constexpr size_t NumOffsets = 6;
+
+  std::array<UINT, NumOffsets> BuffersOffsets() const
+  {
+    assert(meshInstance);
+    std::array<UINT, NumOffsets> o;
+
+    o[0] = offsets.basePositionsBuffer;
+    o[1] = meshInstance->data.offsets.positionsBuffer;
+    o[2] = offsets.baseNormalsBuffer;
+    o[3] = meshInstance->data.offsets.normalsBuffer;
+    o[4] = offsets.blendWeightsAndIndicesBuffer;
+    o[5] = offsets.boneMatricesBuffer;
+
+    return o;
+  }
 };
 
 struct Scene {
@@ -445,7 +468,9 @@ struct FrameContext {
 
     renderTarget.Reset();
     commandAllocator.Reset();
+    computeCommandAllocator.Reset();
     fence.Reset();
+    computeFence.Reset();
   }
 };
 
@@ -1212,14 +1237,15 @@ void Cleanup()
     g_MeshStore.m_BoneMatrices.ResetUpload();
   }
 
-  g_PipelineStateObjects[PSO::Basic].Reset();
   g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::Skinned].Reset();
   g_RootSignature.Reset();
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
+  g_ComputeCommandList.Reset();
   g_CommandQueue.Reset();
+  g_ComputeCommandQueue.Reset();
 
   g_SrvDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
@@ -1369,7 +1395,10 @@ static void InitD3D()
 
   // Create Command Queue
   {
-    D3D12_COMMAND_QUEUE_DESC cqDesc = {};  // use default values
+    D3D12_COMMAND_QUEUE_DESC cqDesc{
+        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+    };
 
     ID3D12CommandQueue* commandQueue = nullptr;
     CHECK_HR(
@@ -1377,13 +1406,34 @@ static void InitD3D()
     g_CommandQueue.Attach(commandQueue);
   }
 
+  // Create Compute Command Queue
+  {
+    D3D12_COMMAND_QUEUE_DESC cqDesc{
+        .Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
+        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+    };
+
+    ID3D12CommandQueue* commandQueue = nullptr;
+    CHECK_HR(g_Device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&commandQueue)));
+    g_ComputeCommandQueue.Attach(commandQueue);
+  }
+
   // Create Command Allocator
   {
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      ID3D12CommandAllocator* commandAllocator = nullptr;
-      CHECK_HR(g_Device->CreateCommandAllocator(
-          D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-      g_FrameContext[i].commandAllocator.Attach(commandAllocator);
+      {
+        ID3D12CommandAllocator* commandAllocator = nullptr;
+        CHECK_HR(g_Device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+        g_FrameContext[i].commandAllocator.Attach(commandAllocator);
+      }
+
+      // Compute
+      {
+        ID3D12CommandAllocator* commandAllocator = nullptr;
+        CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&commandAllocator)));
+        g_FrameContext[i].computeCommandAllocator.Attach(commandAllocator);
+      }
     }
 
     // create the command list with the first allocator
@@ -1392,18 +1442,33 @@ static void InitD3D()
                                     g_FrameContext[0].commandAllocator.Get(),
                                     NULL, IID_PPV_ARGS(&g_CommandList)));
 
+    // Compute
+    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
+                                         g_FrameContext[0].computeCommandAllocator.Get(), NULL,
+                                         IID_PPV_ARGS(&g_ComputeCommandList)));
+
     // command lists are created in the recording state. our main loop will set
     // it up for recording again so close it now
     g_CommandList->Close();
+    g_ComputeCommandList->Close();
   }
 
   // Create Synchronization objects
   {
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      ID3D12Fence* fence = nullptr;
-      CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                     IID_PPV_ARGS(&fence)));
-      g_FrameContext[i].fence.Attach(fence);
+      {
+        ID3D12Fence* fence = nullptr;
+        CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
+                                       IID_PPV_ARGS(&fence)));
+        g_FrameContext[i].fence.Attach(fence);
+      }
+      // Compute
+      {
+        ID3D12Fence* fence = nullptr;
+        CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+        g_FrameContext[i].computeFence.Attach(fence);
+      }
+
       g_FrameContext[i].fenceValue = 0;
     }
 
@@ -1613,7 +1678,20 @@ static void InitFrameResources()
 
   // Compute skinning root signature
   {
-    // TODO...
+    CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
+    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinnedMeshInstance::NumOffsets, 0);  // b0
+    rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
+        MeshStore::NumComputeDescriptorIndices, 1);  // b1
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(SkinningCSRootParameter::Count, rootParameters);
+
+    ID3DBlob* signatureBlobPtr;
+    CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlobPtr, nullptr));
+
+    ID3D12RootSignature* rootSignature = nullptr;
+    CHECK_HR(g_Device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(),
+                                           IID_PPV_ARGS(&rootSignature)));
+    g_ComputeRootSignature.Attach(rootSignature);
   }
 
   // TODO: TMP
@@ -1646,46 +1724,6 @@ static void InitFrameResources()
   auto pixelShaderBlob = ReadData(GetAssetFullPath(L"DefaultPS.cso").c_str());
   D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
                                        pixelShaderBlob.size()};
-
-  // Pipeline State for static objects
-  {
-    // TODO: TMP
-    // Vertex Shader
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"DefaultVS.cso").c_str());
-    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
-                                          vertexShaderBlob.size()};
-
-    // create a pipeline state object (PSO)
-    // In a real application, you will have many pso's. for each different
-    // shader or different combinations of shaders, different blend states or
-    // different rasterizer states, different topology types (point, line,
-    // triangle, patch), or a different number of render targets you will need a
-    // pso VS is the only required shader for a pso. You might be wondering when
-    // a case would be where you only set the VS. It's possible that you have a
-    // pso that only outputs data with the stream output, and not on a render
-    // target, which means you would not need anything after the stream output.
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = g_RootSignature.Get();
-    psoDesc.VS = vertexShader;
-    psoDesc.PS = pixelShader;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;  // we are only binding one render target
-                                   // TODO: for G buffer here set 4 RT
-    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
-    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.SampleDesc = DefaultSampleDesc();
-
-    // create the pso
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateGraphicsPipelineState(
-        &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::Basic].Attach(pipelineStateObject);
-  }
 
   // Mesh Shader Pipeline State for static objects
   {
@@ -1778,6 +1816,24 @@ static void InitFrameResources()
         &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::Skinned].Attach(pipelineStateObject);
   }
+
+  // Compute skinning pipeline
+  {
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"SkinningCS.cso").c_str());
+    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+        .pRootSignature = g_ComputeRootSignature.Get(),
+        .CS = computeShader,
+    };
+
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::SkinningCS].Attach(pipelineStateObject);
+  }
+
+  // TODO: we need a PSO for the 2nd pass (lighting pass) that will use the G buffer to compute the final image
+
   // MeshStore: TODO: make an instance method / DRY
   {
     // TODO: better estimate
