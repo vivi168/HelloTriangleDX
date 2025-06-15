@@ -81,16 +81,14 @@ struct SkinnedMeshInstance {
   std::array<UINT, NumOffsets> BuffersOffsets() const
   {
     assert(meshInstance);
-    std::array<UINT, NumOffsets> o;
-
-    o[0] = offsets.basePositionsBuffer;
-    o[1] = meshInstance->data.offsets.positionsBuffer;
-    o[2] = offsets.baseNormalsBuffer;
-    o[3] = meshInstance->data.offsets.normalsBuffer;
-    o[4] = offsets.blendWeightsAndIndicesBuffer;
-    o[5] = offsets.boneMatricesBuffer;
-
-    return o;
+    return {
+        offsets.basePositionsBuffer,
+        meshInstance->data.offsets.positionsBuffer,
+        offsets.baseNormalsBuffer,
+        meshInstance->data.offsets.normalsBuffer,
+        offsets.blendWeightsAndIndicesBuffer,
+        offsets.boneMatricesBuffer,
+    };
   }
 };
 
@@ -209,14 +207,17 @@ struct HeapResource {
     return resource->GetGPUVirtualAddress() + offset;
   }
 
-  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
-  {
-    descriptor.Alloc(allocator);
-  }
+  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { srvDescriptor.Alloc(allocator); }
 
-  UINT DescriptorIndex() const { return descriptor.index; }
+  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { uavDescriptor.Alloc(allocator); }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const { return descriptor.handle; }
+  UINT SrvDescriptorIndex() const { return srvDescriptor.index; }
+
+  UINT UavDescriptorIndex() const { return uavDescriptor.index; }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return srvDescriptor.handle; }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.handle; }
 
   void CreateResource(D3D12MA::Allocator* allocator,
                       const D3D12MA::ALLOCATION_DESC* allocDesc,
@@ -273,7 +274,8 @@ struct HeapResource {
 
 private:
   ComPtr<ID3D12Resource> resource;
-  HeapDescriptor descriptor;
+  HeapDescriptor srvDescriptor;
+  HeapDescriptor uavDescriptor;
   D3D12MA::Allocation* allocation;
   void* address;
 };
@@ -320,12 +322,17 @@ struct UploadedHeapResource {
     pCmdList->CopyBufferRegion(buffer.Resource(), DstOffset, uploadBuffer.Resource(), SrcOffset, NumBytes);
   }
 
-  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateAfter)
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
+  {
+    return buffer.Transition(stateBefore, stateAfter);
+  }
+
+  D3D12_RESOURCE_BARRIER TransitionFromCopyTo(D3D12_RESOURCE_STATES stateAfter)
   {
     return buffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST, stateAfter);
   }
 
-  D3D12_RESOURCE_BARRIER TransitionBackFrom(D3D12_RESOURCE_STATES stateBefore)
+  D3D12_RESOURCE_BARRIER TransitionToCopyFrom(D3D12_RESOURCE_STATES stateBefore)
   {
     return buffer.Transition(stateBefore, D3D12_RESOURCE_STATE_COPY_DEST);
   }
@@ -337,17 +344,17 @@ struct UploadedHeapResource {
     return buffer.GpuAddress(offset);
   }
 
-  void AllocDescriptor(DescriptorHeapListAllocator& allocator)
-  {
-    buffer.AllocDescriptor(allocator);
-  }
+  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { buffer.AllocSrvDescriptor(allocator); }
 
-  UINT DescriptorIndex() const { return buffer.DescriptorIndex(); }
+  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { buffer.AllocUavDescriptor(allocator); }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle() const
-  {
-    return buffer.DescriptorHandle();
-  }
+  UINT SrvDescriptorIndex() const { return buffer.SrvDescriptorIndex(); }
+
+  UINT UavDescriptorIndex() const { return buffer.UavDescriptorIndex(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return buffer.SrvDescriptorHandle(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return buffer.UavDescriptorHandle(); }
 
   void SetName(std::string name) { buffer.SetName(name); }
 
@@ -614,34 +621,30 @@ struct MeshStore {
   // TODO: struct for these 2? enum?
   std::array<UINT, NumDescriptorIndices> BuffersDescriptorIndices() const
   {
-    std::array<UINT, NumDescriptorIndices> h;
+    return {
+        m_VertexPositions.SrvDescriptorIndex(),
+        m_VertexNormals.SrvDescriptorIndex(),
+        // TODO: tangents
+        m_VertexUVs.SrvDescriptorIndex(),
 
-    h[0] = m_VertexPositions.DescriptorIndex();
-    h[1] = m_VertexNormals.DescriptorIndex();
-    // TODO: tangents
-    h[2] = m_VertexUVs.DescriptorIndex();
-
-    h[3] = m_Meshlets.DescriptorIndex();
-    h[4] = m_VisibleMeshlets.DescriptorIndex();
-    h[5] = m_MeshletUniqueIndices.DescriptorIndex();
-    h[6] = m_MeshletPrimitives.DescriptorIndex();
-    h[7] = m_MeshletMaterials.DescriptorIndex();
-    // TODO: materials
-    h[8] = m_Instances.DescriptorIndex();
-
-    return h;
+        m_Meshlets.SrvDescriptorIndex(),
+        m_VisibleMeshlets.SrvDescriptorIndex(),
+        m_MeshletUniqueIndices.SrvDescriptorIndex(),
+        m_MeshletPrimitives.SrvDescriptorIndex(),
+        m_MeshletMaterials.SrvDescriptorIndex(),
+        // TODO: materials
+        m_Instances.SrvDescriptorIndex(),
+    };
   }
 
   std::array<UINT, NumComputeDescriptorIndices> ComputeBuffersDescriptorIndices() const
   {
-    std::array<UINT, NumComputeDescriptorIndices> h;
-
-    h[0] = m_VertexPositions.DescriptorIndex();
-    h[1] = m_VertexNormals.DescriptorIndex();
-    h[2] = m_VertexBlendWeightsAndIndices.DescriptorIndex();
-    h[3] = m_BoneMatrices.DescriptorIndex();
-
-    return h;
+    return {
+        m_VertexPositions.SrvDescriptorIndex(),
+        m_VertexNormals.SrvDescriptorIndex(),
+        m_VertexBlendWeightsAndIndices.SrvDescriptorIndex(),
+        m_BoneMatrices.SrvDescriptorIndex(),
+    };
   }
 
   UploadedHeapResource m_VertexPositions;
@@ -756,11 +759,8 @@ static UINT g_FrameIndex;
 static HANDLE g_FenceEvent;
 
 // Resources
-static ComPtr<ID3D12DescriptorHeap> g_SrvDescriptorHeap;
-static DescriptorHeapListAllocator g_SrvDescHeapAlloc;
-
-static ComPtr<ID3D12DescriptorHeap> g_UavDescriptorHeap;
-static DescriptorHeapListAllocator g_UavDescHeapAlloc;
+static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
+static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
 
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
 static UINT g_RtvDescriptorSize;
@@ -843,39 +843,39 @@ void LoadAssets()
 
     // vertex data
     g_MeshStore.m_VertexPositions.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.positionsBuffer);
-    uploadBarriers[0] = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[0] = g_MeshStore.m_VertexPositions.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_VertexNormals.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.normalsBuffer);
-    uploadBarriers[1] = g_MeshStore.m_VertexNormals.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[1] = g_MeshStore.m_VertexNormals.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     // TODO: tangents
     g_MeshStore.m_VertexUVs.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.uvsBuffer);
-    uploadBarriers[2] = g_MeshStore.m_VertexUVs.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[2] = g_MeshStore.m_VertexUVs.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_VertexBlendWeightsAndIndices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.bwiBuffer);
-    uploadBarriers[3] = g_MeshStore.m_VertexBlendWeightsAndIndices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[3] = g_MeshStore.m_VertexBlendWeightsAndIndices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // meshlet data
     g_MeshStore.m_Meshlets.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.meshletsBuffer);
-    uploadBarriers[4] = g_MeshStore.m_Meshlets.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[4] = g_MeshStore.m_Meshlets.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // TODO: visible meshlets
 
     g_MeshStore.m_MeshletUniqueIndices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.uniqueIndicesBuffer);
-    uploadBarriers[5] = g_MeshStore.m_MeshletUniqueIndices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[5] = g_MeshStore.m_MeshletUniqueIndices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_MeshletPrimitives.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.primitivesBuffer);
-    uploadBarriers[6] = g_MeshStore.m_MeshletPrimitives.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[6] = g_MeshStore.m_MeshletPrimitives.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_MeshletMaterials.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.meshletMaterialsBuffer);
-    uploadBarriers[7] = g_MeshStore.m_MeshletMaterials.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[7] = g_MeshStore.m_MeshletMaterials.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // meta data
     // TODO: materials
     g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
-    uploadBarriers[8] = g_MeshStore.m_Instances.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[8] = g_MeshStore.m_Instances.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
-    uploadBarriers[9] = g_MeshStore.m_BoneMatrices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    uploadBarriers[9] = g_MeshStore.m_BoneMatrices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_CommandList->ResourceBarrier(uploadBarriers.size(), uploadBarriers.data());
   }
@@ -1050,7 +1050,7 @@ void Render()
     g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   }
 
-  std::array descriptorHeaps{g_SrvDescriptorHeap.Get()};
+  std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
 
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
@@ -1071,10 +1071,10 @@ void Render()
     std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
 
     g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
-    preRenderBarriers[0] = g_MeshStore.m_Instances.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    preRenderBarriers[0] = g_MeshStore.m_Instances.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
-    preRenderBarriers[1] = g_MeshStore.m_BoneMatrices.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    preRenderBarriers[1] = g_MeshStore.m_BoneMatrices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
   }
@@ -1116,8 +1116,8 @@ void Render()
           UINT vbIndex;
           UINT vOffset;
           UINT texIndex;
-        } ronre = {geom->m_VertexBuffer.DescriptorIndex(), subset.vstart,
-                   subset.texture->m_Buffer.DescriptorIndex()};
+        } ronre = {geom->m_VertexBuffer.SrvDescriptorIndex(), subset.vstart,
+                   subset.texture->m_Buffer.SrvDescriptorIndex()};
         g_CommandList->SetGraphicsRoot32BitConstants(
             RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
             &ronre, 0);
@@ -1140,8 +1140,8 @@ void Render()
       D3D12_RESOURCE_STATE_PRESENT);
 
   // transition buffers back to COPY_DEST for next frame
-  postRenderBarriers[1] = g_MeshStore.m_Instances.TransitionBackFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  postRenderBarriers[2] = g_MeshStore.m_BoneMatrices.TransitionBackFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  postRenderBarriers[1] = g_MeshStore.m_Instances.TransitionToCopyFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  postRenderBarriers[2] = g_MeshStore.m_BoneMatrices.TransitionToCopyFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
 
   CHECK_HR(g_CommandList->Close());
@@ -1189,7 +1189,7 @@ void Cleanup()
 
   for (auto& [k, tex] : g_Textures) {
     // TODO: do this from Texture#Reset() ?
-    g_SrvDescHeapAlloc.Free(tex.m_Buffer.DescriptorIndex());
+    g_SrvUavDescHeapAlloc.Free(tex.m_Buffer.SrvDescriptorIndex());
     tex.Reset();
   }
 
@@ -1247,7 +1247,7 @@ void Cleanup()
   g_CommandQueue.Reset();
   g_ComputeCommandQueue.Reset();
 
-  g_SrvDescriptorHeap.Reset();
+  g_SrvUavDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
   g_DepthStencilBuffer.Reset();
   g_DepthStencilDescriptorHeap.Reset();
@@ -1612,9 +1612,9 @@ static void InitFrameResources()
   heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
   heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
   CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc,
-                                          IID_PPV_ARGS(&g_SrvDescriptorHeap)));
+                                          IID_PPV_ARGS(&g_SrvUavDescriptorHeap)));
 
-  g_SrvDescHeapAlloc.Create(g_Device.Get(), g_SrvDescriptorHeap.Get());
+  g_SrvUavDescHeapAlloc.Create(g_Device.Get(), g_SrvUavDescriptorHeap.Get());
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
@@ -1626,16 +1626,16 @@ static void InitFrameResources()
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_SrvDescriptorHeap.Get();
+  initInfo.SrvDescriptorHeap = g_SrvUavDescriptorHeap.Get();
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
-        return g_SrvDescHeapAlloc.Alloc(outCpuHandle, outGpuHandle);
+        return g_SrvUavDescHeapAlloc.Alloc(outCpuHandle, outGpuHandle);
       };
   initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
                                     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
                                     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
-    return g_SrvDescHeapAlloc.Free(cpuHandle, gpuHandle);
+    return g_SrvUavDescHeapAlloc.Free(cpuHandle, gpuHandle);
   };
   ImGui_ImplDX12_Init(&initInfo);
 
@@ -1848,9 +1848,10 @@ static void InitFrameResources()
     // Positions buffer
     {
       size_t bufSiz = numVertices * sizeof(XMFLOAT3);
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+      auto uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VertexPositions.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_VertexPositions.CreateResources(g_Allocator.Get(), &bufferDesc, &uploadBufferDesc);
       g_MeshStore.m_VertexPositions.SetName("Positions Store");
       g_MeshStore.m_VertexPositions.Map();
 
@@ -1862,9 +1863,19 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numVertices),
                                                          .StructureByteStride = sizeof(XMFLOAT3),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_VertexPositions.AllocDescriptor(g_SrvDescHeapAlloc);
+      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                                               .Buffer = {.FirstElement = 0,
+                                                          .NumElements = static_cast<UINT>(numVertices),
+                                                          .StructureByteStride = sizeof(XMFLOAT3),
+                                                          .CounterOffsetInBytes = 0,
+                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
+      g_MeshStore.m_VertexPositions.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexPositions.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexPositions.Resource(), &srvDesc,
-                                         g_MeshStore.m_VertexPositions.DescriptorHandle());
+                                         g_MeshStore.m_VertexPositions.SrvDescriptorHandle());
+      g_Device->CreateUnorderedAccessView(g_MeshStore.m_VertexPositions.Resource(), nullptr, &uavDesc,
+                                          g_MeshStore.m_VertexPositions.UavDescriptorHandle());
     }
 
     // Normals buffer
@@ -1884,9 +1895,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numVertices),
                                                          .StructureByteStride = sizeof(XMFLOAT3),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_VertexNormals.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_VertexNormals.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexNormals.Resource(), &srvDesc,
-                                         g_MeshStore.m_VertexNormals.DescriptorHandle());
+                                         g_MeshStore.m_VertexNormals.SrvDescriptorHandle());
 
     }
 
@@ -1912,9 +1923,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numVertices),
                                                          .StructureByteStride = sizeof(XMFLOAT2),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_VertexUVs.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_VertexUVs.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexUVs.Resource(), &srvDesc,
-                                         g_MeshStore.m_VertexUVs.DescriptorHandle());
+                                         g_MeshStore.m_VertexUVs.SrvDescriptorHandle());
 
     }
 
@@ -1935,9 +1946,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numVertices),
                                                          .StructureByteStride = sizeof(XMUINT2),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_VertexBlendWeightsAndIndices.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_VertexBlendWeightsAndIndices.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexBlendWeightsAndIndices.Resource(), &srvDesc,
-                                         g_MeshStore.m_VertexBlendWeightsAndIndices.DescriptorHandle());
+                                         g_MeshStore.m_VertexBlendWeightsAndIndices.SrvDescriptorHandle());
     }
 
     // Meshlets buffer
@@ -1957,9 +1968,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numMeshlets),
                                                          .StructureByteStride = sizeof(Meshlet),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_Meshlets.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_Meshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_Meshlets.Resource(), &srvDesc,
-                                         g_MeshStore.m_Meshlets.DescriptorHandle());
+                                         g_MeshStore.m_Meshlets.SrvDescriptorHandle());
     }
 
     // Visible meshlets buffer
@@ -1979,9 +1990,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numMeshlets),
                                                          .StructureByteStride = sizeof(Meshlet),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_VisibleMeshlets.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_VisibleMeshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VisibleMeshlets.Resource(), &srvDesc,
-                                         g_MeshStore.m_VisibleMeshlets.DescriptorHandle());
+                                         g_MeshStore.m_VisibleMeshlets.SrvDescriptorHandle());
     }
 
     // Meshlet unique vertex indices buffer
@@ -2001,9 +2012,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numIndices),
                                                          .StructureByteStride = sizeof(UINT),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_MeshletUniqueIndices.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_MeshletUniqueIndices.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_MeshletUniqueIndices.Resource(), &srvDesc,
-                                         g_MeshStore.m_MeshletUniqueIndices.DescriptorHandle());
+                                         g_MeshStore.m_MeshletUniqueIndices.SrvDescriptorHandle());
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
@@ -2023,9 +2034,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numPrimitives),
                                                          .StructureByteStride = sizeof(MeshletTriangle),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_MeshletPrimitives.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_MeshletPrimitives.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_MeshletPrimitives.Resource(), &srvDesc,
-                                         g_MeshStore.m_MeshletPrimitives.DescriptorHandle());
+                                         g_MeshStore.m_MeshletPrimitives.SrvDescriptorHandle());
     }
 
     // Meshlet materials buffer
@@ -2045,9 +2056,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numMeshlets),
                                                          .StructureByteStride = sizeof(UINT),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_MeshletMaterials.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_MeshletMaterials.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_MeshletMaterials.Resource(), &srvDesc,
-                                         g_MeshStore.m_MeshletMaterials.DescriptorHandle());
+                                         g_MeshStore.m_MeshletMaterials.SrvDescriptorHandle());
     }
 
     // Materials buffer
@@ -2072,9 +2083,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numInstances),
                                                          .StructureByteStride = sizeof(MeshInstance::data),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_Instances.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_Instances.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_Instances.Resource(), &srvDesc,
-                                         g_MeshStore.m_Instances.DescriptorHandle());
+                                         g_MeshStore.m_Instances.SrvDescriptorHandle());
     }
 
     // Bone Matrices buffer
@@ -2094,9 +2105,9 @@ static void InitFrameResources()
                                                          .NumElements = static_cast<UINT>(numMatrices),
                                                          .StructureByteStride = sizeof(XMFLOAT4X4),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_BoneMatrices.AllocDescriptor(g_SrvDescHeapAlloc);
+      g_MeshStore.m_BoneMatrices.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_BoneMatrices.Resource(), &srvDesc,
-                                         g_MeshStore.m_BoneMatrices.DescriptorHandle());
+                                         g_MeshStore.m_BoneMatrices.SrvDescriptorHandle());
     }
   }
 }
@@ -2300,7 +2311,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
 
           // TODO: in the future, should preprocess subsets to build a Material buffer.
           // and this index should be an index into the correct Material.
-          meshletMaterials[mi] = subset->texture->m_Buffer.DescriptorIndex();
+          meshletMaterials[mi] = subset->texture->m_Buffer.SrvDescriptorIndex();
         }
         auto o = g_MeshStore.CopyMeshletMaterials(meshletMaterials.data(), meshletMaterials.size() * sizeof(UINT)) /
                  sizeof(UINT);
@@ -2363,7 +2374,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     vertexData.SlicePitch = vBufferSize;
 
     geom.m_VertexBuffer.Upload(g_CommandList.Get(), &vertexData);
-    postUploadBarriers[0] = geom.m_VertexBuffer.Transition(
+    postUploadBarriers[0] = geom.m_VertexBuffer.TransitionFromCopyTo(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // create a vertex buffer view
@@ -2382,9 +2393,9 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     srvDesc.Buffer.StructureByteStride = sizeof(T);
     srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 
-    geom.m_VertexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_VertexBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
     g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(), &srvDesc,
-                                       geom.m_VertexBuffer.DescriptorHandle());
+                                       geom.m_VertexBuffer.SrvDescriptorHandle());
   }
 
   // Index Buffer (not used by mesh shader pipeline)
@@ -2404,7 +2415,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
 
     geom.m_IndexBuffer.Upload(g_CommandList.Get(), &indexData);
     postUploadBarriers[1] =
-        geom.m_IndexBuffer.Transition(D3D12_RESOURCE_STATE_INDEX_BUFFER);
+        geom.m_IndexBuffer.TransitionFromCopyTo(D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
     // create a index buffer view
     geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
@@ -2426,7 +2437,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
 
     geom.m_MeshletBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[2] = geom.m_MeshletBuffer.Transition(
+    postUploadBarriers[2] = geom.m_MeshletBuffer.TransitionFromCopyTo(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // descriptor
@@ -2439,10 +2450,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
                    .StructureByteStride = sizeof(Meshlet),
                    .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
-    geom.m_MeshletBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_MeshletBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
     g_Device->CreateShaderResourceView(geom.m_MeshletBuffer.Resource(),
                                        &srvDesc,
-                                       geom.m_MeshletBuffer.DescriptorHandle());
+                                       geom.m_MeshletBuffer.SrvDescriptorHandle());
   }
 
   // Meshlet Index Buffer
@@ -2460,7 +2471,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
 
     geom.m_MeshletIndexBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[3] = geom.m_MeshletIndexBuffer.Transition(
+    postUploadBarriers[3] = geom.m_MeshletIndexBuffer.TransitionFromCopyTo(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // descriptor
@@ -2474,10 +2485,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
                    .StructureByteStride = sizeof(UINT),
                    .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
-    geom.m_MeshletIndexBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_MeshletIndexBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
     g_Device->CreateShaderResourceView(
         geom.m_MeshletIndexBuffer.Resource(), &srvDesc,
-        geom.m_MeshletIndexBuffer.DescriptorHandle());
+        geom.m_MeshletIndexBuffer.SrvDescriptorHandle());
   }
 
   // Meshlet Primitive Buffer
@@ -2495,7 +2506,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
 
     geom.m_MeshletPrimitiveBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[4] = geom.m_MeshletPrimitiveBuffer.Transition(
+    postUploadBarriers[4] = geom.m_MeshletPrimitiveBuffer.TransitionFromCopyTo(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // descriptor
@@ -2509,10 +2520,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
             .StructureByteStride = sizeof(MeshletTriangle),
             .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
-    geom.m_MeshletPrimitiveBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_MeshletPrimitiveBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
     g_Device->CreateShaderResourceView(
         geom.m_MeshletPrimitiveBuffer.Resource(), &srvDesc,
-        geom.m_MeshletPrimitiveBuffer.DescriptorHandle());
+        geom.m_MeshletPrimitiveBuffer.SrvDescriptorHandle());
   }
 
   // Meshlet Material Buffer
@@ -2523,7 +2534,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
     for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
       auto subset = mesh->meshletSubsetIndices[mi];
 
-      meshletMaterials[mi] = subset->texture->m_Buffer.DescriptorIndex();
+      meshletMaterials[mi] = subset->texture->m_Buffer.SrvDescriptorIndex();
     }
 
     // GPU buffer
@@ -2540,7 +2551,7 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
         .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
 
     geom.m_MeshletMaterialBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[5] = geom.m_MeshletMaterialBuffer.Transition(
+    postUploadBarriers[5] = geom.m_MeshletMaterialBuffer.TransitionFromCopyTo(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // descriptor
@@ -2553,10 +2564,10 @@ static Geometry* CreateGeometry(Mesh3D<T>* mesh)
                    .StructureByteStride = sizeof(UINT),
                    .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
 
-    geom.m_MeshletMaterialBuffer.AllocDescriptor(g_SrvDescHeapAlloc);
+    geom.m_MeshletMaterialBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
     g_Device->CreateShaderResourceView(
         geom.m_MeshletMaterialBuffer.Resource(), &srvDesc,
-        geom.m_MeshletMaterialBuffer.DescriptorHandle());
+        geom.m_MeshletMaterialBuffer.SrvDescriptorHandle());
   }
 
   g_CommandList->ResourceBarrier(postUploadBarriers.size(),
@@ -2597,7 +2608,7 @@ static Texture* CreateTexture(std::string name)
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
   tex.m_Buffer.Upload(g_CommandList.Get(), &textureSubresourceData);
-  auto barrier = tex.m_Buffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  auto barrier = tex.m_Buffer.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   g_CommandList->ResourceBarrier(1, &barrier);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -2606,9 +2617,9 @@ static Texture* CreateTexture(std::string name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  tex.m_Buffer.AllocDescriptor(g_SrvDescHeapAlloc);
+  tex.m_Buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
   g_Device->CreateShaderResourceView(tex.m_Buffer.Resource(), &srvDesc,
-                                     tex.m_Buffer.DescriptorHandle());
+                                     tex.m_Buffer.SrvDescriptorHandle());
 
   g_Textures[name] = tex;
 
