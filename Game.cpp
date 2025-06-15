@@ -23,14 +23,16 @@ struct Player {
   void Update();
 };
 
-static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh, houseMesh,
-    terrainMesh, stairsMesh, unitCubeMesh, boarMesh, sponzaMesh;
-static Mesh3D<SkinnedVertex> humanMeshes[2], boarSkinnedMesh, cesiumMesh;
-static Skin cesiumSkin, boarSkin, humanSkin;
-static Animation cesiumAnim, boarAnim, humanAnim;
+static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh,
+    terrainMesh, stairsMesh, unitCubeMesh, sponzaMesh, swordMesh, shieldMesh;
+static Mesh3D<SkinnedVertex> humanMeshes[2], knightMesh, cesiumMesh;
+static Skin cesiumSkin, knightSkin, humanSkin;
+static Animation cesiumAnim, knightAnim, humanAnim;
 
 static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
-    unitCube, boar, human, sponza, cesium;
+    unitCube, knight, human, sponza, cesium;
+
+static std::vector<Model3D> trees;
 
 static Camera camera;
 static Collider collider;
@@ -53,7 +55,7 @@ struct {
 
 Player::Player()
 {
-  lookYaw = XM_PIDIV2;
+  lookYaw = -XM_PIDIV2;
   lookPitch = 0.0f;
   floorNormalY = 1.0f;
 
@@ -63,6 +65,7 @@ Player::Player()
   currentState = State::Standing;
 }
 
+// TODO: DRY this with camera (Controller class?)
 void Player::ProcessKeyboard(float dt)
 {
   if (Input::IsHeld(Input::KB::Up)) {
@@ -72,10 +75,10 @@ void Player::ProcessKeyboard(float dt)
     lookPitch -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Left)) {
-    lookYaw += PLAYER_ROT_SPEED * dt;
+    lookYaw -= PLAYER_ROT_SPEED * dt;
   }
   if (Input::IsHeld(Input::KB::Right)) {
-    lookYaw -= PLAYER_ROT_SPEED * dt;
+    lookYaw += PLAYER_ROT_SPEED * dt;
   }
 
   // TODO: align this with Camera.cpp
@@ -90,8 +93,8 @@ void Player::ProcessKeyboard(float dt)
 
   float forwardX = cosf(lookYaw);
   float forwardZ = sinf(lookYaw);
-  float rightX = sinf(lookYaw);
-  float rightZ = -cosf(lookYaw);
+  float rightX = -sinf(lookYaw);
+  float rightZ = cosf(lookYaw);
 
   velocity = {0.f, 0.f, 0.f};
 
@@ -175,40 +178,58 @@ void Game::Init()
 {
   Renderer::SetSceneCamera(&camera);
 
-  treeMesh.Read("assets/tree.objb");
-  yukaMesh.Read("assets/yuka.objb");
-  houseMesh.Read("assets/tower.objb");
-  terrainMesh.Read("assets/terrain.objb");
-  cubeMesh.Read("assets/cube.objb");
-  unitCubeMesh.Read("assets/plateform.objb");
-  cylinderMesh.Read("assets/cylinder.objb");
-  stairsMesh.Read("assets/stairs.objb");
+  treeMesh.Read("assets/OPTIM_white_oak_mesh_1.mesh");
+  yukaMesh.Read("assets/OPTIM_yuka_mesh_1.mesh");
+  terrainMesh.Read("assets/OPTIM_ground_mesh_1.mesh");
+  cubeMesh.Read("assets/OPTIM_issou_mesh_1.mesh");
+  unitCubeMesh.Read("assets/OPTIM_plateform_mesh_1.mesh");
+  cylinderMesh.Read("assets/OPTIM_garden_gnome_1k_mesh_1.mesh");
+  stairsMesh.Read("assets/OPTIM_stairs_mesh_1.mesh");
 
-  boarSkinnedMesh.Read("assets/OPTIM_noq_boarskinbrown_mesh_1.m3d");
-  boarSkin.Read("assets/OPTIM_noq_boarskinbrown_skin_1.skin");
-  boarSkin.ReadStaticTransforms("assets/OPTIM_noq_boarskinbrown_transforms.bin");
-  boarSkinnedMesh.skin = &boarSkin;
-  boarAnim.Read("assets/OPTIM_noq_boarskinbrown_animation_1.anim");
+  shieldMesh.Read("assets/OPTIM_knight_mesh_1.mesh");
+  swordMesh.Read("assets/OPTIM_knight_mesh_2.mesh");
+  knightMesh.Read("assets/OPTIM_knight_mesh_3.mesh");
+  knightSkin.Read("assets/OPTIM_knight_skin_1.skin");
+  knightSkin.ReadStaticTransforms("assets/OPTIM_knight_transforms.bin");
+  knightMesh.skin = &knightSkin;
+  knightAnim.Read("assets/OPTIM_knight_animation_1.anim");
 
-  humanMeshes[0].Read("assets/OPTIM_noq_humanmale_mesh_1.m3d");
-  humanMeshes[1].Read("assets/OPTIM_noq_humanmale_mesh_2.m3d");
-  humanSkin.Read("assets/OPTIM_noq_humanmale_skin_1.skin");
-  humanSkin.ReadStaticTransforms("assets/OPTIM_noq_humanmale_transforms.bin");
+  humanMeshes[0].Read("assets/OPTIM_humanmale_mesh_1.mesh");
+  humanMeshes[1].Read("assets/OPTIM_humanmale_mesh_2.mesh");
+  humanSkin.Read("assets/OPTIM_humanmale_skin_1.skin");
+  humanSkin.ReadStaticTransforms("assets/OPTIM_humanmale_transforms.bin");
   humanMeshes[0].skin = &humanSkin;
   humanMeshes[1].skin = &humanSkin;
-  humanAnim.Read("assets/OPTIM_noq_humanmale_animation_83.anim");
+  humanAnim.Read("assets/OPTIM_humanmale_animation_83.anim");
 
-  sponzaMesh.Read("assets/OPTIM_noq_Sponza_mesh_1.m3d");
+  sponzaMesh.Read("assets/OPTIM_Sponza_mesh_1.mesh");
 
   cesiumMesh.Read("assets/OPTIM_CesiumMan_mesh_1.mesh");
   cesiumSkin.Read("assets/OPTIM_CesiumMan_skin_1.skin");
   cesiumMesh.skin = &cesiumSkin;
   cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
 
+  int ntree = 9;
+
+  trees.resize(ntree * ntree);
+  for (int y = 0; y < ntree; y++) {
+    for (int x = 0; x < ntree; x++) {
+      int i = y * ntree + x;
+
+      trees[i].meshes.push_back(&treeMesh);
+      trees[i].Scale(10.f);
+      trees[i].Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
+
+      printf("TREE %d - [%f %f]\n", i, x, y);
+
+      Renderer::AppendToScene(&trees[i]);
+    }
+  }
+
+
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
   yuka.meshes.push_back(&yukaMesh);
-  house.meshes.push_back(&houseMesh);
   terrain.meshes.push_back(&terrainMesh);
   cube.meshes.push_back(&cubeMesh);
   cylinder.meshes.push_back(&cylinderMesh);
@@ -220,21 +241,24 @@ void Game::Init()
   human.animations["attack"] = &humanAnim;
   human.currentAnimation = human.animations["attack"];
 
-  boar.skinnedMeshes.push_back(&boarSkinnedMesh);
-  boar.animations["test"] = &boarAnim;
-  boar.currentAnimation = boar.animations["test"];
+  knight.meshes.push_back(&swordMesh);
+  knight.skinnedMeshes.push_back(&knightMesh);
+  knight.animations["test"] = &knightAnim;
+  knight.currentAnimation = knight.animations["test"];
 
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);
   cesium.animations["walk"] = &cesiumAnim;
   cesium.currentAnimation = cesium.animations["walk"];
 
-  smallTree.Scale(0.5f);
-  smallTree.Translate(-7.f, 0.f, 0.f);
-  bigTree.Translate(-7.f, 0.0f, 14.f);
+  cylinder.Scale(5.0f);
+
+  smallTree.Scale(7.5f);
+  smallTree.Translate(-7.f, -10.f, 0.f);
+  bigTree.Scale(10.f);
+  bigTree.Translate(-7.f, -10.0f, 14.f);
   yuka.Scale(5.f);
   yuka.Translate(15.f, 0.f, 15.f);
-  house.Translate(20.f, 0.f, 50.f);
   stairs.Translate(-50.f, 0.f, 20.f);
   cube.Translate(0.f, 50.f, 0.f);
   cube.Scale(5.f);
@@ -242,8 +266,9 @@ void Game::Init()
   human.Translate(10.f, 0, -10.f);
   human.Scale(3.0f);
 
-  boar.Translate(10.f, 0, -15.f);
-  boar.Scale(3.0f);
+  knight.Translate(10.f, 0, -15.f);
+  knight.Scale(1.5f);
+  knight.Rotate(0, XM_PI/2, 0);
 
   unitCube.Translate(10.f, plateformY, -10.f);
   unitCube.Rotate(plateformPitch, 0.f, 0.f);
@@ -254,10 +279,9 @@ void Game::Init()
   cesium.Scale(5.f);
   cesium.Rotate(-XM_PIDIV2, 0.0f, 0.0f);
 
-  Renderer::AppendToScene(&bigTree);
-  Renderer::AppendToScene(&smallTree);
+  //Renderer::AppendToScene(&bigTree);
+  //Renderer::AppendToScene(&smallTree);
   Renderer::AppendToScene(&yuka);
-  Renderer::AppendToScene(&house);
   Renderer::AppendToScene(&terrain);
   Renderer::AppendToScene(&cube);
   Renderer::AppendToScene(&cylinder);
@@ -265,13 +289,12 @@ void Game::Init()
   Renderer::AppendToScene(&unitCube);
 
   Renderer::AppendToScene(&human);
-  Renderer::AppendToScene(&boar);
-  //Renderer::AppendToScene(&sponza);
+  Renderer::AppendToScene(&knight);
+  Renderer::AppendToScene(&sponza);
   Renderer::AppendToScene(&cesium);
 
   // static
   collider.AppendModel(&terrain);
-  collider.AppendModel(&house);
   collider.AppendModel(&yuka);
   collider.AppendModel(&stairs);
 
@@ -333,7 +356,7 @@ void Game::Update(float time, float deltaTime)
   }
 
   cylinder.Translate(player.position.x, player.position.y, player.position.z);
-  cylinder.Rotate(0.0f, -player.lookYaw - XM_PIDIV2, 0.f);
+  cylinder.Rotate(0.0f, -player.lookYaw + XM_PIDIV2, 0.f);
 }
 
 void Game::DebugWindow()
