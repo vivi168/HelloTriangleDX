@@ -16,4 +16,4 @@ jobs:
         msbuild-architecture: x64
 
     - name: Build Release
-      run: msbuild HelloTriangleDX.vcxproj /p:Configuration=Release
+      run: msbuild HelloTriangleDX.vcxproj /p:Configuration=Release /p:Platform=x64
