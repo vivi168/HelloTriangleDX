@@ -71,12 +71,13 @@ struct SkinnedMeshInstance {
     UINT boneMatricesBuffer;
   } offsets;
 
+  UINT numVertices;
   UINT numBoneMatrices;
   std::shared_ptr<MeshInstance> meshInstance = nullptr;  // should never be null
 
   size_t BoneMatricesBufferSize() const { return sizeof(XMFLOAT4X4) * numBoneMatrices; }
 
-  static constexpr size_t NumOffsets = 6;
+  static constexpr size_t NumOffsets = 7;
 
   std::array<UINT, NumOffsets> BuffersOffsets() const
   {
@@ -88,6 +89,7 @@ struct SkinnedMeshInstance {
         meshInstance->data.offsets.normalsBuffer,
         offsets.blendWeightsAndIndicesBuffer,
         offsets.boneMatricesBuffer,
+        numVertices,
     };
   }
 };
@@ -616,7 +618,7 @@ struct MeshStore {
   }
 
   static constexpr size_t NumDescriptorIndices = 9;
-  static constexpr size_t NumComputeDescriptorIndices = 4;
+  static constexpr size_t NumSkinningCSDescriptorIndices = 4;
 
   // TODO: struct for these 2? enum?
   std::array<UINT, NumDescriptorIndices> BuffersDescriptorIndices() const
@@ -637,11 +639,11 @@ struct MeshStore {
     };
   }
 
-  std::array<UINT, NumComputeDescriptorIndices> ComputeBuffersDescriptorIndices() const
+  std::array<UINT, NumSkinningCSDescriptorIndices> ComputeBuffersDescriptorIndices() const
   {
     return {
-        m_VertexPositions.SrvDescriptorIndex(),
-        m_VertexNormals.SrvDescriptorIndex(),
+        m_VertexPositions.UavDescriptorIndex(),
+        m_VertexNormals.UavDescriptorIndex(),
         m_VertexBlendWeightsAndIndices.SrvDescriptorIndex(),
         m_BoneMatrices.SrvDescriptorIndex(),
     };
@@ -1002,6 +1004,7 @@ void Render()
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in
   CHECK_HR(ctx->commandAllocator->Reset());
+  CHECK_HR(ctx->computeCommandAllocator->Reset());
 
   // reset the command list. by resetting the command list we are putting it
   // into a recording state so we can start recording commands into the command
@@ -1014,6 +1017,7 @@ void Render()
   // initial default pipeline, which is what we get by setting the second
   // parameter to NULL
   CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+  CHECK_HR(g_ComputeCommandList->Reset(ctx->computeCommandAllocator.Get(), g_PipelineStateObjects[PSO::SkinningCS].Get()));
 
   // here we start recording commands into the g_CommandList (which all the
   // commands will be stored in the g_CommandAllocators)
@@ -1078,6 +1082,33 @@ void Render()
 
     g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
   }
+
+  // record skinning compute commands if needed
+  if (g_Scene.skinnedMeshInstances.size() > 0) {
+    std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
+    g_ComputeCommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
+
+    g_ComputeCommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
+
+    auto h = g_MeshStore.ComputeBuffersDescriptorIndices();
+    g_ComputeCommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
+                                                MeshStore::NumSkinningCSDescriptorIndices, h.data(), 0);
+    auto b0 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                                       D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    g_ComputeCommandList->ResourceBarrier(1, &b0);
+
+    for (auto smi : g_Scene.skinnedMeshInstances) {
+      auto o = smi->BuffersOffsets();
+      g_ComputeCommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
+                                                  SkinnedMeshInstance::NumOffsets, o.data(), 0);
+
+      g_ComputeCommandList->Dispatch(DivRoundUp(smi->numVertices, 64), 1, 1);
+    }
+    auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    g_ComputeCommandList->ResourceBarrier(1, &b1);
+  }
+  CHECK_HR(g_ComputeCommandList->Close());
 
   // then draw
   g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
@@ -1148,11 +1179,17 @@ void Render()
 
   // ==========
 
-  // create an array of command lists (only one command list here)
-  std::array ppCommandLists{
-      static_cast<ID3D12CommandList*>(g_CommandList.Get())};
+  // execute skinning command list if needed
+  if (g_Scene.skinnedMeshInstances.size() > 0) {
+    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_ComputeCommandList.Get())};
+    g_ComputeCommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
-  // execute the array of command lists
+    CHECK_HR(g_ComputeCommandQueue->Signal(ctx->computeFence.Get(), ctx->fenceValue));
+    CHECK_HR(g_CommandQueue->Wait(ctx->computeFence.Get(), ctx->fenceValue));
+  }
+
+  // execute graphic command list
+  std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
   g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
   // this command goes in at the end of our command queue. we will know when our
@@ -1678,12 +1715,13 @@ static void InitFrameResources()
 
   // Compute skinning root signature
   {
+    D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
     rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinnedMeshInstance::NumOffsets, 0);  // b0
     rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
-        MeshStore::NumComputeDescriptorIndices, 1);  // b1
+        MeshStore::NumSkinningCSDescriptorIndices, 1);  // b1
 
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(SkinningCSRootParameter::Count, rootParameters);
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(SkinningCSRootParameter::Count, rootParameters, 0, nullptr, flags);
 
     ID3DBlob* signatureBlobPtr;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlobPtr, nullptr));
@@ -2278,6 +2316,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
         smi->offsets.blendWeightsAndIndicesBuffer =
             g_MeshStore.CopyBWI(mesh->blendWeightsAndIndices.data(), mesh->BlendWeightsAndIndicesBufferSize()) / sizeof(XMUINT2);
 
+        smi->numVertices = mesh->header.numVerts;
         smi->numBoneMatrices = mesh->SkinMatricesSize();
         smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(mesh->SkinMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 
