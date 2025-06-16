@@ -822,7 +822,7 @@ void LoadAssets()
     for (auto mesh : node.model->skinnedMeshes) {
       auto mi = LoadMesh3D(mesh);
 
-      // TODO: node.meshInstances.push_back(mi);
+      node.meshInstances.push_back(mi);
       if (mi->skinnedMeshInstance) {
         node.skinnedMeshInstances.push_back(mi->skinnedMeshInstance);
       }
@@ -1121,41 +1121,6 @@ void Render()
     } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
     g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT), &ronre, 0);
     g_CommandList->DispatchMesh(mi->numMeshlets, instances.size(), 1);
-  }
-
-  // TODO: TMP
-  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::Skinned].Get());
-  for (const auto node : g_Scene.nodes) {
-    size_t i = 0;
-    for (auto mesh : node.model->skinnedMeshes) {
-      auto geom = mesh->geometry;
-      g_CommandList->IASetVertexBuffers(0, 1, &geom->m_VertexBufferView);
-      g_CommandList->IASetIndexBuffer(&geom->m_IndexBufferView);
-      g_CommandList->IASetPrimitiveTopology(
-          D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-      g_CommandList->SetGraphicsRootConstantBufferView(
-          RootParameter::PerModelConstants, ctx->perModelConstants.GpuAddress(node.cbIndex));
-
-      auto bonesIndex = node.bonesIndices[i++];
-      g_CommandList->SetGraphicsRootShaderResourceView(
-          RootParameter::BoneTransforms,
-          ctx->boneTransformMatrices.GpuAddress(bonesIndex));
-
-      for (const auto& subset : mesh->subsets) {
-        struct {
-          UINT vbIndex;
-          UINT vOffset;
-          UINT texIndex;
-        } ronre = {geom->m_VertexBuffer.SrvDescriptorIndex(), subset.vstart,
-                   subset.texture->m_Buffer.SrvDescriptorIndex()};
-        g_CommandList->SetGraphicsRoot32BitConstants(
-            RootParameter::MaterialConstants, sizeof(ronre) / sizeof(UINT),
-            &ronre, 0);
-        g_CommandList->DrawIndexedInstanced(subset.count, 1, subset.start,
-                                            subset.vstart, 0);
-      }
-    }
   }
 
   ImGui::Render();
@@ -2282,20 +2247,6 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
     }
   }
 
-  // TODO: TMP. only skinned vertex
-  // then we can create geometry. and have a buffer containing a descriptor
-  // index per meshlet to a material
-  if constexpr (std::is_same_v<T, SkinnedVertex>) {
-    auto it = g_Geometries.find(mesh->name);
-    if (it == std::end(g_Geometries)) {
-      printf("CREATE GEOMETRY %s\n", mesh->name.c_str());
-      mesh->geometry = CreateGeometry(mesh);
-    } else {
-      printf("GEOMETRY ALREADY EXISTS %s\n", mesh->name.c_str());
-      mesh->geometry = &it->second;
-    }
-  }
-
   // Create MeshInstance
   auto mi = std::make_shared<MeshInstance>();
   {
@@ -2379,12 +2330,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
   }
 
   mi->numMeshlets = mesh->meshlets.size();
-
-  // TODO: TMP only append static meshes for now
-  if constexpr (std::is_same_v<T, Vertex>) {
-    g_Scene.meshInstanceMap[mesh->name].push_back(mi);
-    //g_Scene.meshInstances.push_back(mi);
-  }
+  g_Scene.meshInstanceMap[mesh->name].push_back(mi);
 
   return mi;
 }

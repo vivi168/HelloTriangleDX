@@ -40,7 +40,7 @@ uint4 UnpackBoneIndices(uint bi)
 [numthreads(64, 1, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
-  if (dtid.x > numVertices) return;
+  if (dtid.x >= numVertices) return;
 
   uint basePositionIdx = dtid.x + basePositionsBufferOffset;
   uint outPositionIdx = dtid.x + positionsBufferOffset;
