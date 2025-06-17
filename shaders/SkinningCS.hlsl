@@ -38,13 +38,13 @@ uint4 UnpackBoneIndices(uint bi)
 }
 
 [numthreads(64, 1, 1)]
-void main(uint3 dtid : SV_DispatchThreadID)
+void main(uint dtid : SV_DispatchThreadID)
 {
-  if (dtid.x >= numVertices) return;
+  if (dtid >= numVertices) return;
 
-  uint basePositionIdx = dtid.x + basePositionsBufferOffset;
-  uint outPositionIdx = dtid.x + positionsBufferOffset;
-  uint bwiIdx = dtid.x + blendWeightsAndIndicesBufferOffset;
+  uint basePositionIdx = dtid + basePositionsBufferOffset;
+  uint outPositionIdx = dtid + positionsBufferOffset;
+  uint bwiIdx = dtid + blendWeightsAndIndicesBufferOffset;
 
   RWStructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
   StructuredBuffer<uint2> bwis = ResourceDescriptorHeap[vertexBlendWeightsAndIndicesBufferId];
