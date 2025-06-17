@@ -126,7 +126,6 @@ struct Animation {
 // Forward declaration
 namespace Renderer
 {
-struct Geometry;
 struct Texture;
 }  // namespace Renderer
 
@@ -148,8 +147,7 @@ struct Mesh3D {
   } header;
 
   static_assert(std::is_base_of_v<Vertex, T>);
-  std::vector<T> vertices; // TODO: TMP
-  std::vector<uint16_t> indices; // TODO: TMP
+  std::vector<uint16_t> indices; // TODO: TMP export to uint32_t
   std::vector<Subset> subsets;
 
   std::vector<DirectX::XMFLOAT3> positions;
@@ -164,8 +162,7 @@ struct Mesh3D {
   std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
 
   std::string name;
-  Renderer::Geometry* geometry = nullptr;  // GPU data // TODO: TMP
-  Skin* skin = nullptr;                    // in case of skinned mesh
+  Skin* skin = nullptr;  // in case of skinned mesh
 
   void Read(std::string filename)
   {
@@ -177,7 +174,6 @@ struct Mesh3D {
 
     fread(&header, sizeof(header), 1, fp);
 
-    //vertices.resize(header.numVerts); TODO: TMP
     positions.resize(header.numVerts);
     normals.resize(header.numVerts);
     uvs.resize(header.numVerts);
@@ -193,25 +189,6 @@ struct Mesh3D {
     if constexpr (std::is_same_v<T, SkinnedVertex>) {
       fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
     }
-    // fread(vertices.data(), sizeof(T), header.numVerts, fp);
-    // TODO: TMP
-    {
-      for (int i = 0; i < header.numVerts; i++) {
-        T v;
-        v.position = positions[i];
-        v.normal = normals[i];
-        v.uv = uvs[i];
-
-        if constexpr (std::is_same_v<T, SkinnedVertex>) {
-          auto wj = blendWeightsAndIndices[i];
-          memcpy(v.weights, &wj.x, MAX_WEIGHTS);
-          memcpy(v.joints, &wj.y, MAX_WEIGHTS);
-        }
-
-        vertices.push_back(v);
-
-      }
-    }
     fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
@@ -224,14 +201,13 @@ struct Mesh3D {
 
       for (size_t si = 0; si < subsets.size(); si++) {
         const auto& subset = subsets[si];
-        subsets_st[si] =
-            std::make_pair<size_t, size_t>(subset.start / 3, subset.count / 3);
+        subsets_st[si] = std::make_pair<size_t, size_t>(subset.start / 3, subset.count / 3);
 
         for (uint32_t i = 0; i < subset.count; i++) {
           uint32_t gi = subset.start + i;
 
           indices32[gi] = static_cast<uint32_t>(indices[gi]) + subset.vstart;
-          assert(indices32[gi] < vertices.size());
+          assert(indices32[gi] < header.numVerts);
         }
       }
 
@@ -241,7 +217,7 @@ struct Mesh3D {
       constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
           indices32.data(), indices32.size() / 3,
-          positions.data(), vertices.size(),
+          positions.data(), header.numVerts,
           subsets_st.data(), subsets_st.size(),
           nullptr,
           meshlets, uniqueVertexIndices, primitiveIndices,
@@ -265,9 +241,6 @@ struct Mesh3D {
 
     fclose(fp);
   }
-
-  // TODO: TMP
-  size_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
 
   size_t PositionsBufferSize() const
   {

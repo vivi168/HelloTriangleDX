@@ -44,19 +44,21 @@ void Collider::ColliderNode::CreateSurfacesFromModel()
           int i2 = mesh->indices[i + 1 + offset];
           int i3 = mesh->indices[i + 2 + offset];
 
-          Vertex v1 = mesh->vertices[i1];
-          Vertex v2 = mesh->vertices[i2];
-          Vertex v3 = mesh->vertices[i3];
+          XMFLOAT3 p1 = mesh->positions[i1];
+          XMFLOAT3 p2 = mesh->positions[i2];
+          XMFLOAT3 p3 = mesh->positions[i3];
 
-          xmv1 = XMVectorSet(v1.position.x, v1.position.y, v1.position.z, 1.0f);
+          // here translate + offset
+
+          xmv1 = XMVectorSet(p1.x, p1.y, p1.z, 1.0f);
           xmv1 = XMVector4Transform(xmv1, model->WorldMatrix());
           XMStoreFloat3(&surf.v1, xmv1);
 
-          xmv2 = XMVectorSet(v2.position.x, v2.position.y, v2.position.z, 1.0f);
+          xmv2 = XMVectorSet(p2.x, p2.y, p2.z, 1.0f);
           xmv2 = XMVector4Transform(xmv2, model->WorldMatrix());
           XMStoreFloat3(&surf.v2, xmv2);
 
-          xmv3 = XMVectorSet(v3.position.x, v3.position.y, v3.position.z, 1.0f);
+          xmv3 = XMVectorSet(p3.x, p3.y, p3.z, 1.0f);
           xmv3 = XMVector4Transform(xmv3, model->WorldMatrix());
           XMStoreFloat3(&surf.v3, xmv3);
         }

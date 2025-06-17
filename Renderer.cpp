@@ -13,12 +13,11 @@ using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {
-enum class PSO { Basic, BasicMS, Skinned, ColliderSurface, SkinningCS };
+enum class PSO { BasicMS, SkinningCS };
 
-// TODO: clean this
 namespace RootParameter
 {
-enum Slots : size_t { FrameConstants = 0, PerModelConstants, BoneTransforms, MaterialConstants, PerMeshConstants, BuffersDescriptorIndices, Count };
+enum Slots : size_t { PerMeshConstants = 0, FrameConstants, BuffersDescriptorIndices, Count };
 }
 
 namespace SkinningCSRootParameter
@@ -99,9 +98,6 @@ struct Scene {
     Model3D* model;
     std::vector<std::shared_ptr<MeshInstance>> meshInstances;
     std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // should be per Skin, not per Model...
-    size_t cbIndex;  // TODO: TMP this is really an offset in the buffer
-    std::vector<size_t> bonesIndices;  // TODO: TMP these are offsets in the buffer
-                                       // TODO: useless, create buffer on default heap + assign descriptor index to SkinnedGeometry
   };
 
   std::vector<SceneNode> nodes;
@@ -112,13 +108,6 @@ struct Scene {
 
 
   Camera* camera;
-};
-
-// TODO: TMP rename this ?
-struct ModelConstantBuffer {
-  XMFLOAT4X4 WorldViewProj;
-  XMFLOAT4X4 WorldMatrix;
-  XMFLOAT4X4 NormalMatrix;
 };
 
 struct DescriptorHeapListAllocator {
@@ -374,44 +363,6 @@ private:
   };
 };
 
-struct Geometry {
-  UploadedHeapResource m_VertexBuffer;
-
-  // TODO: bindful. soon to be useless.
-  D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
-
-  UploadedHeapResource m_IndexBuffer;
-  D3D12_INDEX_BUFFER_VIEW m_IndexBufferView;
-
-  // meshlets
-  UploadedHeapResource m_MeshletBuffer;
-  UploadedHeapResource m_MeshletIndexBuffer;
-  UploadedHeapResource m_MeshletPrimitiveBuffer;
-  UploadedHeapResource m_MeshletMaterialBuffer; // TODO: for now contains just a descriptor index of a texture
-
-  void Reset()
-  {
-    m_VertexBuffer.Reset();
-    m_IndexBuffer.Reset();
-
-    m_MeshletBuffer.Reset();
-    m_MeshletIndexBuffer.Reset();
-    m_MeshletPrimitiveBuffer.Reset();
-    m_MeshletMaterialBuffer.Reset();
-  }
-
-  void ResetUploadBuffers()
-  {
-    m_VertexBuffer.ResetUpload();
-    m_IndexBuffer.ResetUpload();
-
-    m_MeshletBuffer.ResetUpload();
-    m_MeshletIndexBuffer.ResetUpload();
-    m_MeshletPrimitiveBuffer.ResetUpload();
-    m_MeshletMaterialBuffer.ResetUpload();
-  }
-};
-
 struct Texture {
   struct {
     uint16_t width;
@@ -468,13 +419,7 @@ struct FrameContext {
   ComPtr<ID3D12Fence> computeFence;
   UINT64 fenceValue;
 
-  HeapResource perModelConstants;
-  HeapResource boneTransformMatrices;
-
   void Reset() {
-    perModelConstants.Reset();
-    boneTransformMatrices.Reset();
-
     renderTarget.Reset();
     commandAllocator.Reset();
     computeCommandAllocator.Reset();
@@ -697,11 +642,8 @@ struct MeshStore {
 
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
-static void* const CUSTOM_ALLOCATION_PRIVATE_DATA =
-    (void*)(uintptr_t)0xDEADC0DE;
+static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
 
-static const size_t OBJECT_CB_ALIGNED_SIZE =
-    AlignUp<size_t>(sizeof(ModelConstantBuffer), 256);
 static const size_t FRAME_BUFFER_COUNT = 3;
 
 static const UINT PRESENT_SYNC_INTERVAL = 1;
@@ -720,7 +662,6 @@ static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 template <typename T> static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh);
-template <typename T> static Geometry* CreateGeometry(Mesh3D<T>* mesh);
 static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
@@ -776,7 +717,6 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
-static std::unordered_map<std::string, Geometry> g_Geometries; // TODO: TMP
 static std::unordered_map<std::string, Texture> g_Textures;
 static Scene g_Scene;
 
@@ -894,10 +834,6 @@ void LoadAssets()
   for (auto& [k, tex] : g_Textures) {
     tex.ResetUploadBuffer();
   }
-
-  for (auto& [k, geom] : g_Geometries) {
-    geom.ResetUploadBuffers();
-  }
 }
 
 void Update(float time, float dt)
@@ -929,10 +865,6 @@ void Update(float time, float dt)
         for (auto skinnedMesh : model->skinnedMeshes) {
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
 
-          auto bonesIndex = node.bonesIndices[i++];
-          ctx->boneTransformMatrices.Copy(bonesIndex, matrices.data(),
-                                          sizeof(XMFLOAT4X4) * matrices.size());
-
           for (auto smi : node.skinnedMeshInstances) {
             // TODO: should be by skin, we duplicate unecessary data. (see todo above, don't loop skinnedMesh)
             g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
@@ -942,23 +874,7 @@ void Update(float time, float dt)
       }  // else identity matrices ?
 
       XMMATRIX worldViewProjection = model->WorldMatrix() * viewProjection;
-      // TODO: TMP START
-      ModelConstantBuffer cb;
-      XMStoreFloat4x4(&cb.WorldViewProj,
-                      XMMatrixTranspose(worldViewProjection));
-      XMStoreFloat4x4(&cb.WorldMatrix,
-                      XMMatrixTranspose(model->WorldMatrix()));
-
-      XMMATRIX normalMatrix =
-          XMMatrixInverse(nullptr, model->WorldMatrix());
-      XMStoreFloat4x4(&cb.NormalMatrix, normalMatrix);
-
-      // TMP: hack this for now. won't need cb indices and such when we
-      // render everything with mesh shader and do compute shader skinning.
-      if (model->skinnedMeshes.size() > 0) {
-        ctx->perModelConstants.Copy(node.cbIndex, &cb, sizeof(cb));
-      }
-      // TODO: TMP END
+      XMMATRIX normalMatrix = XMMatrixInverse(nullptr, model->WorldMatrix());
 
       for (auto mi : node.meshInstances) {
         XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
@@ -1011,12 +927,8 @@ void Render()
   // allocator. The command allocator that we reference here may have multiple
   // command lists associated with it, but only one can be recording at any
   // time. Make sure that any other command lists associated to this command
-  // allocator are in the closed state (not recording). Here you will pass an
-  // initial pipeline state object as the second parameter, but in this tutorial
-  // we are only clearing the rtv, and do not actually need anything but an
-  // initial default pipeline, which is what we get by setting the second
-  // parameter to NULL
-  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+  // allocator are in the closed state (not recording).
+  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), g_PipelineStateObjects[PSO::BasicMS].Get()));
   CHECK_HR(g_ComputeCommandList->Reset(ctx->computeCommandAllocator.Get(), g_PipelineStateObjects[PSO::SkinningCS].Get()));
 
   // here we start recording commands into the g_CommandList (which all the
@@ -1070,7 +982,7 @@ void Render()
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
-  // Actually copy data from upload heap to default heap
+  // record data transfers from upload heap -> default heap
   {
     std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
 
@@ -1110,8 +1022,7 @@ void Render()
   }
   CHECK_HR(g_ComputeCommandList->Close());
 
-  // then draw
-  g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
+  // record draw calls
   for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
     auto mi = instances[0];
     struct {
@@ -1195,11 +1106,6 @@ void Cleanup()
     tex.Reset();
   }
 
-  for (auto& [k, geom] : g_Geometries) {
-    // TODO: should free geometry Descriptor Indices
-    geom.Reset();
-  }
-
   {
     g_MeshStore.m_VertexPositions.Reset();
     g_MeshStore.m_VertexPositions.ResetUpload();
@@ -1240,7 +1146,7 @@ void Cleanup()
   }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
-  g_PipelineStateObjects[PSO::Skinned].Reset();
+  g_PipelineStateObjects[PSO::SkinningCS].Reset();
   g_RootSignature.Reset();
 
   CloseHandle(g_FenceEvent);
@@ -1290,19 +1196,6 @@ void AppendToScene(Model3D* model)
 {
   Scene::SceneNode node;
   node.model = model;
-
-  // TMP: hack this for now. won't need cb indices and such when we
-  // render everything with mesh shader and do compute shader skinning.
-  if (model->skinnedMeshes.size() > 0) {
-    size_t cbIndex = OBJECT_CB_ALIGNED_SIZE * g_CbNextIndex++;
-    node.cbIndex = cbIndex;
-  }
-
-  for (auto mesh : model->skinnedMeshes) {
-    size_t boneIndex = g_BonesNextIndex;
-    g_BonesNextIndex += mesh->SkinMatricesBufferSize();
-    node.bonesIndices.push_back(boneIndex);
-  }
 
   g_Scene.nodes.push_back(node);
 }
@@ -1646,12 +1539,9 @@ static void InitFrameResources()
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 0); // b0
-    rootParameters[RootParameter::PerModelConstants].InitAsConstantBufferView(1);  // b1 TODO: TMP: soon useless (use instance buffer)
-    rootParameters[RootParameter::BoneTransforms].InitAsShaderResourceView(0); // t0
-    rootParameters[RootParameter::MaterialConstants].InitAsConstants(3, 2);  // b2 // TODO: TMP: useless when we remove VS pipeline
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(3, 3);  // b3 // TODO: rework root signature.
-    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 4);  // b4 // TODO: rework root signature.
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(3, 0);  // b0
+    rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
+    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 2);  // b2
 
     // Static sampler
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
@@ -1697,37 +1587,6 @@ static void InitFrameResources()
     g_ComputeRootSignature.Attach(rootSignature);
   }
 
-  // TODO: TMP
-  // per object CB
-  {
-    D3D12MA::CALLOCATION_DESC allocDesc =
-        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
-
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(1024 * 64);
-
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      auto ctx = &g_FrameContext[i];
-
-      // size of the resource heap. Must be a multiple of 64KB for
-      // single-textures and constant buffers
-      ctx->perModelConstants.CreateResource(
-          g_Allocator.Get(), &allocDesc,
-          &bufferDesc);  // 1024 * 64 bytes = 64KB
-      ctx->perModelConstants.SetName("Per Model Constant Buffer ", i);
-      ctx->perModelConstants.Map();
-
-      ctx->boneTransformMatrices.CreateResource(g_Allocator.Get(), &allocDesc,
-                                                &bufferDesc);
-      ctx->boneTransformMatrices.SetName("Bone Matrices Constant Buffer ", i);
-      ctx->boneTransformMatrices.Map();
-    }
-  }
-
-  // Pixel Shader
-  auto pixelShaderBlob = ReadData(GetAssetFullPath(L"DefaultPS.cso").c_str());
-  D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                       pixelShaderBlob.size()};
-
   // Mesh Shader Pipeline State for static objects
   {
     // Mesh Shader
@@ -1763,61 +1622,6 @@ static void InitFrameResources()
     CHECK_HR(g_Device->CreatePipelineState(&streamDesc,
                                            IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::BasicMS].Attach(pipelineStateObject);
-  }
-
-  // TODO: TMP
-  // Pipeline State for skinned objects
-  {
-    // Vertex Shader
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"DefaultSkinnedVS.cso").c_str());
-    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(),
-                                          vertexShaderBlob.size()};
-
-    // Input Layout
-    const D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"WEIGHTS", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"BONEINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT, 0,
-         D3D12_APPEND_ALIGNED_ELEMENT,
-         D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-    };
-
-    // PSO
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout.NumElements = _countof(inputLayout);
-    psoDesc.InputLayout.pInputElementDescs = inputLayout;
-    psoDesc.pRootSignature = g_RootSignature.Get();
-    psoDesc.VS = vertexShader;
-    psoDesc.PS = pixelShader;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
-    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.SampleDesc = DefaultSampleDesc();
-
-    // Create the PSO
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateGraphicsPipelineState(
-        &psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::Skinned].Attach(pipelineStateObject);
   }
 
   // Compute skinning pipeline
@@ -2252,7 +2056,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
   {
     auto it = g_Scene.meshInstanceMap.find(mesh->name);
     if (it == std::end(g_Scene.meshInstanceMap)) {
-      // CreateGeometry2
+      // CreateGeometry
       // vertex data
       if constexpr (std::is_same_v<T, SkinnedVertex>) {
         // in case of skinned mesh, these will be filled by a compute shader
@@ -2333,234 +2137,6 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
 
   return mi;
-}
-
-// TODO: TMP
-template <typename T>
-static Geometry* CreateGeometry(Mesh3D<T>* mesh)
-{
-  Geometry geom;
-
-  std::array<D3D12_RESOURCE_BARRIER, 6> postUploadBarriers;
-
-  // Vertex Buffer
-  {
-    const size_t vBufferSize = mesh->VertexBufferSize();
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vBufferSize);
-
-    geom.m_VertexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                        &bufferDesc);
-
-    geom.m_VertexBuffer.SetName("Vertex Buffer: " + mesh->name);
-
-    D3D12_SUBRESOURCE_DATA vertexData = {};
-    vertexData.pData = reinterpret_cast<BYTE*>(mesh->vertices.data());
-    vertexData.RowPitch = vBufferSize;
-    vertexData.SlicePitch = vBufferSize;
-
-    geom.m_VertexBuffer.Upload(g_CommandList.Get(), &vertexData);
-    postUploadBarriers[0] = geom.m_VertexBuffer.TransitionFromCopyTo(
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // create a vertex buffer view
-    // TODO: useless when we go full bindless (missing: skinned models)
-    geom.m_VertexBufferView.BufferLocation = geom.m_VertexBuffer.GpuAddress();
-    geom.m_VertexBufferView.StrideInBytes = sizeof(T);
-    geom.m_VertexBufferView.SizeInBytes = (UINT)vBufferSize;
-
-    // create a descriptor for bindless
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Buffer.FirstElement = 0;
-    srvDesc.Buffer.NumElements = mesh->vertices.size();
-    srvDesc.Buffer.StructureByteStride = sizeof(T);
-    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-
-    geom.m_VertexBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(geom.m_VertexBuffer.Resource(), &srvDesc,
-                                       geom.m_VertexBuffer.SrvDescriptorHandle());
-  }
-
-  // Index Buffer (not used by mesh shader pipeline)
-  {
-    size_t iBufferSize = mesh->IndexBufferSize();
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(iBufferSize);
-
-    geom.m_IndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                       &bufferDesc);
-
-    geom.m_IndexBuffer.SetName("Index Buffer: " + mesh->name);
-
-    D3D12_SUBRESOURCE_DATA indexData = {};
-    indexData.RowPitch = iBufferSize;
-    indexData.SlicePitch = iBufferSize;
-    indexData.pData = reinterpret_cast<BYTE*>(mesh->indices.data());
-
-    geom.m_IndexBuffer.Upload(g_CommandList.Get(), &indexData);
-    postUploadBarriers[1] =
-        geom.m_IndexBuffer.TransitionFromCopyTo(D3D12_RESOURCE_STATE_INDEX_BUFFER);
-
-    // create a index buffer view
-    geom.m_IndexBufferView.BufferLocation = geom.m_IndexBuffer.GpuAddress();
-    geom.m_IndexBufferView.Format = DXGI_FORMAT_R16_UINT;
-    geom.m_IndexBufferView.SizeInBytes = (UINT)iBufferSize;
-  }
-
-  // Meshlet Buffer
-  {
-    const size_t bufferSize = mesh->MeshletBufferSize();
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-    geom.m_MeshletBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                         &bufferDesc);
-    geom.m_MeshletBuffer.SetName("Meshlet Buffer: " + mesh->name);
-
-    D3D12_SUBRESOURCE_DATA data{
-        .pData = reinterpret_cast<BYTE*>(mesh->meshlets.data()),
-        .RowPitch = static_cast<LONG_PTR>(bufferSize),
-        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
-
-    geom.m_MeshletBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[2] = geom.m_MeshletBuffer.TransitionFromCopyTo(
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // descriptor
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {.FirstElement = 0,
-                   .NumElements = static_cast<UINT>(mesh->meshlets.size()),
-                   .StructureByteStride = sizeof(Meshlet),
-                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-
-    geom.m_MeshletBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(geom.m_MeshletBuffer.Resource(),
-                                       &srvDesc,
-                                       geom.m_MeshletBuffer.SrvDescriptorHandle());
-  }
-
-  // Meshlet Index Buffer
-  {
-    const size_t bufferSize = mesh->MeshletIndexBufferSize();
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-
-    geom.m_MeshletIndexBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                              &bufferDesc);
-    geom.m_MeshletIndexBuffer.SetName("Meshlet Index Buffer: " + mesh->name);
-
-    D3D12_SUBRESOURCE_DATA data{
-        .pData = reinterpret_cast<BYTE*>(mesh->uniqueVertexIndices.data()),
-        .RowPitch = static_cast<LONG_PTR>(bufferSize),
-        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
-
-    geom.m_MeshletIndexBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[3] = geom.m_MeshletIndexBuffer.TransitionFromCopyTo(
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // descriptor
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {.FirstElement = 0,
-                   .NumElements =
-                       static_cast<UINT>(mesh->MeshletIndexBufferNumElements()),
-                   .StructureByteStride = sizeof(UINT),
-                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-
-    geom.m_MeshletIndexBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(
-        geom.m_MeshletIndexBuffer.Resource(), &srvDesc,
-        geom.m_MeshletIndexBuffer.SrvDescriptorHandle());
-  }
-
-  // Meshlet Primitive Buffer
-  {
-    const size_t bufferSize = mesh->MeshletPrimitiveBufferSize();
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-    geom.m_MeshletPrimitiveBuffer.CreateResources(g_Allocator.Get(),
-                                                  &bufferDesc, &bufferDesc);
-    geom.m_MeshletPrimitiveBuffer.SetName("Meshlet Primitive Buffer: " +
-                                          mesh->name);
-
-    D3D12_SUBRESOURCE_DATA data{
-        .pData = reinterpret_cast<BYTE*>(mesh->primitiveIndices.data()),
-        .RowPitch = static_cast<LONG_PTR>(bufferSize),
-        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
-
-    geom.m_MeshletPrimitiveBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[4] = geom.m_MeshletPrimitiveBuffer.TransitionFromCopyTo(
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // descriptor
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {
-            .FirstElement = 0,
-            .NumElements = static_cast<UINT>(mesh->primitiveIndices.size()),
-            .StructureByteStride = sizeof(MeshletTriangle),
-            .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-
-    geom.m_MeshletPrimitiveBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(
-        geom.m_MeshletPrimitiveBuffer.Resource(), &srvDesc,
-        geom.m_MeshletPrimitiveBuffer.SrvDescriptorHandle());
-  }
-
-  // Meshlet Material Buffer
-  {
-    // CPU buffer
-    std::vector<UINT> meshletMaterials(mesh->meshlets.size());
-
-    for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
-      auto subset = mesh->meshletSubsetIndices[mi];
-
-      meshletMaterials[mi] = subset->texture->m_Buffer.SrvDescriptorIndex();
-    }
-
-    // GPU buffer
-    const size_t bufferSize = meshletMaterials.size() * sizeof(UINT);
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
-    geom.m_MeshletMaterialBuffer.CreateResources(g_Allocator.Get(), &bufferDesc,
-                                                 &bufferDesc);
-    geom.m_MeshletMaterialBuffer.SetName("Meshlet Material Buffer: " +
-                                         mesh->name);
-
-    D3D12_SUBRESOURCE_DATA data{
-        .pData = reinterpret_cast<BYTE*>(meshletMaterials.data()),
-        .RowPitch = static_cast<LONG_PTR>(bufferSize),
-        .SlicePitch = static_cast<LONG_PTR>(bufferSize)};
-
-    geom.m_MeshletMaterialBuffer.Upload(g_CommandList.Get(), &data);
-    postUploadBarriers[5] = geom.m_MeshletMaterialBuffer.TransitionFromCopyTo(
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // descriptor
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer = {.FirstElement = 0,
-                   .NumElements = static_cast<UINT>(meshletMaterials.size()),
-                   .StructureByteStride = sizeof(UINT),
-                   .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-
-    geom.m_MeshletMaterialBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(
-        geom.m_MeshletMaterialBuffer.Resource(), &srvDesc,
-        geom.m_MeshletMaterialBuffer.SrvDescriptorHandle());
-  }
-
-  g_CommandList->ResourceBarrier(postUploadBarriers.size(),
-                                 postUploadBarriers.data());
-
-  g_Geometries[mesh->name] = geom;
-
-  return &g_Geometries[mesh->name];
 }
 
 static Texture* CreateTexture(std::string name)

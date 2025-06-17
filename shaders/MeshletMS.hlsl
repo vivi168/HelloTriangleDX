@@ -1,47 +1,4 @@
-cbuffer FrameConstants : register(b0)
-{
-  float time;
-  float deltaTime;
-};
-
-cbuffer MeshletConstants : register(b3)
-{
-  uint instanceBufferOffset;
-  uint numMeshlets;
-  uint numInstances;
-};
-
-cbuffer BuffersDescriptorIndices : register(b4)
-{
-  uint vertexPositionsBufferId;
-  uint vertexNormalsBufferId;
-  // TODO: tangents
-  uint vertexUVsBufferId;
-
-  uint meshletsBufferId;
-  uint visibleMeshletsBufferId;
-  uint meshletUniqueIndicesBufferId;
-  uint meshletsPrimitivesBufferId;
-  uint meshletMaterialsBufferId;
-  // TODO: materials
-  uint instancesBufferId;
-};
-
-struct MeshInstance {
-  float4x4 WorldViewProj;
-  float4x4 WorldMatrix;
-  float4x4 NormalMatrix;
-
-  uint positionsBufferOffset;
-  uint normalsBufferOffset;
-  // TODO: tangents
-  uint uvsBufferOffset;
-
-  uint meshletBufferOffset;
-  uint indexBufferOffset;
-  uint primBufferOffset;
-  uint2 pad;
-};
+#include "MeshletCommon.hlsli"
 
 struct Meshlet
 {
@@ -57,14 +14,6 @@ struct Vertex
   float3 normal;
   float4 color;
   float2 texCoord;
-};
-
-struct MS_OUTPUT
-{
-  float4 pos : SV_POSITION;
-  float3 normal : NORMAL;
-  float2 texCoord : TEXCOORD;
-  uint meshletIndex : COLOR0;
 };
 
 uint3 UnpackPrimitive(uint primitive)
