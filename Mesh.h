@@ -242,44 +242,23 @@ struct Mesh3D {
     fclose(fp);
   }
 
-  size_t PositionsBufferSize() const
-  {
-    return sizeof(positions[0]) * header.numVerts;
-  }
-  size_t NormalsBufferSize() const
-  {
-    return sizeof(normals[0]) * header.numVerts;
-  }
-  size_t UvsBufferSize() const
-  {
-    return sizeof(uvs[0]) * header.numVerts;
-  }
-  size_t BlendWeightsAndIndicesBufferSize() const
-  {
-    return sizeof(blendWeightsAndIndices[0]) * header.numVerts;
-  }
+  size_t PositionsBufferSize() const { return sizeof(positions[0]) * header.numVerts; }
 
-  size_t IndexBufferSize() const
-  {
-    return sizeof(uint16_t) * header.numIndices;
-  }
+  size_t NormalsBufferSize() const { return sizeof(normals[0]) * header.numVerts; }
+
+  size_t UvsBufferSize() const { return sizeof(uvs[0]) * header.numVerts; }
+
+  size_t BlendWeightsAndIndicesBufferSize() const { return sizeof(blendWeightsAndIndices[0]) * header.numVerts; }
+
+  size_t IndexBufferSize() const { return sizeof(uint16_t) * header.numIndices; }
 
   size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
 
-  size_t MeshletIndexBufferNumElements() const
-  {
-    return DivRoundUp(uniqueVertexIndices.size(), sizeof(UINT));
-  }
+  size_t MeshletIndexBufferNumElements() const { return DivRoundUp(uniqueVertexIndices.size(), sizeof(UINT)); }
 
-  size_t MeshletIndexBufferSize() const
-  {
-    return MeshletIndexBufferNumElements() * sizeof(UINT);
-  }
+  size_t MeshletIndexBufferSize() const { return MeshletIndexBufferNumElements() * sizeof(UINT); }
 
-  size_t MeshletPrimitiveBufferSize() const
-  {
-    return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size();
-  }
+  size_t MeshletPrimitiveBufferSize() const { return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size(); }
 
   size_t SkinMatricesBufferSize() const
   {

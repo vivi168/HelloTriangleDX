@@ -193,10 +193,7 @@ struct HeapDescriptor
 struct HeapResource {
   ID3D12Resource* Resource() const { return resource.Get(); };
 
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
-  {
-    return resource->GetGPUVirtualAddress() + offset;
-  }
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return resource->GetGPUVirtualAddress() + offset; }
 
   void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { srvDescriptor.Alloc(allocator); }
 
@@ -210,32 +207,24 @@ struct HeapResource {
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.handle; }
 
-  void CreateResource(D3D12MA::Allocator* allocator,
-                      const D3D12MA::ALLOCATION_DESC* allocDesc,
+  void CreateResource(D3D12MA::Allocator* allocator, const D3D12MA::ALLOCATION_DESC* allocDesc,
                       const D3D12_RESOURCE_DESC* pResourceDesc,
-                      D3D12_RESOURCE_STATES InitialResourceState =
-                          D3D12_RESOURCE_STATE_GENERIC_READ,
+                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
   {
-    CHECK_HR(allocator->CreateResource(
-        allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
-        &allocation, IID_PPV_ARGS(&resource)));
+    CHECK_HR(allocator->CreateResource(allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
+                                       &allocation, IID_PPV_ARGS(&resource)));
   }
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
 
   void Unmap() { resource->Unmap(0, nullptr); }
 
-  void Copy(size_t offset, const void* data, size_t size)
-  {
-    memcpy((BYTE*)address + offset, data, size);
-  }
+  void Copy(size_t offset, const void* data, size_t size) { memcpy((BYTE*)address + offset, data, size); }
 
-  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore,
-                                    D3D12_RESOURCE_STATES stateAfter)
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
   {
-    return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore,
-                                                stateAfter);
+    return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore, stateAfter);
   }
 
   void SetName(std::string name)
@@ -273,29 +262,21 @@ private:
 
 // TODO: rename this
 struct UploadedHeapResource {
-  void CreateResources(D3D12MA::Allocator* allocator,
-                       const D3D12_RESOURCE_DESC* pResourceDesc,
+  void CreateResources(D3D12MA::Allocator* allocator, const D3D12_RESOURCE_DESC* pResourceDesc,
                        const D3D12_RESOURCE_DESC* pResourceUploadDesc,
-                       D3D12_RESOURCE_STATES InitialResourceState =
-                           D3D12_RESOURCE_STATE_COMMON,
+                       D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON,
                        const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
   {
     // create default heap
-    // Default heap is memory on the GPU. Only the GPU has access to this
-    // memory. To get data into this heap, we will have to upload the data using
-    // an upload heap
-    D3D12MA::CALLOCATION_DESC allocDesc =
-        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-    buffer.CreateResource(allocator, &allocDesc, pResourceDesc,
-                          InitialResourceState, pOptimizedClearValue);
+    // Default heap is memory on the GPU. Only the GPU has access to this memory. To get data into this heap, we will
+    // have to upload the data using an upload heap
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
+    buffer.CreateResource(allocator, &allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue);
     // create upload heap
-    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU
-    // can read from it. We will upload the buffer using this heap to the
-    // default heap
-    D3D12MA::CALLOCATION_DESC uploadAllocDesc =
-        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
-    uploadBuffer.CreateResource(allocator, &uploadAllocDesc,
-                                pResourceUploadDesc);
+    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU can read from it. We will upload the
+    // buffer using this heap to the default heap
+    D3D12MA::CALLOCATION_DESC uploadAllocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
+    uploadBuffer.CreateResource(allocator, &uploadAllocDesc, pResourceUploadDesc);
   }
 
   void Map() { uploadBuffer.Map(); }
@@ -330,10 +311,7 @@ struct UploadedHeapResource {
 
   ID3D12Resource* Resource() const { return buffer.Resource(); };
 
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const
-  {
-    return buffer.GpuAddress(offset);
-  }
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return buffer.GpuAddress(offset); }
 
   void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { buffer.AllocSrvDescriptor(allocator); }
 
@@ -357,10 +335,7 @@ private:
   HeapResource buffer;
   HeapResource uploadBuffer;
 
-  ID3D12Resource* UploadResource() const
-  {
-    return uploadBuffer.Resource();
-  };
+  ID3D12Resource* UploadResource() const { return uploadBuffer.Resource(); };
 };
 
 struct Texture {
@@ -388,6 +363,7 @@ struct Texture {
   }
 
   void Reset() { m_Buffer.Reset(); }
+
   void ResetUploadBuffer() { m_Buffer.ResetUpload(); }
 
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
@@ -544,10 +520,7 @@ struct MeshStore {
     return offset;
   }
 
-  void UpdateInstance(const void* data, size_t size, UINT offset)
-  {
-    m_Instances.Copy(offset, data, size);
-  }
+  void UpdateInstance(const void* data, size_t size, UINT offset) { m_Instances.Copy(offset, data, size); }
 
   UINT ReserveBoneMatrices(size_t size)
   {
@@ -557,10 +530,7 @@ struct MeshStore {
     return offset;
   }
 
-  void UpdateBoneMatrices(const void* data, size_t size, UINT offset)
-  {
-    m_BoneMatrices.Copy(offset, data, size);
-  }
+  void UpdateBoneMatrices(const void* data, size_t size, UINT offset) { m_BoneMatrices.Copy(offset, data, size); }
 
   static constexpr size_t NumDescriptorIndices = 9;
   static constexpr size_t NumSkinningCSDescriptorIndices = 4;
@@ -665,11 +635,6 @@ template <typename T> static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>*
 static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
-
-static size_t g_CbNextIndex = 0; // TODO: rename as offset
-                                 // TODO: add a struct to allocate / free indices
-static size_t g_BonesNextIndex = 0; // TODO: rename as offset
-                                    // use bindless for bone matrices?
 
 static UINT g_Width;
 static UINT g_Height;
@@ -822,7 +787,6 @@ void LoadAssets()
     g_CommandList->ResourceBarrier(uploadBarriers.size(), uploadBarriers.data());
   }
 
-
   g_CommandList->Close();
 
   ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
@@ -848,8 +812,7 @@ void Update(float time, float dt)
 
   // Per object constant buffer
   {
-    const XMMATRIX projection = XMMatrixPerspectiveFovRH(
-        45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
+    const XMMATRIX projection = XMMatrixPerspectiveFovRH(45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
 
     XMMATRIX view = g_Scene.camera->LookAt();
     XMMATRIX viewProjection = view * projection;
@@ -971,10 +934,11 @@ void Render()
 
   g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
-  g_CommandList->SetGraphicsRoot32BitConstants(
-      RootParameter::FrameConstants, FrameContext::frameConstantsSize, &ctx->frameConstants, 0);
+  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
+                                               &ctx->frameConstants, 0);
   auto h = g_MeshStore.BuffersDescriptorIndices();
-  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices, MeshStore::NumDescriptorIndices, h.data(), 0);
+  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices, MeshStore::NumDescriptorIndices,
+                                               h.data(), 0);
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
