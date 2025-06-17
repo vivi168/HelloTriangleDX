@@ -82,13 +82,6 @@ struct Animation {
 
   float minTime;
   float maxTime;
-  float curTime = 0.0f;
-
-  void Update(float dt) {
-    curTime += dt;
-    if (curTime > maxTime)
-      curTime = minTime;
-  }
 
   void Read(std::string filename)
   {
@@ -113,14 +106,26 @@ struct Animation {
 
       if (minEl->time < minTime) minTime = minEl->time;
       if (maxEl->time > maxTime) maxTime = maxEl->time;
-
-      curTime = minTime;
     }
   }
 
-  DirectX::XMMATRIX Interpolate(int boneId, Skin* skin);
+  DirectX::XMMATRIX Interpolate(float curTime, int boneId, Skin* skin);
 
-  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(Skin* skin);
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime, Skin* skin);
+};
+
+struct AnimationInfo {
+  Animation* animation = nullptr;
+
+  float curTime = 0.0f;
+
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float dt, Skin* skin)
+  {
+    curTime += dt;
+    if (curTime > animation->maxTime) curTime = animation->minTime;
+
+    return animation->BoneTransforms(curTime, skin);
+  }
 };
 
 // Forward declaration
@@ -280,7 +285,7 @@ struct Model3D {
   std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
   std::vector<Skin*> skins; // TODO: loop this and not meshes then skin when computing matrices.
   std::unordered_map<std::string, Animation*> animations;
-  Animation* currentAnimation = nullptr;
+  AnimationInfo currentAnimation;
 
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 translate;
@@ -293,5 +298,14 @@ struct Model3D {
   void Scale(float s);
   void Rotate(float x, float y, float z);
   void Translate(float x, float y, float z);
+
+  void SetCurrentAnimation(std::string name)
+  {
+    currentAnimation.animation = animations[name];
+    assert(currentAnimation.animation);
+  }
+
+  bool HasCurrentAnimation() { return currentAnimation.animation != nullptr; }
+
   void Clean() { dirty = false; }
 };

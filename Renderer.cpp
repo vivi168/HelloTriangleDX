@@ -821,12 +821,11 @@ void Update(float time, float dt)
       auto model = node.model;
 
       // TODO: TMP (refactor when doing compute shader skinning)
-      if (model->currentAnimation) {
-        model->currentAnimation->Update(dt);
+      if (model->HasCurrentAnimation()) {
         size_t i = 0;
         // TODO: don't loop skinnedMesh but loop unique skins to avoid computing same thing twice
         for (auto skinnedMesh : model->skinnedMeshes) {
-          std::vector<XMFLOAT4X4> matrices = model->currentAnimation->BoneTransforms(skinnedMesh->skin);
+          std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(dt, skinnedMesh->skin);
 
           for (auto smi : node.skinnedMeshInstances) {
             // TODO: should be by skin, we duplicate unecessary data. (see todo above, don't loop skinnedMesh)
@@ -2086,6 +2085,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
 
         auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets = i->skinnedMeshInstance->offsets;
+
+        smi->numVertices = mesh->header.numVerts;
         smi->numBoneMatrices = i->skinnedMeshInstance->numBoneMatrices;
         smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(smi->BoneMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 

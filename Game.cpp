@@ -226,7 +226,6 @@ void Game::Init()
     }
   }
 
-
   bigTree.meshes.push_back(&treeMesh);
   smallTree.meshes.push_back(&treeMesh);
   yuka.meshes.push_back(&yukaMesh);
@@ -239,17 +238,17 @@ void Game::Init()
   human.skinnedMeshes.push_back(&humanMeshes[0]);
   human.skinnedMeshes.push_back(&humanMeshes[1]);
   human.animations["attack"] = &humanAnim;
-  human.currentAnimation = human.animations["attack"];
+  human.SetCurrentAnimation("attack");
 
-  knight.meshes.push_back(&swordMesh);
+  //knight.meshes.push_back(&swordMesh);
   knight.skinnedMeshes.push_back(&knightMesh);
   knight.animations["test"] = &knightAnim;
-  knight.currentAnimation = knight.animations["test"];
+  knight.SetCurrentAnimation("test");
 
   sponza.meshes.push_back(&sponzaMesh);
   cesium.skinnedMeshes.push_back(&cesiumMesh);
   cesium.animations["walk"] = &cesiumAnim;
-  cesium.currentAnimation = cesium.animations["walk"];
+  cesium.SetCurrentAnimation("walk");
 
   cylinder.Scale(5.0f);
 
