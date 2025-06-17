@@ -96,8 +96,17 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         Game::Update(g_Time, g_TimeDelta);
         Renderer::Update(g_Time, g_TimeDelta);
         Game::DebugWindow();
+        static std::array<float, 100> fpsHistory = {};
+        static int fpsIndex = 0;
+        float fps = 1.0f / g_TimeDelta;
+        fpsHistory[fpsIndex] = fps;
+        fpsIndex = (fpsIndex + 1) % fpsHistory.size();
+        float avgFps = std::accumulate(fpsHistory.begin(), fpsHistory.end(), 0.f) / fpsHistory.size();
+
         ImGui::Begin("Stats");
-        ImGui::Text("FPS: %.1f", 1 / g_TimeDelta);
+        ImGui::Text("FPS: %.1f", avgFps);
+        ImGui::PlotLines("FPS History", fpsHistory.data(), fpsHistory.size(),
+                         fpsIndex, nullptr, 0.0f, 120.0f, ImVec2(0, 80));
         ImGui::End();
         Renderer::Render();
       }
