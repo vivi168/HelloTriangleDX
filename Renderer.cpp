@@ -1606,7 +1606,7 @@ static void InitFrameResources()
     static constexpr size_t numPrimitives = 3'000'000;
     static constexpr size_t numInstances = 10000;
     static constexpr size_t numMaterials = 100;
-    static constexpr size_t numMatrices = 1000;
+    static constexpr size_t numMatrices = 3000;
 
     // Positions buffer
     {

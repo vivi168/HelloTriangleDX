@@ -26,6 +26,7 @@ struct Player {
 static Model3D cube, cylinder, yuka, terrain, stairs, unitCube, knight, human, sponza, cesium;
 
 static std::vector<Model3D> trees;
+static std::vector<Model3D> knights;
 
 static Camera camera;
 static Collider collider;
@@ -171,26 +172,20 @@ void Game::Init()
 {
   Renderer::SetSceneCamera(&camera);
 
+  Model3D baseTree;
+  baseTree.AddMesh("assets/OPTIM_white_oak_mesh_1.mesh");
+
   int ntree = 3;
-
   trees.resize(ntree * ntree);
-  //for (int y = 0; y < ntree; y++) {
-  //  for (int x = 0; x < ntree; x++) {
-  //    int i = y * ntree + x;
+  for (int y = 0; y < ntree; y++) {
+    for (int x = 0; x < ntree; x++) {
+      int i = y * ntree + x;
 
-  //    //trees[i].meshes.push_back(&treeMesh);
-  //    trees[i].skinnedMeshes.push_back(&knightMesh);
-  //    trees[i].animations["test"] = &knightAnim;
-  //    trees[i].SetCurrentAnimation("test");
-  //    trees[i].currentAnimation.curTime = 0.25 * i;
-  //    trees[i].Scale(10.f);
-  //    trees[i].Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
+      trees[i] = baseTree.SpawnInstance().Scale(10.0f).Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
 
-  //    printf("TREE %d - [%f %f]\n", i, x, y);
-
-  //    Renderer::AppendToScene(&trees[i]);
-  //  }
-  //}
+      Renderer::AppendToScene(&trees[i]);
+    }
+  }
 
   yuka.AddMesh("assets/OPTIM_yuka_mesh_1.mesh").Scale(5.f).Translate(15.f, 0.f, 15.f);
   Renderer::AppendToScene(&yuka);
@@ -237,6 +232,22 @@ void Game::Init()
       .Scale(1.5f)
       .Rotate(0, XM_PI / 2, 0);
   Renderer::AppendToScene(&knight);
+
+  int yknight = 3;
+  int xknight = 5;
+  knights.resize(yknight * xknight);
+  for (int y = 0; y < yknight; y++) {
+    for (int x = 0; x < xknight; x++) {
+      int i = y * xknight + x;
+
+      knights[i] = knight.SpawnInstance()
+                         .SetCurrentAnimation("test")
+                         .Scale(1.5f)
+                         .Translate(80 + x * 10, 20.f, 20.0f + y * 10.f);
+
+      Renderer::AppendToScene(&knights[i]);
+    }
+  }
 
   cesium.AddSkinnedMesh("assets/OPTIM_CesiumMan_mesh_1.mesh", "assets/OPTIM_CesiumMan_skin_1.skin")
       .AddAnimation("assets/OPTIM_CesiumMan_animation_1.anim", "walk")

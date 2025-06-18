@@ -258,8 +258,8 @@ struct Model3D {
   std::vector<std::shared_ptr<Mesh3D>> meshes;
   std::unordered_map<std::string, std::shared_ptr<Skin>> skins;
   std::unordered_map<std::string, std::shared_ptr<Animation>> animations;
-  AnimationInfo currentAnimation;
 
+  AnimationInfo currentAnimation;
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 translate;
   DirectX::XMFLOAT3 rotate;
@@ -267,8 +267,15 @@ struct Model3D {
 
   Model3D();
 
-  // TODO: SpawInstance(); -> return Model3DInstance which contains only transforms, currentAnimation and base model.
-  // feed this to the scene.
+  Model3D SpawnInstance() const
+  {
+    Model3D instance;
+    instance.meshes = this->meshes;
+    instance.skins = this->skins;
+    instance.animations = this->animations;
+
+    return instance;
+  }
 
   Model3D& AddMesh(std::string filename)
   {
