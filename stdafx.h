@@ -45,6 +45,7 @@
 #include <exception>
 #include <stdexcept>
 #include <deque>
+#include <optional>
 
 #include <cassert>
 #include <cstdlib>

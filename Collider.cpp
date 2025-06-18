@@ -30,7 +30,7 @@ void Collider::ColliderNode::CreateSurfacesFromModel()
   Clear();
   model->Clean();
 
-  for (auto mesh : model->meshes) {
+  for (auto &mesh : model->meshes) {
     for (auto& sub : mesh->subsets) {
       unsigned int offset = sub.start;
 

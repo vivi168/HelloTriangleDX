@@ -631,7 +631,7 @@ static void WaitForFrame(FrameContext* ctx);
 static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
-template <typename T> static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh);
+static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh);
 static Texture* CreateTexture(std::string name);
 
 // ========== Global variables
@@ -719,13 +719,8 @@ void LoadAssets()
   CHECK_HR(g_CommandList->Reset(cmdAllocator, NULL));
 
   for (auto &node : g_Scene.nodes) {
-    for (auto mesh : node.model->meshes) {
-      auto mi = LoadMesh3D(mesh);
-
-      node.meshInstances.push_back(mi);
-    }
-    for (auto mesh : node.model->skinnedMeshes) {
-      auto mi = LoadMesh3D(mesh);
+    for (auto &mesh : node.model->meshes) {
+      auto mi = LoadMesh3D(mesh.get());
 
       node.meshInstances.push_back(mi);
       if (mi->skinnedMeshInstance) {
@@ -820,15 +815,13 @@ void Update(float time, float dt)
     for (auto& node : g_Scene.nodes) {
       auto model = node.model;
 
-      // TODO: TMP (refactor when doing compute shader skinning)
       if (model->HasCurrentAnimation()) {
         size_t i = 0;
-        // TODO: don't loop skinnedMesh but loop unique skins to avoid computing same thing twice
-        for (auto skinnedMesh : model->skinnedMeshes) {
-          std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(dt, skinnedMesh->skin);
+        for (auto &[k, skin] : model->skins) {
+          std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(dt, skin.get());
 
-          for (auto smi : node.skinnedMeshInstances) {
-            // TODO: should be by skin, we duplicate unecessary data. (see todo above, don't loop skinnedMesh)
+          for (auto &smi : node.skinnedMeshInstances) {
+            // TODO: should reuse bone matrice buffer for meshes of same model which share skin
             g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
                                            smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4));
           }
@@ -1995,8 +1988,7 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
   }
 }
 
-template <typename T>
-static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
+static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
 {
   // first loop subsets and create textures (and soon to be materials)
   for (auto& subset : mesh->subsets) {
@@ -2021,7 +2013,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
     if (it == std::end(g_Scene.meshInstanceMap)) {
       // CreateGeometry
       // vertex data
-      if constexpr (std::is_same_v<T, SkinnedVertex>) {
+      if (mesh->Skinned()) {
         // in case of skinned mesh, these will be filled by a compute shader
         mi->data.offsets.positionsBuffer = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.offsets.normalsBuffer = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
@@ -2036,6 +2028,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
 
         smi->numVertices = mesh->header.numVerts;
         smi->numBoneMatrices = mesh->SkinMatricesSize();
+        // TODO: should reuse bone matrice buffer for meshes of same model which share skin
         smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(mesh->SkinMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 
         smi->meshInstance = mi;
@@ -2078,7 +2071,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
       auto i = it->second[0];
       mi->data.offsets = i->data.offsets;
 
-      if constexpr (std::is_same_v<T, SkinnedVertex>) {
+      if (mesh->Skinned()) {
         // these will be filled by compute shader so we need new ones.
         mi->data.offsets.positionsBuffer = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.offsets.normalsBuffer = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
@@ -2088,6 +2081,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D<T>* mesh)
 
         smi->numVertices = mesh->header.numVerts;
         smi->numBoneMatrices = i->skinnedMeshInstance->numBoneMatrices;
+        // TODO: should reuse bone matrice buffer for meshes of same model which share skin
         smi->offsets.boneMatricesBuffer = g_MeshStore.ReserveBoneMatrices(smi->BoneMatricesBufferSize()) / sizeof(XMFLOAT4X4);
 
         smi->meshInstance = mi;

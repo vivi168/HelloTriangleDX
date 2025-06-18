@@ -19,7 +19,7 @@ void Skin::ReadStaticTransforms(std::string filename)
   std::vector<int> boneIds(numBones);
   fread(boneIds.data(), sizeof(int), numBones, fp);
 
-  for (auto& i : boneIds) {
+  for (auto i : boneIds) {
     struct {
       DirectX::XMFLOAT3 scale;
       DirectX::XMFLOAT3 translation;
@@ -140,20 +140,26 @@ XMMATRIX Model3D::WorldMatrix()
   return XMMatrixAffineTransformation(scaleVector, zero, q, transVector);
 }
 
-void Model3D::Scale(float s)
+Model3D& Model3D::Scale(float s)
 {
   scale = {s, s, s};
   dirty = true;
+
+  return *this;
 }
 
-void Model3D::Rotate(float x, float y, float z)
+Model3D& Model3D::Rotate(float x, float y, float z)
 {
   rotate = {x, y, z};
   dirty = true;
+
+  return *this;
 }
 
-void Model3D::Translate(float x, float y, float z)
+Model3D& Model3D::Translate(float x, float y, float z)
 {
   translate = {x, y, z};
   dirty = true;
+
+  return *this;
 }

@@ -8,20 +8,6 @@
 #define MAX_TEXTURE_NAME_LEN 64
 typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
 
-#define MAX_WEIGHTS 4
-
-struct Vertex {
-  DirectX::XMFLOAT3 position;
-  DirectX::XMFLOAT3 normal;
-  DirectX::XMFLOAT4 color;
-  DirectX::XMFLOAT2 uv;
-};
-
-struct SkinnedVertex : Vertex {
-  UCHAR weights[MAX_WEIGHTS];
-  UCHAR joints[MAX_WEIGHTS];
-};
-
 struct Skin {
   struct {
     int rootBone;
@@ -115,7 +101,7 @@ struct Animation {
 };
 
 struct AnimationInfo {
-  Animation* animation = nullptr;
+  std::shared_ptr<Animation> animation = nullptr;
 
   float curTime = 0.0f;
 
@@ -143,7 +129,6 @@ struct Subset {
 
 using MeshletSubset = std::pair<size_t, size_t>; // start, count
 
-template <typename T>
 struct Mesh3D {
   struct {
     uint32_t numVerts;
@@ -151,7 +136,6 @@ struct Mesh3D {
     uint32_t numSubsets;
   } header;
 
-  static_assert(std::is_base_of_v<Vertex, T>);
   std::vector<uint32_t> indices;
   std::vector<Subset> subsets;
 
@@ -167,9 +151,9 @@ struct Mesh3D {
   std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
 
   std::string name;
-  Skin* skin = nullptr;  // in case of skinned mesh
+  std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
 
-  void Read(std::string filename)
+  void Read(std::string filename, bool skinned = false)
   {
     FILE* fp;
     fopen_s(&fp, filename.c_str(), "rb");
@@ -191,7 +175,7 @@ struct Mesh3D {
     fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
     fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
     fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
-    if constexpr (std::is_same_v<T, SkinnedVertex>) {
+    if (skinned) {
       blendWeightsAndIndices.resize(header.numVerts);
       fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
     }
@@ -237,6 +221,8 @@ struct Mesh3D {
     fclose(fp);
   }
 
+  bool Skinned() const { return skin != nullptr; }
+
   size_t PositionsBufferSize() const { return sizeof(positions[0]) * header.numVerts; }
 
   size_t NormalsBufferSize() const { return sizeof(normals[0]) * header.numVerts; }
@@ -255,24 +241,23 @@ struct Mesh3D {
 
   size_t SkinMatricesBufferSize() const
   {
-    if (!skin) return 0;
+    if (!Skinned()) return 0;
 
     return sizeof(DirectX::XMFLOAT4X4) * skin->header.numJoints;
   }
 
   size_t SkinMatricesSize() const
   {
-    if (!skin) return 0;
+    if (!Skinned()) return 0;
 
     return skin->header.numJoints;
   }
 };
 
 struct Model3D {
-  std::vector<Mesh3D<Vertex>*> meshes;
-  std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
-  std::vector<Skin*> skins; // TODO: loop this and not meshes then skin when computing matrices.
-  std::unordered_map<std::string, Animation*> animations;
+  std::vector<std::shared_ptr<Mesh3D>> meshes;
+  std::unordered_map<std::string, std::shared_ptr<Skin>> skins;
+  std::unordered_map<std::string, std::shared_ptr<Animation>> animations;
   AnimationInfo currentAnimation;
 
   DirectX::XMFLOAT3 scale;
@@ -281,19 +266,71 @@ struct Model3D {
   bool dirty;  // world position changed. Rename to collisionDirty?
 
   Model3D();
-  DirectX::XMMATRIX WorldMatrix();
 
-  void Scale(float s);
-  void Rotate(float x, float y, float z);
-  void Translate(float x, float y, float z);
+  // TODO: SpawInstance(); -> return Model3DInstance which contains only transforms, currentAnimation and base model.
+  // feed this to the scene.
 
-  void SetCurrentAnimation(std::string name)
+  Model3D& AddMesh(std::string filename)
+  {
+    auto mesh = std::make_unique<Mesh3D>();
+    mesh->Read(filename);
+
+    meshes.push_back(std::move(mesh));
+
+    return *this;
+  }
+
+  Model3D& AddSkinnedMesh(std::string meshFilename, std::string skinFilename,
+                          std::optional<std::string> transformFilename = std::nullopt)
+  {
+    auto mesh = std::make_shared<Mesh3D>();
+    mesh->Read(meshFilename, true);
+
+    auto it = skins.find(skinFilename);
+    if (it == std::end(skins)) {
+      auto skin = std::make_shared<Skin>();
+      skin->Read(skinFilename);
+
+      if (transformFilename.has_value()) {
+        skin->ReadStaticTransforms(transformFilename.value());
+      }
+
+      mesh->skin = skin;
+      skins[skinFilename] = skin;
+    } else {
+      mesh->skin = skins[skinFilename];
+    }
+
+    meshes.push_back(mesh);
+
+    return *this;
+  }
+
+  Model3D& AddAnimation(std::string filename, std::string name)
+  {
+    auto animation = std::make_shared<Animation>();
+    animation->Read(filename);
+
+    animations[name] = animation;
+
+    return *this;
+  }
+
+  Model3D& SetCurrentAnimation(std::string name)
   {
     currentAnimation.animation = animations[name];
     assert(currentAnimation.animation);
+
+    return *this;
   }
 
   bool HasCurrentAnimation() { return currentAnimation.animation != nullptr; }
+
+  DirectX::XMMATRIX WorldMatrix();
+
+  Model3D& Scale(float s);
+  Model3D& Rotate(float x, float y, float z);
+  Model3D& Translate(float x, float y, float z);
 
   void Clean() { dirty = false; }
 };

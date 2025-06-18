@@ -23,14 +23,7 @@ struct Player {
   void Update();
 };
 
-static Mesh3D<Vertex> treeMesh, cubeMesh, cylinderMesh, yukaMesh,
-    terrainMesh, stairsMesh, unitCubeMesh, sponzaMesh, swordMesh, shieldMesh;
-static Mesh3D<SkinnedVertex> humanMeshes[2], knightMesh, cesiumMesh;
-static Skin cesiumSkin, knightSkin, humanSkin;
-static Animation cesiumAnim, knightAnim, humanAnim;
-
-static Model3D bigTree, smallTree, cube, cylinder, yuka, house, terrain, stairs,
-    unitCube, knight, human, sponza, cesium;
+static Model3D cube, cylinder, yuka, terrain, stairs, unitCube, knight, human, sponza, cesium;
 
 static std::vector<Model3D> trees;
 
@@ -178,120 +171,80 @@ void Game::Init()
 {
   Renderer::SetSceneCamera(&camera);
 
-  treeMesh.Read("assets/OPTIM_white_oak_mesh_1.mesh");
-  yukaMesh.Read("assets/OPTIM_yuka_mesh_1.mesh");
-  terrainMesh.Read("assets/OPTIM_ground_mesh_1.mesh");
-  cubeMesh.Read("assets/OPTIM_issou_mesh_1.mesh");
-  unitCubeMesh.Read("assets/OPTIM_plateform_mesh_1.mesh");
-  cylinderMesh.Read("assets/OPTIM_garden_gnome_1k_mesh_1.mesh");
-  stairsMesh.Read("assets/OPTIM_stairs_mesh_1.mesh");
-
-  shieldMesh.Read("assets/OPTIM_knight_mesh_1.mesh");
-  swordMesh.Read("assets/OPTIM_knight_mesh_2.mesh");
-  knightMesh.Read("assets/OPTIM_knight_mesh_3.mesh");
-  knightSkin.Read("assets/OPTIM_knight_skin_1.skin");
-  knightSkin.ReadStaticTransforms("assets/OPTIM_knight_transforms.bin");
-  knightMesh.skin = &knightSkin;
-  knightAnim.Read("assets/OPTIM_knight_animation_1.anim");
-
-  humanMeshes[0].Read("assets/OPTIM_humanmale_mesh_1.mesh");
-  humanMeshes[1].Read("assets/OPTIM_humanmale_mesh_2.mesh");
-  humanSkin.Read("assets/OPTIM_humanmale_skin_1.skin");
-  humanSkin.ReadStaticTransforms("assets/OPTIM_humanmale_transforms.bin");
-  humanMeshes[0].skin = &humanSkin;
-  humanMeshes[1].skin = &humanSkin;
-  humanAnim.Read("assets/OPTIM_humanmale_animation_83.anim");
-
-  sponzaMesh.Read("assets/OPTIM_Sponza_mesh_1.mesh");
-
-  cesiumMesh.Read("assets/OPTIM_CesiumMan_mesh_1.mesh");
-  cesiumSkin.Read("assets/OPTIM_CesiumMan_skin_1.skin");
-  cesiumMesh.skin = &cesiumSkin;
-  cesiumAnim.Read("assets/OPTIM_CesiumMan_animation_1.anim");
-
-  int ntree = 9;
+  int ntree = 3;
 
   trees.resize(ntree * ntree);
-  for (int y = 0; y < ntree; y++) {
-    for (int x = 0; x < ntree; x++) {
-      int i = y * ntree + x;
+  //for (int y = 0; y < ntree; y++) {
+  //  for (int x = 0; x < ntree; x++) {
+  //    int i = y * ntree + x;
 
-      trees[i].meshes.push_back(&treeMesh);
-      trees[i].Scale(10.f);
-      trees[i].Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
+  //    //trees[i].meshes.push_back(&treeMesh);
+  //    trees[i].skinnedMeshes.push_back(&knightMesh);
+  //    trees[i].animations["test"] = &knightAnim;
+  //    trees[i].SetCurrentAnimation("test");
+  //    trees[i].currentAnimation.curTime = 0.25 * i;
+  //    trees[i].Scale(10.f);
+  //    trees[i].Translate(-100 + x * 30, -10.f, -100.f + y * 30.f);
 
-      printf("TREE %d - [%f %f]\n", i, x, y);
+  //    printf("TREE %d - [%f %f]\n", i, x, y);
 
-      Renderer::AppendToScene(&trees[i]);
-    }
-  }
+  //    Renderer::AppendToScene(&trees[i]);
+  //  }
+  //}
 
-  bigTree.meshes.push_back(&treeMesh);
-  smallTree.meshes.push_back(&treeMesh);
-  yuka.meshes.push_back(&yukaMesh);
-  terrain.meshes.push_back(&terrainMesh);
-  cube.meshes.push_back(&cubeMesh);
-  cylinder.meshes.push_back(&cylinderMesh);
-  stairs.meshes.push_back(&stairsMesh);
-  unitCube.meshes.push_back(&unitCubeMesh);
-
-  human.skinnedMeshes.push_back(&humanMeshes[0]);
-  human.skinnedMeshes.push_back(&humanMeshes[1]);
-  human.animations["attack"] = &humanAnim;
-  human.SetCurrentAnimation("attack");
-
-  //knight.meshes.push_back(&swordMesh);
-  knight.skinnedMeshes.push_back(&knightMesh);
-  knight.animations["test"] = &knightAnim;
-  knight.SetCurrentAnimation("test");
-
-  sponza.meshes.push_back(&sponzaMesh);
-  cesium.skinnedMeshes.push_back(&cesiumMesh);
-  cesium.animations["walk"] = &cesiumAnim;
-  cesium.SetCurrentAnimation("walk");
-
-  cylinder.Scale(5.0f);
-
-  smallTree.Scale(7.5f);
-  smallTree.Translate(-7.f, -10.f, 0.f);
-  bigTree.Scale(10.f);
-  bigTree.Translate(-7.f, -10.0f, 14.f);
-  yuka.Scale(5.f);
-  yuka.Translate(15.f, 0.f, 15.f);
-  stairs.Translate(-50.f, 0.f, 20.f);
-  cube.Translate(0.f, 50.f, 0.f);
-  cube.Scale(5.f);
-
-  human.Translate(10.f, 0, -10.f);
-  human.Scale(3.0f);
-
-  knight.Translate(10.f, 0, -15.f);
-  knight.Scale(1.5f);
-  knight.Rotate(0, XM_PI/2, 0);
-
-  unitCube.Translate(10.f, plateformY, -10.f);
-  unitCube.Rotate(plateformPitch, 0.f, 0.f);
-
-  sponza.Translate(-150.f, 5.f, -150.f);
-  sponza.Scale(5.f);
-
-  cesium.Scale(5.f);
-  cesium.Rotate(-XM_PIDIV2, 0.0f, 0.0f);
-
-  //Renderer::AppendToScene(&bigTree);
-  //Renderer::AppendToScene(&smallTree);
+  yuka.AddMesh("assets/OPTIM_yuka_mesh_1.mesh").Scale(5.f).Translate(15.f, 0.f, 15.f);
   Renderer::AppendToScene(&yuka);
+
+  terrain.AddMesh("assets/OPTIM_ground_mesh_1.mesh");
   Renderer::AppendToScene(&terrain);
+
+  cube.AddMesh("assets/OPTIM_issou_mesh_1.mesh").Translate(0.f, 50.f, 0.f).Scale(5.f);
   Renderer::AppendToScene(&cube);
+
+  cylinder.AddMesh("assets/OPTIM_garden_gnome_1k_mesh_1.mesh");
+  cylinder.Scale(5.0f);
   Renderer::AppendToScene(&cylinder);
+
+  stairs.AddMesh("assets/OPTIM_stairs_mesh_1.mesh").Translate(-50.f, 0.f, 20.f);
   Renderer::AppendToScene(&stairs);
+
+  unitCube.AddMesh("assets/OPTIM_plateform_mesh_1.mesh")
+      .Translate(10.f, plateformY, -10.f)
+      .Rotate(plateformPitch, 0.f, 0.f);
   Renderer::AppendToScene(&unitCube);
 
-  Renderer::AppendToScene(&human);
-  Renderer::AppendToScene(&knight);
+  sponza.AddMesh("assets/OPTIM_Sponza_mesh_1.mesh").Translate(-150.f, 5.f, -150.f).Scale(5.f);
   Renderer::AppendToScene(&sponza);
-  Renderer::AppendToScene(&cesium);
 
+  human
+      .AddSkinnedMesh("assets/OPTIM_humanmale_mesh_1.mesh", "assets/OPTIM_humanmale_skin_1.skin",
+                      "assets/OPTIM_humanmale_transforms.bin")
+      .AddSkinnedMesh("assets/OPTIM_humanmale_mesh_2.mesh", "assets/OPTIM_humanmale_skin_1.skin")
+      .AddAnimation("assets/OPTIM_humanmale_animation_83.anim", "attack")
+      .SetCurrentAnimation("attack")
+      .Translate(10.f, 0, -10.f)
+      .Scale(3.0f);
+  Renderer::AppendToScene(&human);
+
+  knight
+      .AddSkinnedMesh("assets/OPTIM_knight_mesh_3.mesh", "assets/OPTIM_knight_skin_1.skin",
+                      "assets/OPTIM_knight_transforms.bin")
+      // .AddMesh("assets/OPTIM_knight_mesh_1.mesh") // shield
+      // .AddMesh("assets/OPTIM_knight_mesh_2.mesh") // sword
+      .AddAnimation("assets/OPTIM_knight_animation_1.anim", "test")
+      .SetCurrentAnimation("test")
+      .Translate(10.f, 0, -15.f)
+      .Scale(1.5f)
+      .Rotate(0, XM_PI / 2, 0);
+  Renderer::AppendToScene(&knight);
+
+  cesium.AddSkinnedMesh("assets/OPTIM_CesiumMan_mesh_1.mesh", "assets/OPTIM_CesiumMan_skin_1.skin")
+      .AddAnimation("assets/OPTIM_CesiumMan_animation_1.anim", "walk")
+      .SetCurrentAnimation("walk")
+      .Scale(5.f)
+      .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
+  Renderer::AppendToScene(&cesium);
+  
   // static
   collider.AppendModel(&terrain);
   collider.AppendModel(&yuka);
