@@ -106,18 +106,18 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\Common.hlsli">
+    <None Include="shaders\MeshletCommon.hlsli">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\DefaultPS.hlsl">
+    <FxCompile Include="shaders\MeshletMS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\DefaultSkinnedVS.hlsl">
+    <FxCompile Include="shaders\MeshletPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\DefaultVS.hlsl">
+    <FxCompile Include="shaders\SkinningCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

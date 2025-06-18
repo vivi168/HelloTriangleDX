@@ -10,8 +10,9 @@ static const wchar_t* const CLASS_NAME = L"D3D12MemAllocSample";
 static const wchar_t* const WINDOW_TITLE = L"D3D12 Memory Allocator Sample";
 
 static HWND g_Hwnd = nullptr;
-static UINT64 g_TimeOffset;  // In ms.
-static UINT64 g_TimeValue;   // Time since g_TimeOffset, in ms.
+static LARGE_INTEGER g_Frequency;
+static LARGE_INTEGER g_StartTime;
+static LARGE_INTEGER g_LastTime;
 static float g_Time;         // g_TimeValue converted to float, in seconds.
 static float g_TimeDelta;
 
@@ -59,7 +60,10 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
 
   Renderer::Init();
-  g_TimeOffset = GetTickCount64();
+
+  QueryPerformanceFrequency(&g_Frequency);
+  QueryPerformanceCounter(&g_StartTime);
+  g_LastTime = g_StartTime;
 
   ShowWindow(g_Hwnd, nCmdShow);
 
@@ -75,10 +79,11 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     } else {
-      const UINT64 newTimeValue = GetTickCount64() - g_TimeOffset;
-      g_TimeDelta = (float)(newTimeValue - g_TimeValue) * 0.001f;
-      g_TimeValue = newTimeValue;
-      g_Time = (float)newTimeValue * 0.001f;
+      LARGE_INTEGER currentTime;
+      QueryPerformanceCounter(&currentTime);
+      g_TimeDelta = static_cast<float>(currentTime.QuadPart - g_LastTime.QuadPart) / g_Frequency.QuadPart;
+      g_Time = static_cast<float>(currentTime.QuadPart - g_StartTime.QuadPart) / g_Frequency.QuadPart;
+      g_LastTime = currentTime;
 
       if (g_TimeDelta > 0.f)
       {
@@ -91,6 +96,18 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
         Game::Update(g_Time, g_TimeDelta);
         Renderer::Update(g_Time, g_TimeDelta);
         Game::DebugWindow();
+        static std::array<float, 100> fpsHistory = {};
+        static int fpsIndex = 0;
+        float fps = 1.0f / g_TimeDelta;
+        fpsHistory[fpsIndex] = fps;
+        fpsIndex = (fpsIndex + 1) % fpsHistory.size();
+        float avgFps = std::accumulate(fpsHistory.begin(), fpsHistory.end(), 0.f) / fpsHistory.size();
+
+        ImGui::Begin("Stats");
+        ImGui::Text("FPS: %.1f", avgFps);
+        ImGui::PlotLines("FPS History", fpsHistory.data(), fpsHistory.size(),
+                         fpsIndex, nullptr, 0.0f, 120.0f, ImVec2(0, 80));
+        ImGui::End();
         Renderer::Render();
       }
     }

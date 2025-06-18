@@ -2,5 +2,8 @@ Language:     Cpp
 BasedOnStyle: Google
 AccessModifierOffset: -2
 BreakBeforeBraces: Linux
+ColumnLimit: 120
+DerivePointerAlignment: false
 InsertNewlineAtEOF: true
+SeparateDefinitionBlocks: Always
 SortIncludes: false

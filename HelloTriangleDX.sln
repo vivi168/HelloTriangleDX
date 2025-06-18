@@ -4,6 +4,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 17.6.33829.357
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloTriangleDX", "HelloTriangleDX.vcxproj", "{DF8A573D-FD94-45F8-AED2-0BEFC00B9591}"
+	ProjectSection(ProjectDependencies) = postProject
+		{6857F086-F6FE-4150-9ED7-7446F1C1C220} = {6857F086-F6FE-4150-9ED7-7446F1C1C220}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DirectXMesh", "third_party\DirectXMesh\DirectXMesh\DirectXMesh_Desktop_2022.vcxproj", "{6857F086-F6FE-4150-9ED7-7446F1C1C220}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +20,10 @@ Global
 		{DF8A573D-FD94-45F8-AED2-0BEFC00B9591}.Debug|x64.Build.0 = Debug|x64
 		{DF8A573D-FD94-45F8-AED2-0BEFC00B9591}.Release|x64.ActiveCfg = Release|x64
 		{DF8A573D-FD94-45F8-AED2-0BEFC00B9591}.Release|x64.Build.0 = Release|x64
+		{6857F086-F6FE-4150-9ED7-7446F1C1C220}.Debug|x64.ActiveCfg = Debug|x64
+		{6857F086-F6FE-4150-9ED7-7446F1C1C220}.Debug|x64.Build.0 = Debug|x64
+		{6857F086-F6FE-4150-9ED7-7446F1C1C220}.Release|x64.ActiveCfg = Release|x64
+		{6857F086-F6FE-4150-9ED7-7446F1C1C220}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

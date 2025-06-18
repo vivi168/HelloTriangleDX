@@ -19,7 +19,7 @@ void Skin::ReadStaticTransforms(std::string filename)
   std::vector<int> boneIds(numBones);
   fread(boneIds.data(), sizeof(int), numBones, fp);
 
-  for (auto& i : boneIds) {
+  for (auto i : boneIds) {
     struct {
       DirectX::XMFLOAT3 scale;
       DirectX::XMFLOAT3 translation;
@@ -37,13 +37,14 @@ void Skin::ReadStaticTransforms(std::string filename)
   }
 }
 
-XMMATRIX Animation::Interpolate(int boneId, Skin* skin)
+XMMATRIX Animation::Interpolate(float curTime, int boneId, Skin* skin)
 {
-  if (bonesKeyframes.find(boneId) == bonesKeyframes.end()) {
+  auto it = bonesKeyframes.find(boneId);
+  if (it == std::end(bonesKeyframes)) {
     return XMLoadFloat4x4(&skin->staticTransforms[boneId]);
   }
 
-  auto keyframes = bonesKeyframes[boneId];
+  auto keyframes = it->second;
 
   float startTime = keyframes.front().time;
   float endTime = keyframes.back().time;
@@ -86,10 +87,10 @@ XMMATRIX Animation::Interpolate(int boneId, Skin* skin)
   return XMMatrixIdentity();
 }
 
-std::vector<XMFLOAT4X4> Animation::BoneTransforms(Skin* skin)
+std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin)
 {
   std::unordered_map<int, XMMATRIX> boneLocalTransforms;
-  boneLocalTransforms[skin->header.rootBone] = Interpolate(skin->header.rootBone, skin);
+  boneLocalTransforms[skin->header.rootBone] = Interpolate(curTime, skin->header.rootBone, skin);
 
   std::stack<int> stack;
   stack.push(skin->header.rootBone);
@@ -102,7 +103,7 @@ std::vector<XMFLOAT4X4> Animation::BoneTransforms(Skin* skin)
 
     auto children = skin->boneHierarchy[bone];
     for (auto child : children) {
-      auto localTransform = Interpolate(child, skin);
+      auto localTransform = Interpolate(curTime, child, skin);
       boneLocalTransforms[child] = localTransform * parentLocalTransform;
       stack.push(child);
     }
@@ -139,20 +140,26 @@ XMMATRIX Model3D::WorldMatrix()
   return XMMatrixAffineTransformation(scaleVector, zero, q, transVector);
 }
 
-void Model3D::Scale(float s)
+Model3D& Model3D::Scale(float s)
 {
   scale = {s, s, s};
   dirty = true;
+
+  return *this;
 }
 
-void Model3D::Rotate(float x, float y, float z)
+Model3D& Model3D::Rotate(float x, float y, float z)
 {
   rotate = {x, y, z};
   dirty = true;
+
+  return *this;
 }
 
-void Model3D::Translate(float x, float y, float z)
+Model3D& Model3D::Translate(float x, float y, float z)
 {
   translate = {x, y, z};
   dirty = true;
+
+  return *this;
 }

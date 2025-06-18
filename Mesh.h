@@ -3,22 +3,10 @@
 #include <string>
 #include <vector>
 
+#include "DirectXMesh.h"
+
 #define MAX_TEXTURE_NAME_LEN 64
 typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
-
-#define MAX_WEIGHTS 4
-
-struct Vertex {
-  DirectX::XMFLOAT3 position;
-  DirectX::XMFLOAT3 normal;
-  DirectX::XMFLOAT4 color;
-  DirectX::XMFLOAT2 uv;
-};
-
-struct SkinnedVertex : Vertex {
-  UCHAR weights[MAX_WEIGHTS];
-  UCHAR joints[MAX_WEIGHTS];
-};
 
 struct Skin {
   struct {
@@ -80,13 +68,6 @@ struct Animation {
 
   float minTime;
   float maxTime;
-  float curTime = 0.0f;
-
-  void Update(float dt) {
-    curTime += dt;
-    if (curTime > maxTime)
-      curTime = minTime;
-  }
 
   void Read(std::string filename)
   {
@@ -111,31 +92,43 @@ struct Animation {
 
       if (minEl->time < minTime) minTime = minEl->time;
       if (maxEl->time > maxTime) maxTime = maxEl->time;
-
-      curTime = minTime;
     }
   }
 
-  DirectX::XMMATRIX Interpolate(int boneId, Skin* skin);
+  DirectX::XMMATRIX Interpolate(float curTime, int boneId, Skin* skin);
 
-  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(Skin* skin);
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime, Skin* skin);
+};
+
+struct AnimationInfo {
+  std::shared_ptr<Animation> animation = nullptr;
+
+  float curTime = 0.0f;
+
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float dt, Skin* skin)
+  {
+    curTime += dt;
+    if (curTime > animation->maxTime) curTime = animation->minTime;
+
+    return animation->BoneTransforms(curTime, skin);
+  }
 };
 
 // Forward declaration
 namespace Renderer
 {
-struct Geometry;
 struct Texture;
 }  // namespace Renderer
 
 struct Subset {
-  uint32_t start, count, vstart, pad;
+  uint32_t start, count;
   TEXTURENAME name;
 
   Renderer::Texture* texture = nullptr;  // GPU data // TODO Material struct instead
 };
 
-template <typename T>
+using MeshletSubset = std::pair<size_t, size_t>; // start, count
+
 struct Mesh3D {
   struct {
     uint32_t numVerts;
@@ -143,16 +136,24 @@ struct Mesh3D {
     uint32_t numSubsets;
   } header;
 
-  static_assert(std::is_base_of_v<Vertex, T>);
-  std::vector<T> vertices;
-  std::vector<uint16_t> indices;
+  std::vector<uint32_t> indices;
   std::vector<Subset> subsets;
 
-  std::string name;
-  Renderer::Geometry* geometry = nullptr;  // GPU data
-  Skin* skin = nullptr;                 // in case of skinned mesh
+  std::vector<DirectX::XMFLOAT3> positions;
+  std::vector<DirectX::XMFLOAT3> normals;
+  std::vector<DirectX::XMFLOAT2> uvs;
+  std::vector<DirectX::XMUINT2> blendWeightsAndIndices;
 
-  void Read(std::string filename)
+  // mesh shader specific
+  std::vector<DirectX::Meshlet> meshlets;
+  std::vector<uint8_t> uniqueVertexIndices; // underlying indices are uint32
+  std::vector<DirectX::MeshletTriangle> primitiveIndices;
+  std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
+
+  std::string name;
+  std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
+
+  void Read(std::string filename, bool skinned = false)
   {
     FILE* fp;
     fopen_s(&fp, filename.c_str(), "rb");
@@ -162,47 +163,181 @@ struct Mesh3D {
 
     fread(&header, sizeof(header), 1, fp);
 
-    vertices.resize(header.numVerts);
+    positions.resize(header.numVerts);
+    normals.resize(header.numVerts);
+    uvs.resize(header.numVerts);
     indices.resize(header.numIndices);
     subsets.resize(header.numSubsets);
 
-    fread(vertices.data(), sizeof(T), header.numVerts, fp);
-    fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
+    fread(indices.data(), sizeof(uint32_t), header.numIndices, fp);
     fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
+
+    fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
+    fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
+    fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
+    if (skinned) {
+      blendWeightsAndIndices.resize(header.numVerts);
+      fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
+    }
+
+    // TODO: build bounding sphere
+    // TODO: move this out of runtime
+    {
+      std::vector<MeshletSubset> meshSubsets;
+      meshSubsets.reserve(header.numSubsets);
+
+      for (const auto& subset : subsets) {
+        meshSubsets.emplace_back(subset.start / 3, subset.count / 3);
+      }
+
+      std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
+
+      constexpr size_t maxPrims = 124;
+      constexpr size_t maxVerts = 64;
+      CHECK_HR(ComputeMeshlets(
+          indices.data(), indices.size() / 3,
+          positions.data(), header.numVerts,
+          meshSubsets.data(), meshSubsets.size(),
+          nullptr,
+          meshlets, uniqueVertexIndices, primitiveIndices,
+          meshletSubsets.data(), maxVerts, maxPrims));
+
+      assert(uniqueVertexIndices.size() % 4 == 0);
+
+      meshletSubsetIndices.resize(meshlets.size());
+      for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
+        auto start = meshletSubsets[i].first;
+        auto end = start + meshletSubsets[i].second;
+
+        for (uint32_t j = start; j < end; j++) {
+          // TODO: this is dangerous. if subsets changes (push_back(),...) all pointers are invalidated.
+          // instead store an index ? if we do this offline, we won't have a choice
+          // if we do it offline, add a fifth member to Meshlet struct?
+          meshletSubsetIndices[j] = &subsets[i];
+        }
+      }
+    }
 
     fclose(fp);
   }
 
-  size_t VertexBufferSize() const { return sizeof(T) * header.numVerts; }
+  bool Skinned() const { return skin != nullptr; }
 
-  size_t IndexBufferSize() const
+  size_t PositionsBufferSize() const { return sizeof(positions[0]) * header.numVerts; }
+
+  size_t NormalsBufferSize() const { return sizeof(normals[0]) * header.numVerts; }
+
+  size_t UvsBufferSize() const { return sizeof(uvs[0]) * header.numVerts; }
+
+  size_t BlendWeightsAndIndicesBufferSize() const { return sizeof(blendWeightsAndIndices[0]) * header.numVerts; }
+
+  size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
+
+  size_t MeshletIndexBufferNumElements() const { return DivRoundUp(uniqueVertexIndices.size(), sizeof(UINT)); }
+
+  size_t MeshletIndexBufferSize() const { return MeshletIndexBufferNumElements() * sizeof(UINT); }
+
+  size_t MeshletPrimitiveBufferSize() const { return sizeof(DirectX::MeshletTriangle) * primitiveIndices.size(); }
+
+  size_t SkinMatricesBufferSize() const
   {
-    return sizeof(uint16_t) * header.numIndices;
-  }
-
-  size_t SkinMatricesSize() const {
-    if (!skin) return 0;
+    if (!Skinned()) return 0;
 
     return sizeof(DirectX::XMFLOAT4X4) * skin->header.numJoints;
+  }
+
+  size_t SkinMatricesSize() const
+  {
+    if (!Skinned()) return 0;
+
+    return skin->header.numJoints;
   }
 };
 
 struct Model3D {
-  std::vector<Mesh3D<Vertex>*> meshes;
-  std::vector<Mesh3D<SkinnedVertex>*> skinnedMeshes;
-  std::unordered_map<std::string, Animation*> animations;
-  Animation* currentAnimation = nullptr;
+  std::vector<std::shared_ptr<Mesh3D>> meshes;
+  std::unordered_map<std::string, std::shared_ptr<Skin>> skins;
+  std::unordered_map<std::string, std::shared_ptr<Animation>> animations;
 
+  AnimationInfo currentAnimation;
   DirectX::XMFLOAT3 scale;
   DirectX::XMFLOAT3 translate;
   DirectX::XMFLOAT3 rotate;
   bool dirty;  // world position changed. Rename to collisionDirty?
 
   Model3D();
+
+  Model3D SpawnInstance() const
+  {
+    Model3D instance;
+    instance.meshes = this->meshes;
+    instance.skins = this->skins;
+    instance.animations = this->animations;
+
+    return instance;
+  }
+
+  Model3D& AddMesh(std::string filename)
+  {
+    auto mesh = std::make_unique<Mesh3D>();
+    mesh->Read(filename);
+
+    meshes.push_back(std::move(mesh));
+
+    return *this;
+  }
+
+  Model3D& AddSkinnedMesh(std::string meshFilename, std::string skinFilename,
+                          std::optional<std::string> transformFilename = std::nullopt)
+  {
+    auto mesh = std::make_shared<Mesh3D>();
+    mesh->Read(meshFilename, true);
+
+    auto it = skins.find(skinFilename);
+    if (it == std::end(skins)) {
+      auto skin = std::make_shared<Skin>();
+      skin->Read(skinFilename);
+
+      if (transformFilename.has_value()) {
+        skin->ReadStaticTransforms(transformFilename.value());
+      }
+
+      mesh->skin = skin;
+      skins[skinFilename] = skin;
+    } else {
+      mesh->skin = skins[skinFilename];
+    }
+
+    meshes.push_back(mesh);
+
+    return *this;
+  }
+
+  Model3D& AddAnimation(std::string filename, std::string name)
+  {
+    auto animation = std::make_shared<Animation>();
+    animation->Read(filename);
+
+    animations[name] = animation;
+
+    return *this;
+  }
+
+  Model3D& SetCurrentAnimation(std::string name)
+  {
+    currentAnimation.animation = animations[name];
+    assert(currentAnimation.animation);
+
+    return *this;
+  }
+
+  bool HasCurrentAnimation() { return currentAnimation.animation != nullptr; }
+
   DirectX::XMMATRIX WorldMatrix();
 
-  void Scale(float s);
-  void Rotate(float x, float y, float z);
-  void Translate(float x, float y, float z);
+  Model3D& Scale(float s);
+  Model3D& Rotate(float x, float y, float z);
+  Model3D& Translate(float x, float y, float z);
+
   void Clean() { dirty = false; }
 };
