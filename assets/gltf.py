@@ -129,7 +129,7 @@ class Triangle:
         self.vertIndices = [vi1, vi2, vi3]
 
     def pack(self):
-        return struct.pack("<HHH", self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
+        return struct.pack("<III", self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
 
     def __str__(self):
         return "{} {} {}".format(self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
@@ -167,7 +167,9 @@ class Subset:
         return "{} {}/{} ({})".format(self.istart, self.icount, self.vstart, self.material.texture_name)
 
     def pack(self):
-        data = struct.pack("<IIII", self.istart, self.icount, self.vstart, 0)
+        assert(self.istart % 3 == 0)
+        assert(self.icount % 3 == 0)
+        data = struct.pack("<II", self.istart, self.icount)
         pointer = struct.pack("<Q", 0)  # pointer to material
         return data + self.material.pack() + pointer
 
@@ -191,6 +193,12 @@ class Mesh:
         # TODO: add parent_node and bounding box
         data += struct.pack("<III", len(self.vertices), len(self.tris) * 3, len(self.subsets))
 
+        for t in self.tris:
+            data += t.pack()
+
+        for s in self.subsets:
+            data += s.pack()
+
         positions_data = bytearray()
         normals_data = bytearray()
         uvs_data = bytearray()
@@ -206,12 +214,6 @@ class Mesh:
                 weights_and_indices += v.pack_weights_and_indices()
 
         data += (positions_data + normals_data + uvs_data + weights_and_indices)
-
-        for t in self.tris:
-            data += t.pack()
-
-        for s in self.subsets:
-            data += s.pack()
 
         with open(outfile, "wb") as f:
             f.write(data)
@@ -436,7 +438,9 @@ class GLTFConvert:
             num_vertices = max(indices)[0] + 1
 
             triangles = [
-                Triangle(indices[i][0], indices[i + 1][0], indices[i + 2][0]) for i in range(0, num_indices, 3)
+                Triangle(indices[i + 0][0] + vstart,
+                         indices[i + 1][0] + vstart,
+                         indices[i + 2][0] + vstart) for i in range(0, num_indices, 3)
             ]
             m.tris.extend(triangles)
 

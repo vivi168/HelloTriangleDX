@@ -135,13 +135,13 @@ struct Texture;
 }  // namespace Renderer
 
 struct Subset {
-  uint32_t start, count, vstart, pad;
+  uint32_t start, count;
   TEXTURENAME name;
 
   Renderer::Texture* texture = nullptr;  // GPU data // TODO Material struct instead
 };
 
-using MeshletSubset = std::pair<size_t, size_t>; // offset, count
+using MeshletSubset = std::pair<size_t, size_t>; // start, count
 
 template <typename T>
 struct Mesh3D {
@@ -152,7 +152,7 @@ struct Mesh3D {
   } header;
 
   static_assert(std::is_base_of_v<Vertex, T>);
-  std::vector<uint16_t> indices; // TODO: TMP export to uint32_t
+  std::vector<uint32_t> indices;
   std::vector<Subset> subsets;
 
   std::vector<DirectX::XMFLOAT3> positions;
@@ -182,38 +182,28 @@ struct Mesh3D {
     positions.resize(header.numVerts);
     normals.resize(header.numVerts);
     uvs.resize(header.numVerts);
-    if constexpr (std::is_same_v<T, SkinnedVertex>) {
-      blendWeightsAndIndices.resize(header.numVerts);
-    }
     indices.resize(header.numIndices);
     subsets.resize(header.numSubsets);
+
+    fread(indices.data(), sizeof(uint32_t), header.numIndices, fp);
+    fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
     fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
     fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
     fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
     if constexpr (std::is_same_v<T, SkinnedVertex>) {
+      blendWeightsAndIndices.resize(header.numVerts);
       fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
     }
-    fread(indices.data(), sizeof(uint16_t), header.numIndices, fp);
-    fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
 
     // TODO: build bounding sphere
     // TODO: move this out of runtime
     {
-      // TODO: modify gltf.py export to have 32 bits indices.
-      std::vector<uint32_t> indices32(indices.size());
-      std::vector<MeshletSubset> subsets_st(subsets.size());
+      std::vector<MeshletSubset> meshSubsets;
+      meshSubsets.reserve(header.numSubsets);
 
-      for (size_t si = 0; si < subsets.size(); si++) {
-        const auto& subset = subsets[si];
-        subsets_st[si] = std::make_pair<size_t, size_t>(subset.start / 3, subset.count / 3);
-
-        for (uint32_t i = 0; i < subset.count; i++) {
-          uint32_t gi = subset.start + i;
-
-          indices32[gi] = static_cast<uint32_t>(indices[gi]) + subset.vstart;
-          assert(indices32[gi] < header.numVerts);
-        }
+      for (const auto& subset : subsets) {
+        meshSubsets.emplace_back(subset.start / 3, subset.count / 3);
       }
 
       std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
@@ -221,9 +211,9 @@ struct Mesh3D {
       constexpr size_t maxPrims = 124;
       constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
-          indices32.data(), indices32.size() / 3,
+          indices.data(), indices.size() / 3,
           positions.data(), header.numVerts,
-          subsets_st.data(), subsets_st.size(),
+          meshSubsets.data(), meshSubsets.size(),
           nullptr,
           meshlets, uniqueVertexIndices, primitiveIndices,
           meshletSubsets.data(), maxVerts, maxPrims));
@@ -254,8 +244,6 @@ struct Mesh3D {
   size_t UvsBufferSize() const { return sizeof(uvs[0]) * header.numVerts; }
 
   size_t BlendWeightsAndIndicesBufferSize() const { return sizeof(blendWeightsAndIndices[0]) * header.numVerts; }
-
-  size_t IndexBufferSize() const { return sizeof(uint16_t) * header.numIndices; }
 
   size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
 
