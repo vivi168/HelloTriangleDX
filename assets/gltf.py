@@ -70,15 +70,16 @@ class Vec4:
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y and self.z == other.z and self.w == other.w
 
-
+MAX_WEIGHTS = 4
 class Vertex:
-    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2()):
+    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2(), w = (), ji = ()):
         self.position = p
         self.normal = n
         self.uv = u
 
-    def pack(self):
-        return self.position.pack_f32() + self.normal.pack_f32() + Vec4().pack() + self.uv.pack_f32()
+        assert len(w) == len(ji) <= MAX_WEIGHTS
+        self.weights = w
+        self.joint_indices = ji
 
     def pack_positions(self):
         return self.position.pack_f32()
@@ -89,33 +90,6 @@ class Vertex:
     def pack_uvs(self):
         return self.uv.pack_f32()
 
-    def __str__(self):
-        return "({}) ({}) ({})".format(self.position, self.normal, self.uv)
-
-    def __eq__(self, other):
-        return self.position == other.position and self.normal == other.normal and self.uv == other.uv
-
-
-MAX_WEIGHTS = 4
-
-# TODO: merge with Vertex
-class SkinnedVertex(Vertex):
-    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2(), w: tuple[int, ...] = (), ji: tuple[int, ...] = ()):
-        super().__init__(p, n, u)
-
-        assert len(w) == len(ji) <= MAX_WEIGHTS
-        self.weights = w
-        self.joint_indices = ji
-
-    def pack(self):
-        vertex_data = super().pack()
-        padded_weights = list(self.weights) + [0.0] * (MAX_WEIGHTS - len(self.weights))
-        padded_indices = list(self.joint_indices) + [0] * (MAX_WEIGHTS - len(self.joint_indices))
-        weights_data = struct.pack("<BBBB", *padded_weights[:MAX_WEIGHTS])
-        indices_data = struct.pack("<BBBB", *padded_indices[:MAX_WEIGHTS])
-
-        return vertex_data + weights_data + indices_data
-
     def pack_weights_and_indices(self):
         padded_weights = list(self.weights) + [0.0] * (MAX_WEIGHTS - len(self.weights))
         padded_indices = list(self.joint_indices) + [0] * (MAX_WEIGHTS - len(self.joint_indices))
@@ -123,6 +97,13 @@ class SkinnedVertex(Vertex):
         indices_data = struct.pack("<BBBB", *padded_indices[:MAX_WEIGHTS])
 
         return weights_data + indices_data
+
+    def __str__(self):
+        return "({}) ({}) ({})".format(self.position, self.normal, self.uv)
+
+    def __eq__(self, other):
+        return self.position == other.position and self.normal == other.normal and self.uv == other.uv
+
 
 class Triangle:
     def __init__(self, vi1=0, vi2=0, vi3=0):
@@ -510,7 +491,7 @@ class GLTFConvert:
                 assert len(joints) == len(weights) == num_vertices
 
                 for i in range(num_vertices):
-                    m.vertices.append(SkinnedVertex(positions[i], normals[i], uvs[i], weights[i], joints[i]))
+                    m.vertices.append(Vertex(positions[i], normals[i], uvs[i], weights[i], joints[i]))
             else:
                 for i in range(num_vertices):
                     m.vertices.append(Vertex(positions[i], normals[i], uvs[i]))
