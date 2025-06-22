@@ -11,7 +11,7 @@ from raw import RawImage
 from typing import List
 
 MAX_TEXTURE_NAME_LEN = 64
-SKIP_TEXTURES = True
+SKIP_TEXTURES = False
 
 
 class Vec2:
@@ -98,9 +98,9 @@ class Vertex:
 
 MAX_WEIGHTS = 4
 
-
+# TODO: merge with Vertex
 class SkinnedVertex(Vertex):
-    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2(), w: tuple[int] = [], ji: tuple[int] = []):
+    def __init__(self, p=Vec3(), n=Vec3(), u=Vec2(), w: tuple[int, ...] = (), ji: tuple[int, ...] = ()):
         super().__init__(p, n, u)
 
         assert len(w) == len(ji) <= MAX_WEIGHTS
@@ -136,35 +136,41 @@ class Triangle:
 
 
 class Material:
-    def __init__(self, texture, offset=Vec2(), scale=Vec2(), base_color_factor=Vec4(1, 1, 1, 1)):
-        self.offset = offset
-        self.scale = scale
-        self.base_color_factor = base_color_factor
+    def __init__(self, base_color_orig_path:str|None=None, base_color_factor=Vec4(1, 1, 1, 1)):
+        self.base_color_orig_path = base_color_orig_path
+        self.base_color_factor = (round(base_color_factor.x * 255),
+                                  round(base_color_factor.y * 255),
+                                  round(base_color_factor.z * 255),
+                                  round(base_color_factor.w * 255))
 
-        raw_texture = "{}.raw".format(os.path.splitext(os.path.basename(texture))[0])
-        if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:  # null terminated
-            exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_TEXTURE_NAME_LEN))
-        self.original_texture_name = texture
-        self.texture_name = raw_texture
+        if self.base_color_orig_path is not None:
+            raw_texture = "{}.raw".format(os.path.splitext(os.path.basename(self.base_color_orig_path))[0])
+            if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:  # null terminated
+                exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_TEXTURE_NAME_LEN))
+            self.base_color_path = raw_texture
+        else:
+            self.base_color_path = "{}-{}-{}-{}.raw".format(*self.base_color_factor)
 
     def pack(self):
-        return bytes(self.texture_name.ljust(MAX_TEXTURE_NAME_LEN, "\0"), "ascii")
+        return bytes(self.base_color_path.ljust(MAX_TEXTURE_NAME_LEN, "\0"), "ascii")
 
     def convert_texture(self):
-        m = RawImage(self.original_texture_name, None)
-        with open(self.texture_name, "wb") as f:
+        if self.base_color_orig_path is not None:
+            m = RawImage(filename=self.base_color_orig_path)
+        else:
+            m = RawImage(color=self.base_color_factor)
+        with open(self.base_color_path, "wb") as f:
             f.write(m.pack())
 
 
 class Subset:
-    def __init__(self, material, istart=0, icount=0, vstart=0):
+    def __init__(self, material, istart=0, icount=0):
         self.material: Material = material
         self.istart = istart
         self.icount = icount
-        self.vstart = vstart  # offset in the vertex array
 
     def __str__(self):
-        return "{} {}/{} ({})".format(self.istart, self.icount, self.vstart, self.material.texture_name)
+        return "{} {}".format(self.istart, self.icount)
 
     def pack(self):
         assert(self.istart % 3 == 0)
@@ -224,7 +230,6 @@ class Mesh:
 
         for s in self.subsets:
             m = s.material
-            # print("{} -> {}".format(m.original_texture_name, m.texture_name))
             # TODO: use DDS instead of uncompressed RAW loul
             m.convert_texture()
 
@@ -347,8 +352,8 @@ class GLTFConvert:
         self.skins = self.gltf.get("skins", [])
         self.animations = self.gltf.get("animations", [])
         self.materials = self.gltf["materials"]
-        self.textures = self.gltf["textures"]
-        self.images = self.gltf["images"]
+        self.textures = self.gltf.get("textures", [])
+        self.images = self.gltf.get("images", [])
 
         assert len(self.mesh_nodes) == len(self.meshes)
         assert len(self.skin_indices) == len(self.skins)
@@ -412,15 +417,22 @@ class GLTFConvert:
 
         material = self.materials[material_id]
         pbr_mr = material["pbrMetallicRoughness"]
+
+        base_color_texture_info = pbr_mr.get("baseColorTexture", None)
+
+        if base_color_texture_info is not None:
+            texture = self.textures[base_color_texture_info["index"]]
+            image = self.images[texture["source"]]
+            file = image["uri"]  # TODO: can be base64?
+            base_color_texture = os.path.join(self.cwd, file)
+            base_color = Vec4(1, 1, 1, 1)
+        else:
+            base_color_texture = None
+            base_color = base_color_texture_info = Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1, 1]))
+
         # import pdb; pdb.set_trace()
-        base_color_texture_info = pbr_mr["baseColorTexture"]
 
-        texture = self.textures[base_color_texture_info["index"]]
-        image = self.images[texture["source"]]
-        file = image["uri"]  # TODO: can be base64?
-        # base_color_factor = pbr_mr.get('baseColorFactor', [1, 1, 1, 1]) # TODO: for PBR
-
-        return Material(os.path.join(self.cwd, file))
+        return Material(base_color_texture, base_color)
 
     def process_mesh(self, mi, skinned):
         mesh = self.meshes[mi]
@@ -446,7 +458,7 @@ class GLTFConvert:
 
             material = self.get_material(prim.get("material"))
 
-            subset = Subset(material, istart, num_indices, vstart)
+            subset = Subset(material, istart, num_indices)
             m.subsets.append(subset)
             istart += num_indices
             vstart += num_vertices
@@ -454,7 +466,6 @@ class GLTFConvert:
             attributes = prim["attributes"]
             assert attributes.get("POSITION") is not None
             assert attributes.get("NORMAL") is not None
-            assert attributes.get("TEXCOORD_0") is not None
 
             idx = attributes["POSITION"]
             assert self.accessors[idx]["componentType"] == FLOAT32
@@ -471,14 +482,14 @@ class GLTFConvert:
             # if attributes.get('TANGENT', None) is not None:
             #     pass # TODO compute if not present
 
-            # if attributes.get('COLOR_0', None) is not None:
-            #     pass # TODO
-
-            idx = attributes["TEXCOORD_0"]
-            assert self.accessors[idx]["componentType"] == FLOAT32
-            assert self.accessors[idx].get("normalized", False) == False
-            values = self.get_values(idx)
-            uvs = [Vec2(v[0], v[1]) for v in values]
+            idx = attributes.get("TEXCOORD_0", None)
+            if idx is not None:
+                assert self.accessors[idx]["componentType"] == FLOAT32
+                assert self.accessors[idx].get("normalized", False) == False
+                values = self.get_values(idx)
+                uvs = [Vec2(v[0], v[1]) for v in values]
+            else:
+                uvs = [Vec2(0, 0) for i in range(num_vertices)]
 
             assert len(positions) == len(normals) == len(uvs) == num_vertices
 

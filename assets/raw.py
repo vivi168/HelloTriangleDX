@@ -5,8 +5,11 @@ import argparse
 from PIL import Image
 
 class RawImage:
-    def __init__(self, filename, alpha = None):
-        img = Image.open(filename)
+    def __init__(self, filename=None, color=(), alpha = None):
+        if filename is not None:
+            img = Image.open(filename)
+        else:
+            img = Image.new("RGBA", (1,1), color)
         self.width, self.height = img.size
         self.alpha = alpha
         self.img = img.convert('RGBA')

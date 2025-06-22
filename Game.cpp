@@ -23,7 +23,7 @@ struct Player {
   void Update();
 };
 
-static Model3D cube, cylinder, yuka, terrain, stairs, unitCube, knight, human, sponza, cesium;
+static Model3D cube, cylinder, yuka, terrain, stairs, unitCube, knight, brainstem, sponza, cesium;
 
 static std::vector<Model3D> trees;
 static std::vector<Model3D> knights;
@@ -211,15 +211,15 @@ void Game::Init()
   sponza.AddMesh("assets/OPTIM_Sponza_mesh_1.mesh").Translate(-150.f, 5.f, -150.f).Scale(5.f);
   Renderer::AppendToScene(&sponza);
 
-  human
-      .AddSkinnedMesh("assets/OPTIM_humanmale_mesh_1.mesh", "assets/OPTIM_humanmale_skin_1.skin",
-                      "assets/OPTIM_humanmale_transforms.bin")
-      .AddSkinnedMesh("assets/OPTIM_humanmale_mesh_2.mesh", "assets/OPTIM_humanmale_skin_1.skin")
-      .AddAnimation("assets/OPTIM_humanmale_animation_83.anim", "attack")
-      .SetCurrentAnimation("attack")
-      .Translate(10.f, 0, -10.f)
-      .Scale(3.0f);
-  Renderer::AppendToScene(&human);
+  brainstem
+      .AddSkinnedMesh("assets/OPTIM_BrainStem_mesh_1.mesh", "assets/OPTIM_BrainStem_skin_1.skin",
+                      "assets/OPTIM_BrainStem_transforms.bin")
+      .AddAnimation("assets/OPTIM_BrainStem_animation_1.anim", "dance")
+      .SetCurrentAnimation("dance")
+      .Scale(5.f)
+      .Rotate(-XM_PIDIV2, XM_PIDIV2, 0.0f)
+      .Translate(-10.f, 0.f, 0.f);
+  Renderer::AppendToScene(&brainstem);
 
   knight
       .AddSkinnedMesh("assets/OPTIM_knight_mesh_3.mesh", "assets/OPTIM_knight_skin_1.skin",
