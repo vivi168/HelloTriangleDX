@@ -982,7 +982,7 @@ void Render()
   for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
     auto mi = instances[0];
     struct {
-      UINT firstInstanceBufferOffset;
+      UINT firstInstanceIndex;
       UINT numMeshlets;
       UINT numInstances;
     } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
@@ -2056,12 +2056,12 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
       {
         std::vector<UINT> meshletMaterials(mesh->meshlets.size());
 
-        for (size_t mi = 0; mi < mesh->meshlets.size(); mi++) {
-          auto subset = mesh->meshletSubsetIndices[mi];
+        for (size_t i = 0; i < mesh->meshlets.size(); i++) {
+          auto subset = mesh->meshletSubsetIndices[i];
 
           // TODO: in the future, should preprocess subsets to build a Material buffer.
           // and this index should be an index into the correct Material.
-          meshletMaterials[mi] = subset->texture->m_Buffer.SrvDescriptorIndex();
+          meshletMaterials[i] = subset->texture->m_Buffer.SrvDescriptorIndex();
         }
         auto o = g_MeshStore.CopyMeshletMaterials(meshletMaterials.data(), meshletMaterials.size() * sizeof(UINT)) /
                  sizeof(UINT);
