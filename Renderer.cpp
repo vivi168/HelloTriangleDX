@@ -227,21 +227,12 @@ struct HeapResource {
     return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore, stateAfter);
   }
 
-  void SetName(std::string name)
+  void SetName(std::wstring name)
   {
-    std::wstring bufName = ConvertToWstring(name);
-    std::wstring allocName = bufName + L" (Allocation)";
+    std::wstring allocName = name + L" (Allocation)";
 
-    resource->SetName(bufName.c_str());
-    allocation->SetName(allocName.c_str());
-  }
-
-  void SetName(std::string name, int index)
-  {
-    std::wstring bufName = ConvertToWstring(name) + L" " + std::to_wstring(index);
-    std::wstring allocName = bufName + L" (Allocation)";
-
-    resource->SetName(bufName.c_str());
+    resourceName = name;
+    resource->SetName(name.c_str());
     allocation->SetName(allocName.c_str());
   }
 
@@ -258,6 +249,7 @@ private:
   HeapDescriptor uavDescriptor;
   D3D12MA::Allocation* allocation;
   void* address;
+  std::wstring resourceName;
 };
 
 // TODO: rename this
@@ -325,7 +317,7 @@ struct UploadedHeapResource {
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return buffer.UavDescriptorHandle(); }
 
-  void SetName(std::string name) { buffer.SetName(name); }
+  void SetName(std::wstring name) { buffer.SetName(name); }
 
   void Reset() { buffer.Reset(); }
 
@@ -345,14 +337,14 @@ struct Texture {
   } header;
 
   std::vector<uint8_t> pixels;
-  std::string name;
+  std::wstring name;
 
   UploadedHeapResource m_Buffer;
 
-  void Read(std::string filename)
+  void Read(std::wstring filename)
   {
     FILE* fp;
-    fopen_s(&fp, filename.c_str(), "rb");
+    _wfopen_s(&fp, filename.c_str(), L"rb");
     assert(fp);
 
     name = filename;
@@ -632,7 +624,7 @@ static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh);
-static Texture* CreateTexture(std::string name);
+static Texture* CreateTexture(std::wstring name);
 
 // ========== Global variables
 
@@ -682,7 +674,7 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
-static std::unordered_map<std::string, Texture> g_Textures;
+static std::unordered_map<std::wstring, Texture> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -855,9 +847,6 @@ void Update(float time, float dt)
   }
 }
 
-// TODO: render ColliderSurfaces
-// DrawIndexed
-// Need to add a new PSO
 // Add a PSO helper struct ?
 void Render()
 {
@@ -1446,7 +1435,7 @@ static void InitFrameResources()
         g_Allocator.Get(), &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
-    g_DepthStencilBuffer.SetName("Depth Stencil Buffer");
+    g_DepthStencilBuffer.SetName(L"Depth Stencil Buffer");
 
     D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
     depthStencilDesc.Format = DEPTH_STENCIL_FORMAT;
@@ -1615,7 +1604,7 @@ static void InitFrameResources()
       auto uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VertexPositions.CreateResources(g_Allocator.Get(), &bufferDesc, &uploadBufferDesc);
-      g_MeshStore.m_VertexPositions.SetName("Positions Store");
+      g_MeshStore.m_VertexPositions.SetName(L"Positions Store");
       g_MeshStore.m_VertexPositions.Map();
 
       // descriptor
@@ -1647,7 +1636,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VertexNormals.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_VertexNormals.SetName("Normals Store");
+      g_MeshStore.m_VertexNormals.SetName(L"Normals Store");
       g_MeshStore.m_VertexNormals.Map();
 
       // descriptor
@@ -1675,7 +1664,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VertexUVs.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_VertexUVs.SetName("UVs Store");
+      g_MeshStore.m_VertexUVs.SetName(L"UVs Store");
       g_MeshStore.m_VertexUVs.Map();
 
       // descriptor
@@ -1698,7 +1687,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VertexBlendWeightsAndIndices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_VertexBlendWeightsAndIndices.SetName("Blend weights/indices Store");
+      g_MeshStore.m_VertexBlendWeightsAndIndices.SetName(L"Blend weights/indices Store");
       g_MeshStore.m_VertexBlendWeightsAndIndices.Map();
 
       // descriptor
@@ -1720,7 +1709,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_Meshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_Meshlets.SetName("Meshlets Store");
+      g_MeshStore.m_Meshlets.SetName(L"Meshlets Store");
       g_MeshStore.m_Meshlets.Map();
 
       // descriptor
@@ -1742,7 +1731,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VisibleMeshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_VisibleMeshlets.SetName("Visible Meshlets Store");
+      g_MeshStore.m_VisibleMeshlets.SetName(L"Visible Meshlets Store");
       g_MeshStore.m_VisibleMeshlets.Map();
 
       // descriptor
@@ -1764,7 +1753,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_MeshletUniqueIndices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_MeshletUniqueIndices.SetName("Unique vertex indices Store");
+      g_MeshStore.m_MeshletUniqueIndices.SetName(L"Unique vertex indices Store");
       g_MeshStore.m_MeshletUniqueIndices.Map();
 
       // descriptor
@@ -1786,7 +1775,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_MeshletPrimitives.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_MeshletPrimitives.SetName("Primitives Store");
+      g_MeshStore.m_MeshletPrimitives.SetName(L"Primitives Store");
       g_MeshStore.m_MeshletPrimitives.Map();
 
       // descriptor
@@ -1808,7 +1797,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_MeshletMaterials.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_MeshletMaterials.SetName("Materials Store");
+      g_MeshStore.m_MeshletMaterials.SetName(L"Materials Store");
       g_MeshStore.m_MeshletMaterials.Map();
 
       // descriptor
@@ -1835,7 +1824,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_Instances.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_Instances.SetName("Instances Store");
+      g_MeshStore.m_Instances.SetName(L"Instances Store");
       g_MeshStore.m_Instances.Map();
 
       // descriptor
@@ -1857,7 +1846,7 @@ static void InitFrameResources()
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_BoneMatrices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_BoneMatrices.SetName("Bone Matrices Store");
+      g_MeshStore.m_BoneMatrices.SetName(L"Bone Matrices Store");
       g_MeshStore.m_BoneMatrices.Map();
 
       // descriptor
@@ -1993,16 +1982,16 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
   // first loop subsets and create textures (and soon to be materials)
   for (auto& subset : mesh->subsets) {
     // TODO: get assets path
-    std::string name(subset.name);
-    std::string fullName = "assets/" + name;
+    std::wstring name(subset.name);
+    std::wstring fullName = L"assets/" + name;
 
     auto it = g_Textures.find(fullName);
     if (it == std::end(g_Textures)) {
       subset.texture = CreateTexture(fullName);
-      printf("CREATE TEXTURE %s\n", fullName.c_str());
+      wprintf(L"CREATE TEXTURE %s\n", fullName.c_str());
     } else {
       subset.texture = &it->second;
-      printf("TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
+      wprintf(L"TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
     }
   }
 
@@ -2098,7 +2087,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
   return mi;
 }
 
-static Texture* CreateTexture(std::string name)
+static Texture* CreateTexture(std::wstring name)
 {
   Texture tex;
   tex.Read(name);
@@ -2120,7 +2109,7 @@ static Texture* CreateTexture(std::string name)
   auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize);
   tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc,
                                D3D12_RESOURCE_STATE_COPY_DEST);
-  tex.m_Buffer.SetName("Texture: " + name);
+  tex.m_Buffer.SetName(L"Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = tex.pixels.data();

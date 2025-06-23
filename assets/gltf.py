@@ -10,8 +10,8 @@ from raw import RawImage
 
 from typing import List
 
-MAX_TEXTURE_NAME_LEN = 64
-SKIP_TEXTURES = False
+MAX_PATH = 260
+SKIP_TEXTURES = True
 
 
 class Vec2:
@@ -126,14 +126,14 @@ class Material:
 
         if self.base_color_orig_path is not None:
             raw_texture = "{}.raw".format(os.path.splitext(os.path.basename(self.base_color_orig_path))[0])
-            if len(raw_texture) > MAX_TEXTURE_NAME_LEN - 1:  # null terminated
-                exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_TEXTURE_NAME_LEN))
+            if len(raw_texture) > MAX_PATH - 1:  # null terminated
+                exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_PATH))
             self.base_color_path = raw_texture
         else:
             self.base_color_path = "{}-{}-{}-{}.raw".format(*self.base_color_factor)
 
     def pack(self):
-        return bytes(self.base_color_path.ljust(MAX_TEXTURE_NAME_LEN, "\0"), "ascii")
+        return bytes(self.base_color_path.ljust(MAX_PATH, "\0"), "utf-16le")
 
     def convert_texture(self):
         if self.base_color_orig_path is not None:

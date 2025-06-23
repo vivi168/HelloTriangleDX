@@ -5,8 +5,8 @@
 
 #include "DirectXMesh.h"
 
-#define MAX_TEXTURE_NAME_LEN 64
-typedef char TEXTURENAME[MAX_TEXTURE_NAME_LEN];
+#define MAX_TEXTURE_NAME_LEN MAX_PATH
+typedef WCHAR TEXTURENAME[MAX_TEXTURE_NAME_LEN];
 
 struct Skin {
   struct {
@@ -192,7 +192,7 @@ struct Mesh3D {
 
       std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
 
-      constexpr size_t maxPrims = 124;
+      constexpr size_t maxPrims = 126;
       constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
           indices.data(), indices.size() / 3,

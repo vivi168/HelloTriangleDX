@@ -121,15 +121,3 @@ static std::wstring SizeToStr(size_t size)
   }
   return result;
 }
-
-static std::wstring ConvertToWstring(std::string in)
-{
-  size_t newsize = std::strlen(in.c_str()) + 1;
-  wchar_t* wcstring = new wchar_t[newsize];
-  mbstowcs_s(nullptr, wcstring, newsize, in.c_str(), _TRUNCATE);
-
-  std::wstring out(wcstring);
-  delete[] wcstring;
-
-  return out;
-}
