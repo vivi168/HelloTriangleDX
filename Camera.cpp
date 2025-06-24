@@ -14,22 +14,21 @@ const XMVECTOR Camera::worldUp = XMVectorSet(0.f, 1.f, 0.f, 0.f);
 
 Camera::Camera()
 {
-  m_Yaw = -XM_PIDIV2;
+  m_Yaw = XM_PI;
   m_Pitch = 0;
   m_Speed = 20.0f;
   m_Sensitivity = 2.f;
 
-  m_Translate = {0, 0, 0};
+  m_Translate = {0, 0, 10.f};
 }
 
 XMMATRIX Camera::LookAt()
 {
-  XMVECTOR front =
-      XMVector3Normalize(XMVectorSet(cosf(m_Yaw) * cosf(m_Pitch), sinf(m_Pitch),
-                                     sinf(m_Yaw) * cosf(m_Pitch), 0.f));
+  const float r = cosf(m_Pitch);
+  XMVECTOR front = XMVector3Normalize(XMVectorSet(sinf(m_Yaw) * r, sinf(m_Pitch), cosf(m_Yaw) * r, 0.f));
   XMVECTOR position = XMLoadFloat3(&m_Translate);
 
-  return XMMatrixLookAtRH(position, XMVectorAdd(position, front), worldUp);
+  return XMMatrixLookToRH(position, front, worldUp);
 }
 
 void Camera::Translate(float x, float y, float z) { m_Translate = {x, y, z}; }
@@ -67,10 +66,10 @@ void Camera::ProcessKeyboard(float dt)
     m_Pitch -= m_Sensitivity * dt;
   }
   if (Input::IsHeld(Input::KB::Left)) {
-    m_Yaw -= m_Sensitivity * dt;
+    m_Yaw += m_Sensitivity * dt;
   }
   if (Input::IsHeld(Input::KB::Right)) {
-    m_Yaw += m_Sensitivity * dt;
+    m_Yaw -= m_Sensitivity * dt;
   }
 
   if (m_Pitch > upper)
@@ -78,10 +77,10 @@ void Camera::ProcessKeyboard(float dt)
   else if (m_Pitch < lower)
     m_Pitch = lower;
 
-  float forwardX = cosf(m_Yaw);
-  float forwardZ = sinf(m_Yaw);
-  float rightX = -sinf(m_Yaw);
-  float rightZ = cosf(m_Yaw);
+  float forwardX = sinf(m_Yaw);
+  float forwardZ = cosf(m_Yaw);
+  float rightX = -cosf(m_Yaw);
+  float rightZ = sinf(m_Yaw);
 
   if (Input::IsHeld(Input::KB::W)) {
     m_Translate.x += forwardX * m_Speed * dt;
