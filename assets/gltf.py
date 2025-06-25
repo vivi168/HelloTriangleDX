@@ -13,6 +13,9 @@ from typing import List
 MAX_PATH = 260
 SKIP_TEXTURES = True
 
+def pack_string(s):
+    assert(len(s) < MAX_PATH)
+    return bytes(s.ljust(MAX_PATH, "\0"), "utf-16le")
 
 class Vec2:
     def __init__(self, x=0, y=0):
@@ -125,22 +128,20 @@ class Material:
                                   round(base_color_factor.w * 255))
 
         if self.base_color_orig_path is not None:
-            raw_texture = "{}.raw".format(os.path.splitext(os.path.basename(self.base_color_orig_path))[0])
-            if len(raw_texture) > MAX_PATH - 1:  # null terminated
-                exit("Texture name too long: {} {}/{}".format(raw_texture, len(raw_texture), MAX_PATH))
-            self.base_color_path = raw_texture
+            self.base_color_path = "{}.raw".format(os.path.splitext(os.path.basename(self.base_color_orig_path))[0])
         else:
             self.base_color_path = "{}-{}-{}-{}.raw".format(*self.base_color_factor)
 
     def pack(self):
-        return bytes(self.base_color_path.ljust(MAX_PATH, "\0"), "utf-16le")
+        return pack_string(self.base_color_path)
 
-    def convert_texture(self):
+    def convert_texture(self, out_folder):
+        # TODO: use DDS
         if self.base_color_orig_path is not None:
             m = RawImage(filename=self.base_color_orig_path)
         else:
             m = RawImage(color=self.base_color_factor)
-        with open(self.base_color_path, "wb") as f:
+        with open(os.path.join(out_folder, self.base_color_path), "wb") as f:
             f.write(m.pack())
 
 
@@ -205,14 +206,13 @@ class Mesh:
         with open(outfile, "wb") as f:
             f.write(data)
 
-    def convert_textures(self):
+    def convert_textures(self, out_folder):
         if SKIP_TEXTURES:
             return
 
         for s in self.subsets:
             m = s.material
-            # TODO: use DDS instead of uncompressed RAW loul
-            m.convert_texture()
+            m.convert_texture(out_folder)
 
 
 class Skin:
@@ -591,6 +591,35 @@ class GLTFConvert:
         return nodes_keyframes
 
     def convert(self):
+        out_meshes = []
+        out_skinned_meshes = []
+        out_animations = []
+        out_static_transforms = None
+
+        skin_filename = lambda i: "{}_skin_{}.skin".format(self.original_filename, i)
+        outfile = lambda f: os.path.join(self.original_filename, f)
+        def write_model_file():
+            buf = "base_dir: {}\n".format(self.original_filename)
+            buf += '#mesh: {}\n'.format(len(out_meshes))
+            buf += '#skinned_mesh: {}\n'.format(len(out_skinned_meshes))
+            buf += '#animations: {}\n'.format(len(out_animations))
+            buf += 'static_transforms: {}\n'.format(out_static_transforms)
+
+            for m in out_meshes:
+                buf += m + '\n'
+
+            if self.skinned:
+                for m in out_skinned_meshes:
+                    buf += "{} {}".format(m[0], m[1]) + '\n'
+                for a in out_animations:
+                    buf += "{} {}".format(a[0], a[1]) + '\n'
+
+            with open("{}.mdl".format(self.original_filename), 'w') as f:
+                f.write(buf)
+
+        if not os.path.exists(self.original_filename):
+            os.makedirs(self.original_filename)
+
         for i, ni in enumerate(self.mesh_nodes):
             node = self.nodes[ni]
             filename = "{}_mesh_{}.mesh".format(self.original_filename, i + 1)
@@ -600,17 +629,20 @@ class GLTFConvert:
 
             if skinned:
                 skin_idx = self.skin_indices.index(node["skin"])
+                out_skinned_meshes.append([filename, skin_filename(skin_idx + 1)])
                 print(" (-> skin #{})".format(skin_idx + 1))
             else:
+                out_meshes.append(filename)
                 print()
 
             m = self.process_mesh(node["mesh"], skinned)
             if self.skinned:
                 m.parent_node = self.mesh_parent_nodes[ni]
-            m.pack(filename)
-            m.convert_textures()
+            m.pack(outfile(filename))
+            m.convert_textures(self.original_filename)
 
         if not self.skinned:
+            write_model_file()
             return
 
         nodes_static_transforms = {}
@@ -624,9 +656,9 @@ class GLTFConvert:
             joints = self.skins[i]["joints"]
             inverse_bind_matrices = self.get_values(self.skins[i]["inverseBindMatrices"])
 
-            filename = "{}_skin_{}.skin".format(self.original_filename, i + 1)
+            filename = skin_filename(i + 1)
             s = Skin(root_bone, joints, inverse_bind_matrices, bh)
-            s.pack(filename)
+            s.pack(outfile(filename))
             print("skin #{}: {}".format(i + 1, filename))
 
             for ni in bh.keys():
@@ -659,24 +691,29 @@ class GLTFConvert:
 
             filename = "{}_animation_{}.anim".format(self.original_filename, ai + 1)
             a = Animation(nodes_keyframe_transforms)
-            a.pack(filename)
-            print("animation #{}: {} -- [{}]".format(ai + 1, filename, self.animations[ai].get("name", "noname")))
+            a.pack(outfile(filename))
+            anim_name = self.animations[ai].get("name", "noname {}".format(ai))
+            out_animations.append([filename, anim_name])
+            print("animation #{}: {} -- [{}]".format(ai + 1, filename, anim_name))
 
             missing = set(bh.keys()) - set(nodes_keyframe_transforms.keys())
             if len(missing) > 0:
                 missing_bones.update(missing)
 
+        # wonder how does this behave with multiple different skins...
         if len(missing_bones) > 0:
             filename = "{}_transforms.bin".format(self.original_filename)
             print("transforms: {}".format(filename))
             st = StaticTransforms(missing_bones, nodes_static_transforms)
-            st.pack(filename)
+            st.pack(outfile(filename))
+            out_static_transforms = filename
+
+        write_model_file()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert a GLTF model")
     parser.add_argument("-i", "--infile", required=True, help="GLTF input file")
-    # parser.add_argument("-o", "--outfile", help="Output path")
     parser.add_argument("-s", "--skinned", action="store_true", help="Skinned model")
 
     args = parser.parse_args()
