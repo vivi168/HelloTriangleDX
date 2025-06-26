@@ -336,22 +336,24 @@ struct Texture {
     uint16_t height;
   } header;
 
-  std::vector<uint8_t> pixels;
   std::wstring name;
 
   UploadedHeapResource m_Buffer;
 
-  void Read(std::wstring filename)
+  std::vector<uint8_t> Read(std::wstring filename)
   {
     FILE* fp;
     _wfopen_s(&fp, filename.c_str(), L"rb");
     assert(fp);
 
+    std::vector<uint8_t> pixels;
     name = filename;
 
     fread(&header, sizeof(header), 1, fp);
     pixels.resize(ImageSize());
     fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
+
+    return pixels;
   }
 
   void Reset() { m_Buffer.Reset(); }
@@ -2091,7 +2093,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
 static Texture* CreateTexture(std::wstring name)
 {
   Texture tex;
-  tex.Read(name);
+  auto pixels = tex.Read(name);
 
   D3D12_RESOURCE_DESC textureDesc =
       CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
@@ -2113,7 +2115,7 @@ static Texture* CreateTexture(std::wstring name)
   tex.m_Buffer.SetName(L"Texture: " + name);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
-  textureSubresourceData.pData = tex.pixels.data();
+  textureSubresourceData.pData = pixels.data();
   textureSubresourceData.RowPitch = tex.BytesPerRow();
   textureSubresourceData.SlicePitch = tex.ImageSize();
 
