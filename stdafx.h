@@ -31,6 +31,8 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
+#include <filesystem>
 #include <list>
 #include <vector>
 #include <unordered_map>

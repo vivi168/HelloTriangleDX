@@ -19,7 +19,7 @@ void Game::Init()
   Renderer::SetSceneCamera(&camera);
 
   Model3D baseTree;
-  baseTree.AddMesh("assets/OPTIM_white_oak_mesh_1.mesh");
+  baseTree.Read("OPTIM_white_oak.mdl");
 
   int ntree = 3;
   trees.resize(ntree * ntree);
@@ -33,38 +33,40 @@ void Game::Init()
     }
   }
 
-  yuka.AddMesh("assets/OPTIM_yuka_mesh_1.mesh").Scale(5.f).Translate(15.f, 0.f, 15.f);
+  yuka.Read("OPTIM_yuka.mdl").Scale(5.f).Translate(15.f, 0.f, 15.f);
   Renderer::AppendToScene(&yuka);
 
-  terrain.AddMesh("assets/OPTIM_ground_mesh_1.mesh");
+  terrain.Read("OPTIM_ground.mdl");
   Renderer::AppendToScene(&terrain);
 
-  cube.AddMesh("assets/OPTIM_issou_mesh_1.mesh").Translate(0.f, 50.f, 0.f).Scale(5.f);
+  cube.Read("OPTIM_issou.mdl").Translate(0.f, 50.f, 0.f).Scale(5.f);
   Renderer::AppendToScene(&cube);
 
-  gardenGnome.AddMesh("assets/OPTIM_garden_gnome_1k_mesh_1.mesh");
-  gardenGnome.Scale(5.0f);
+  gardenGnome.Read("OPTIM_garden_gnome_1k.mdl").Scale(5.0f);
   Renderer::AppendToScene(&gardenGnome);
 
-  sponza.AddMesh("assets/OPTIM_Sponza_mesh_1.mesh").Translate(-150.f, 5.f, -150.f).Scale(5.f);
+  sponza.Read("OPTIM_Sponza.mdl").Translate(-150.f, 5.f, -150.f).Scale(5.f);
   Renderer::AppendToScene(&sponza);
 
-  brainstem
-      .AddSkinnedMesh("assets/OPTIM_BrainStem_mesh_1.mesh", "assets/OPTIM_BrainStem_skin_1.skin",
-                      "assets/OPTIM_BrainStem_transforms.bin")
-      .AddAnimation("assets/OPTIM_BrainStem_animation_1.anim", "dance")
-      .SetCurrentAnimation("dance")
+  brainstem.Read("OPTIM_BrainStem.mdl")
+      .SetCurrentAnimation("noname 0")
       .Scale(5.f)
       .Rotate(-XM_PIDIV2, XM_PIDIV2, 0.0f)
       .Translate(-10.f, 0.f, 0.f);
   Renderer::AppendToScene(&brainstem);
 
+  cesium.Read("OPTIM_CesiumMan.mdl")
+      .SetCurrentAnimation("noname 0")
+      .Scale(5.f)
+      .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
+  Renderer::AppendToScene(&cesium);
+
   knight
-      .AddSkinnedMesh("assets/OPTIM_knight_mesh_3.mesh", "assets/OPTIM_knight_skin_1.skin",
-                      "assets/OPTIM_knight_transforms.bin")
-      // .AddMesh("assets/OPTIM_knight_mesh_1.mesh") // shield
-      // .AddMesh("assets/OPTIM_knight_mesh_2.mesh") // sword
-      .AddAnimation("assets/OPTIM_knight_animation_1.anim", "test")
+      .AddSkinnedMesh(L"assets/OPTIM_knight/OPTIM_knight_mesh_3.mesh", "assets/OPTIM_knight/OPTIM_knight_skin_1.skin",
+                      "assets/OPTIM_knight/OPTIM_knight_transforms.bin")
+      // .AddMesh("assets/OPTIM_knight/OPTIM_knight_mesh_1.mesh") // shield
+      // .AddMesh("assets/OPTIM_knight/OPTIM_knight_mesh_2.mesh") // sword
+      .AddAnimation("assets/OPTIM_knight/OPTIM_knight_animation_1.anim", "test")
       .SetCurrentAnimation("test")
       .Translate(10.f, 0, -15.f)
       .Scale(1.5f)
@@ -86,13 +88,6 @@ void Game::Init()
       Renderer::AppendToScene(&knights[i]);
     }
   }
-
-  cesium.AddSkinnedMesh("assets/OPTIM_CesiumMan_mesh_1.mesh", "assets/OPTIM_CesiumMan_skin_1.skin")
-      .AddAnimation("assets/OPTIM_CesiumMan_animation_1.anim", "walk")
-      .SetCurrentAnimation("walk")
-      .Scale(5.f)
-      .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
-  Renderer::AppendToScene(&cesium);
 }
 
 void Game::Update(float time, float deltaTime)

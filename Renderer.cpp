@@ -103,7 +103,7 @@ struct Scene {
   std::vector<SceneNode> nodes;
 
   // TODO: Mesh3D* instead of string? (use inheritance instead of generic programming)
-  std::unordered_map<std::string, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
+  std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
   std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // TODO: map for this as well? to help cache coherence when dispatching? group by skin ? or mesh ?
 
 
@@ -1979,11 +1979,12 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
 
 static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
 {
+  auto meshBasePath = std::filesystem::path(mesh->name).parent_path();
   // first loop subsets and create textures (and soon to be materials)
   for (auto& subset : mesh->subsets) {
     // TODO: get assets path
     std::wstring name(subset.name);
-    std::wstring fullName = L"assets/" + name;
+    std::wstring fullName = (meshBasePath / name).wstring();
 
     auto it = g_Textures.find(fullName);
     if (it == std::end(g_Textures)) {

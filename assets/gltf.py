@@ -610,9 +610,9 @@ class GLTFConvert:
 
             if self.skinned:
                 for m in out_skinned_meshes:
-                    buf += "{} {}".format(m[0], m[1]) + '\n'
+                    buf += "{};{}".format(m[0], m[1]) + '\n'
                 for a in out_animations:
-                    buf += "{} {}".format(a[0], a[1]) + '\n'
+                    buf += "{};{}".format(a[0], a[1]) + '\n'
 
             with open("{}.mdl".format(self.original_filename), 'w') as f:
                 f.write(buf)

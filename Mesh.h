@@ -150,13 +150,13 @@ struct Mesh3D {
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
   std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
 
-  std::string name;
+  std::wstring name;
   std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
 
-  void Read(std::string filename, bool skinned = false)
+  void Read(std::wstring filename, bool skinned = false)
   {
     FILE* fp;
-    fopen_s(&fp, filename.c_str(), "rb");
+    _wfopen_s(&fp, filename.c_str(), L"rb");
     assert(fp);
 
     name = filename;
@@ -267,6 +267,56 @@ struct Model3D {
 
   Model3D();
 
+  Model3D& Read(std::string filename)
+  {
+    std::filesystem::path basePath = "assets";
+
+    std::ifstream file((basePath / filename).string());
+    std::string line;
+
+    std::getline(file, line);
+    std::string baseDir = line.substr(line.find(":") + 2);
+
+    std::getline(file, line);
+    size_t numMesh = std::stoi(line.substr(line.find(":") + 1));
+
+    std::getline(file, line);
+    size_t numSkinnedMesh = std::stoi(line.substr(line.find(":") + 1));
+
+    std::getline(file, line);
+    size_t numAnimations = std::stoi(line.substr(line.find(":") + 1));
+
+    std::getline(file, line);
+    std::optional<std::string> staticTransform;
+    std::string transformFile = line.substr(line.find(":") + 2);
+    if (transformFile != "None") staticTransform = (basePath / baseDir / transformFile).string();
+
+    for (size_t i = 0; i < numMesh; ++i) {
+      std::getline(file, line);
+      AddMesh((basePath / baseDir / line).wstring());
+    }
+
+    for (size_t i = 0; i < numSkinnedMesh; ++i) {
+      std::getline(file, line);
+      auto sep = line.find(';');
+      std::string mesh = line.substr(0, sep);
+      std::string skin = line.substr(sep + 1);
+
+      AddSkinnedMesh((basePath / baseDir / mesh).wstring(), (basePath / baseDir / skin).string(), staticTransform);
+    }
+
+    for (size_t i = 0; i < numAnimations; ++i) {
+      std::getline(file, line);
+      auto sep = line.find(';');
+      std::string anim = line.substr(0, sep);
+      std::string name = line.substr(sep + 1);
+
+      AddAnimation((basePath / baseDir / anim).string(), name);
+    }
+
+    return *this;
+  }
+
   Model3D SpawnInstance() const
   {
     Model3D instance;
@@ -277,7 +327,7 @@ struct Model3D {
     return instance;
   }
 
-  Model3D& AddMesh(std::string filename)
+  Model3D& AddMesh(std::wstring filename)
   {
     auto mesh = std::make_unique<Mesh3D>();
     mesh->Read(filename);
@@ -287,7 +337,7 @@ struct Model3D {
     return *this;
   }
 
-  Model3D& AddSkinnedMesh(std::string meshFilename, std::string skinFilename,
+  Model3D& AddSkinnedMesh(std::wstring meshFilename, std::string skinFilename,
                           std::optional<std::string> transformFilename = std::nullopt)
   {
     auto mesh = std::make_shared<Mesh3D>();
