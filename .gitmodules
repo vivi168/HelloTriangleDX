@@ -7,9 +7,6 @@
 [submodule "DirectX-Headers"]
 	path = third_party/DirectX-Headers
 	url = https://github.com/microsoft/DirectX-Headers
-[submodule "third_party/meshoptimizer"]
-	path = third_party/meshoptimizer
-	url = https://github.com/zeux/meshoptimizer.git
 [submodule "third_party/DirectXMesh"]
 	path = third_party/DirectXMesh
 	url = https://github.com/microsoft/DirectXMesh

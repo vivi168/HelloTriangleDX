@@ -117,17 +117,33 @@ struct AnimationInfo {
 // Forward declaration
 namespace Renderer
 {
-struct Texture;
+struct TextureData;
+struct Material;
 }  // namespace Renderer
+
 
 struct Subset {
   uint32_t start, count;
   TEXTURENAME name;
 
-  Renderer::Texture* texture = nullptr;  // GPU data // TODO Material struct instead
+  Renderer::TextureData* texture = nullptr;  // GPU data // TODO Material struct instead
+  // std::shared_ptr<Renderer::Material> material = nullptr;
 };
 
 using MeshletSubset = std::pair<size_t, size_t>; // start, count
+
+struct MeshletData {
+  uint32_t numVerts;
+  uint32_t firstVert;
+  uint32_t numPrim;
+  uint32_t firstPrim;
+  uint32_t subsetIndex;
+
+  DirectX::BoundingSphere boundingSphere;       // xyz = center, w = radius
+  DirectX::PackedVector::XMUBYTEN4 normalCone;  // xyz = axis, w = -cos(a + 90)
+  float apexOffset;                             // apex = center - axis * offset
+  uint32_t pad;
+};
 
 struct Mesh3D {
   struct {
@@ -145,10 +161,12 @@ struct Mesh3D {
   std::vector<DirectX::XMUINT2> blendWeightsAndIndices;
 
   // mesh shader specific
-  std::vector<DirectX::Meshlet> meshlets;
-  std::vector<uint8_t> uniqueVertexIndices; // underlying indices are uint32
+  std::vector<MeshletData> meshlets;
+  std::vector<uint8_t> uniqueVertexIndices; // underlying indices are uint32, but stored in uint8_t array
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
-  std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset
+  std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset TODO: remove when we use new Meshlet struct
+
+  DirectX::BoundingSphere boundingSphere;
 
   std::wstring name;
   std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
@@ -180,8 +198,24 @@ struct Mesh3D {
       fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
     }
 
-    // TODO: build bounding sphere
-    // TODO: move this out of runtime
+    fclose(fp);
+
+    ComputeAdditionalData();
+
+    wprintf(
+        L"=== %s ===\nnumVerts: %d\nnumIndices: %d\nnumMeshlets: %d\nnumUniqueVertexIndices: %d\nnumPrimitives: %d\n\n",
+        name.c_str(), header.numVerts, header.numIndices, meshlets.size(), uniqueVertexIndices.size(),
+        primitiveIndices.size());
+  }
+
+  // TODO: cache all this
+  // check if meshlet data file is older than mesh file. if so regenerate. if not, load from disk.
+  void ComputeAdditionalData()
+  {
+    DirectX::BoundingSphere::CreateFromPoints(boundingSphere, positions.size(), positions.data(), sizeof(positions[0]));
+    std::vector<DirectX::Meshlet> dxMeshlets;
+
+    // Meshlet generation
     {
       std::vector<MeshletSubset> meshSubsets;
       meshSubsets.reserve(header.numSubsets);
@@ -192,24 +226,33 @@ struct Mesh3D {
 
       std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
 
-      constexpr size_t maxPrims = 126;
+      constexpr size_t maxPrims = 124;
       constexpr size_t maxVerts = 64;
       CHECK_HR(ComputeMeshlets(
           indices.data(), indices.size() / 3,
-          positions.data(), header.numVerts,
+          positions.data(), positions.size(),
           meshSubsets.data(), meshSubsets.size(),
           nullptr,
-          meshlets, uniqueVertexIndices, primitiveIndices,
+          dxMeshlets, uniqueVertexIndices, primitiveIndices,
           meshletSubsets.data(), maxVerts, maxPrims));
 
       assert(uniqueVertexIndices.size() % 4 == 0);
 
-      meshletSubsetIndices.resize(meshlets.size());
+      meshlets.resize(dxMeshlets.size());
+      for (size_t i = 0; i < dxMeshlets.size(); i++) {
+        meshlets[i].numVerts = dxMeshlets[i].VertCount;
+        meshlets[i].firstVert = dxMeshlets[i].VertOffset;
+        meshlets[i].numPrim = dxMeshlets[i].PrimCount;
+        meshlets[i].firstPrim = dxMeshlets[i].PrimOffset;
+      }
+
+      meshletSubsetIndices.resize(dxMeshlets.size());
       for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
         auto start = meshletSubsets[i].first;
         auto end = start + meshletSubsets[i].second;
 
-        for (uint32_t j = start; j < end; j++) {
+        for (size_t j = start; j < end; j++) {
+          meshlets[j].subsetIndex = i; // TODO: material index instead.
           // TODO: this is dangerous. if subsets changes (push_back(),...) all pointers are invalidated.
           // instead store an index ? if we do this offline, we won't have a choice
           // if we do it offline, add a fifth member to Meshlet struct?
@@ -218,7 +261,21 @@ struct Mesh3D {
       }
     }
 
-    fclose(fp);
+    // Meshlet cull data generation
+    {
+      std::vector<DirectX::CullData> cullData;
+      cullData.resize(dxMeshlets.size());
+      CHECK_HR(ComputeCullData(positions.data(), positions.size(), dxMeshlets.data(), dxMeshlets.size(),
+                               reinterpret_cast<uint32_t*>(uniqueVertexIndices.data()), uniqueVertexIndices.size(),
+                               primitiveIndices.data(), primitiveIndices.size(), cullData.data(),
+                               DirectX::MESHLET_WIND_CW));
+
+      for (size_t i = 0; i < meshlets.size(); i++) {
+        meshlets[i].boundingSphere = cullData[i].BoundingSphere;
+        meshlets[i].normalCone = cullData[i].NormalCone;
+        meshlets[i].apexOffset = cullData[i].ApexOffset;
+      }
+    }
   }
 
   bool Skinned() const { return skin != nullptr; }
@@ -231,7 +288,7 @@ struct Mesh3D {
 
   size_t BlendWeightsAndIndicesBufferSize() const { return sizeof(blendWeightsAndIndices[0]) * header.numVerts; }
 
-  size_t MeshletBufferSize() const { return sizeof(DirectX::Meshlet) * meshlets.size(); }
+  size_t MeshletBufferSize() const { return sizeof(MeshletData) * meshlets.size(); }
 
   size_t MeshletIndexBufferNumElements() const { return DivRoundUp(uniqueVertexIndices.size(), sizeof(UINT)); }
 

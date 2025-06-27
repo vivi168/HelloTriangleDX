@@ -6,6 +6,12 @@ struct Meshlet
   uint VertOffset;
   uint PrimCount;
   uint PrimOffset;
+
+  uint subsetIndex;
+  float4 boundingSphere;
+  uint normalCone;
+  float apexOffset;
+  uint pad;
 };
 
 struct Vertex

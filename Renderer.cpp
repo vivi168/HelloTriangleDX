@@ -25,11 +25,9 @@ namespace SkinningCSRootParameter
 enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 }
 
-struct Material {
-  UINT baseColorId;
-  UINT ormId;
-  UINT normalMapId;
-  UINT pad;
+struct VisibleMeshlet {
+  UINT meshletIndex;
+  UINT primitiveIndex;
 };
 
 struct SkinnedMeshInstance;
@@ -330,7 +328,7 @@ private:
   ID3D12Resource* UploadResource() const { return uploadBuffer.Resource(); };
 };
 
-struct Texture {
+struct TextureData {
   struct {
     uint16_t width;
     uint16_t height;
@@ -371,6 +369,26 @@ struct Texture {
   size_t BytesPerRow() const { return Width() * BytesPerPixel(); }
 
   size_t ImageSize() const { return Height() * BytesPerRow(); }
+};
+
+struct Material {
+  struct Texture {
+    TEXTURENAME name;
+    TextureData* data;
+  };
+
+  std::wstring name;
+
+  Texture baseColor;
+  Texture normalMap;
+  Texture metallicRoughness;
+
+  struct {
+    UINT baseColorId;
+    UINT normalMapId;
+    UINT metallicRoughnessId;
+    UINT pad;
+  } indices;
 };
 
 struct FrameContext {
@@ -626,7 +644,7 @@ static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh);
-static Texture* CreateTexture(std::wstring name);
+static TextureData* CreateTexture(std::wstring name);
 
 // ========== Global variables
 
@@ -676,7 +694,7 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
-static std::unordered_map<std::wstring, Texture> g_Textures;
+static std::unordered_map<std::wstring, TextureData> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -1707,7 +1725,7 @@ static void InitFrameResources()
 
     // Meshlets buffer
     {
-      size_t bufSiz = numMeshlets * sizeof(Meshlet);
+      size_t bufSiz = numMeshlets * sizeof(MeshletData);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_Meshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
@@ -1720,7 +1738,7 @@ static void InitFrameResources()
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
                                                          .NumElements = static_cast<UINT>(numMeshlets),
-                                                         .StructureByteStride = sizeof(Meshlet),
+                                                         .StructureByteStride = sizeof(MeshletData),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
       g_MeshStore.m_Meshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_Meshlets.Resource(), &srvDesc,
@@ -1729,7 +1747,7 @@ static void InitFrameResources()
 
     // Visible meshlets buffer
     {
-      size_t bufSiz = numMeshlets * sizeof(Meshlet);
+      size_t bufSiz = numMeshlets * sizeof(VisibleMeshlet);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
       g_MeshStore.m_VisibleMeshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
@@ -1742,7 +1760,7 @@ static void InitFrameResources()
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
                                                          .NumElements = static_cast<UINT>(numMeshlets),
-                                                         .StructureByteStride = sizeof(Meshlet),
+                                                         .StructureByteStride = sizeof(VisibleMeshlet),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
       g_MeshStore.m_VisibleMeshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VisibleMeshlets.Resource(), &srvDesc,
@@ -2037,7 +2055,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
 
       // meshlet data
       mi->data.offsets.meshletsBuffer =
-          g_MeshStore.CopyMeshlets(mesh->meshlets.data(), mesh->MeshletBufferSize()) / sizeof(Meshlet);
+          g_MeshStore.CopyMeshlets(mesh->meshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
       mi->data.offsets.uniqueIndicesBuffer =
           g_MeshStore.CopyMeshletUniqueIndices(mesh->uniqueVertexIndices.data(), mesh->MeshletIndexBufferSize()) /
           sizeof(UINT);
@@ -2090,9 +2108,9 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
   return mi;
 }
 
-static Texture* CreateTexture(std::wstring name)
+static TextureData* CreateTexture(std::wstring name)
 {
-  Texture tex;
+  TextureData tex;
   auto pixels = tex.Read(name);
 
   D3D12_RESOURCE_DESC textureDesc =
