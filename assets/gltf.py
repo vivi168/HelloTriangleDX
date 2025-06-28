@@ -118,31 +118,43 @@ class Triangle:
     def __str__(self):
         return "{} {} {}".format(self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
 
-
-class Material:
-    def __init__(self, base_color_orig_path:str|None=None, base_color_factor=Vec4(1, 1, 1, 1)):
-        self.base_color_orig_path = base_color_orig_path
-        self.base_color_factor = (round(base_color_factor.x * 255),
-                                  round(base_color_factor.y * 255),
-                                  round(base_color_factor.z * 255),
-                                  round(base_color_factor.w * 255))
-
-        if self.base_color_orig_path is not None:
-            self.base_color_path = "{}.raw".format(os.path.splitext(os.path.basename(self.base_color_orig_path))[0])
+class Texture:
+    def __init__(self, sourcepath:str|None=None, color=Vec4(1, 1, 1, 1)):
+        if sourcepath is not None:
+            self.sourcepath = sourcepath
+            self.filename = "{}.raw".format(os.path.splitext(os.path.basename(self.sourcepath))[0])
         else:
-            self.base_color_path = "{}-{}-{}-{}.raw".format(*self.base_color_factor)
+            self.color = (round(color.x * 255),
+                          round(color.y * 255),
+                          round(color.z * 255),
+                          round(color.w * 255))
+            self.sourcepath = None
+            self.filename = "{}-{}-{}-{}.raw".format(*self.color)
 
     def pack(self):
-        return pack_string(self.base_color_path)
+        return pack_string(self.filename)
 
-    def convert_texture(self, out_folder):
+    def convert(self, out_folder):
         # TODO: use DDS
-        if self.base_color_orig_path is not None:
-            m = RawImage(filename=self.base_color_orig_path)
+        # or at least allow exporting 2, 3 or 4 channels image...
+        if self.sourcepath is not None:
+            m = RawImage(filename=self.sourcepath)
         else:
-            m = RawImage(color=self.base_color_factor)
-        with open(os.path.join(out_folder, self.base_color_path), "wb") as f:
+            m = RawImage(color=self.color)
+        with open(os.path.join(out_folder, self.filename), "wb") as f:
             f.write(m.pack())
+
+class Material:
+    def __init__(self, base_color_texture:Texture, metallic_roughness_texture:Texture, normal_map_texture:Texture):
+       self.base_color_texture = base_color_texture
+       self.metallic_roughness_texture = metallic_roughness_texture
+       self.normal_map_texture = normal_map_texture
+
+    def pack(self):
+        return self.base_color_texture.pack()
+
+    def convert_textures(self, out_folder):
+        self.base_color_texture.convert(out_folder)
 
 
 class Subset:
@@ -212,7 +224,7 @@ class Mesh:
 
         for s in self.subsets:
             m = s.material
-            m.convert_texture(out_folder)
+            m.convert_textures(out_folder)
 
 
 class Skin:
@@ -400,20 +412,38 @@ class GLTFConvert:
         pbr_mr = material["pbrMetallicRoughness"]
 
         base_color_texture_info = pbr_mr.get("baseColorTexture", None)
-
         if base_color_texture_info is not None:
             texture = self.textures[base_color_texture_info["index"]]
             image = self.images[texture["source"]]
             file = image["uri"]  # TODO: can be base64?
-            base_color_texture = os.path.join(self.cwd, file)
-            base_color = Vec4(1, 1, 1, 1)
+            base_color_texture = Texture(sourcepath=os.path.join(self.cwd, file))
         else:
-            base_color_texture = None
-            base_color = base_color_texture_info = Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1, 1]))
+            base_color_texture = Texture(color=Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1, 1])))
 
+        metallic_roughness_texture_info = pbr_mr.get("metallicRoughnessTexture", None)
+        if metallic_roughness_texture_info is not None:
+            texture = self.textures[metallic_roughness_texture_info["index"]]
+            image = self.images[texture["source"]]
+            file = image["uri"]  # TODO: can be base64?
+            metallic_roughness_texture = Texture(sourcepath=os.path.join(self.cwd, file))
+        else:
+            metallic_factor = pbr_mr.get("metallicFactor", 1)
+            roughness_factor = pbr_mr.get("roughnessFactor", 1)
+            # The metalness values are sampled from the B channel
+            # The roughness values are sampled from the G channel
+            metallic_roughness_texture = Texture(color=Vec4(1, roughness_factor, metallic_factor, 1))
+
+        normal_map_texture_info = material.get("normalTexture", None)
+        if normal_map_texture_info is not None:
+            texture = self.textures[normal_map_texture_info["index"]]
+            image = self.images[texture["source"]]
+            file = image["uri"]  # TODO: can be base64?
+            normal_map_texture = Texture(sourcepath=os.path.join(self.cwd, file))
+        else:
+            normal_map_texture = Texture(color=Vec4(0, 0, 1, 1))
         # import pdb; pdb.set_trace()
 
-        return Material(base_color_texture, base_color)
+        return Material(base_color_texture, metallic_roughness_texture, normal_map_texture)
 
     def process_mesh(self, mi, skinned):
         mesh = self.meshes[mi]

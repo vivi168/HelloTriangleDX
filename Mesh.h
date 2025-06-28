@@ -5,8 +5,7 @@
 
 #include "DirectXMesh.h"
 
-#define MAX_TEXTURE_NAME_LEN MAX_PATH
-typedef WCHAR TEXTURENAME[MAX_TEXTURE_NAME_LEN];
+typedef WCHAR FILENAME[MAX_PATH];
 
 struct Skin {
   struct {
@@ -121,13 +120,12 @@ struct TextureData;
 struct Material;
 }  // namespace Renderer
 
-
 struct Subset {
   uint32_t start, count;
-  TEXTURENAME name;
+  FILENAME name;
+  // FILENAME materialName;
 
   Renderer::TextureData* texture = nullptr;  // GPU data // TODO Material struct instead
-  // std::shared_ptr<Renderer::Material> material = nullptr;
 };
 
 using MeshletSubset = std::pair<size_t, size_t>; // start, count

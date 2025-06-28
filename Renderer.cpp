@@ -104,7 +104,6 @@ struct Scene {
   std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
   std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // TODO: map for this as well? to help cache coherence when dispatching? group by skin ? or mesh ?
 
-
   Camera* camera;
 };
 
@@ -373,7 +372,7 @@ struct TextureData {
 
 struct Material {
   struct Texture {
-    TEXTURENAME name;
+    FILENAME name;
     TextureData* data;
   };
 
@@ -694,6 +693,8 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
+static std::vector<Material> g_Materials;
+static std::unordered_map<std::wstring, UINT> g_MaterialMap;
 static std::unordered_map<std::wstring, TextureData> g_Textures;
 static Scene g_Scene;
 
