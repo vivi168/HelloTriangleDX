@@ -6,12 +6,13 @@ import os
 import base64
 import struct
 import argparse
+import hashlib
 from raw import RawImage
 
 from typing import List
 
 MAX_PATH = 260
-SKIP_TEXTURES = True
+SKIP_TEXTURES = False
 
 def pack_string(s):
     assert(len(s) < MAX_PATH)
@@ -150,11 +151,28 @@ class Material:
        self.metallic_roughness_texture = metallic_roughness_texture
        self.normal_map_texture = normal_map_texture
 
-    def pack(self):
+       self.buf = '{}\n'.format(self.base_color_texture.filename)
+       self.buf += '{}\n'.format(self.metallic_roughness_texture.filename)
+       self.buf += '{}\n'.format(self.normal_map_texture.filename)
+       self.hash = hashlib.md5(self.buf.encode('utf-8')).hexdigest()
+
+    def pack_name(self):
         return self.base_color_texture.pack()
 
+    def pack(self, out_folder):
+        with open("{}.mtl".format(os.path.join(out_folder, self.hash)), 'w') as f:
+            f.write(self.buf)
+
+        self.convert_textures(out_folder)
+
     def convert_textures(self, out_folder):
+        if SKIP_TEXTURES:
+            return
+
         self.base_color_texture.convert(out_folder)
+        self.metallic_roughness_texture.convert(out_folder)
+        self.normal_map_texture.convert(out_folder)
+
 
 
 class Subset:
@@ -171,7 +189,7 @@ class Subset:
         assert(self.icount % 3 == 0)
         data = struct.pack("<II", self.istart, self.icount)
         pointer = struct.pack("<Q", 0)  # pointer to material
-        return data + self.material.pack() + pointer
+        return data + self.material.pack_name() + pointer
 
 
 class Mesh:
@@ -217,14 +235,6 @@ class Mesh:
 
         with open(outfile, "wb") as f:
             f.write(data)
-
-    def convert_textures(self, out_folder):
-        if SKIP_TEXTURES:
-            return
-
-        for s in self.subsets:
-            m = s.material
-            m.convert_textures(out_folder)
 
 
 class Skin:
@@ -356,6 +366,8 @@ class GLTFConvert:
         self.buffers = []
         self.construct_buffers()
 
+        self.out_materials = {}
+
     def construct_buffers(self):
         raw_buffers = self.gltf["buffers"]
 
@@ -409,6 +421,12 @@ class GLTFConvert:
         assert material_id is not None
 
         material = self.materials[material_id]
+        name = material["name"]
+
+        out_mat = self.out_materials.get(name, None)
+        if out_mat is not None:
+            return out_mat
+
         pbr_mr = material["pbrMetallicRoughness"]
 
         base_color_texture_info = pbr_mr.get("baseColorTexture", None)
@@ -441,9 +459,10 @@ class GLTFConvert:
             normal_map_texture = Texture(sourcepath=os.path.join(self.cwd, file))
         else:
             normal_map_texture = Texture(color=Vec4(0, 0, 1, 1))
-        # import pdb; pdb.set_trace()
 
-        return Material(base_color_texture, metallic_roughness_texture, normal_map_texture)
+        new_mat = Material(base_color_texture, metallic_roughness_texture, normal_map_texture)
+        self.out_materials[name] = new_mat
+        return new_mat
 
     def process_mesh(self, mi, skinned):
         mesh = self.meshes[mi]
@@ -669,7 +688,9 @@ class GLTFConvert:
             if self.skinned:
                 m.parent_node = self.mesh_parent_nodes[ni]
             m.pack(outfile(filename))
-            m.convert_textures(self.original_filename)
+
+        for i, m in self.out_materials.items():
+            m.pack(self.original_filename)
 
         if not self.skinned:
             write_model_file()
