@@ -148,14 +148,14 @@ class Texture:
 
 class Material:
     def __init__(self, base_color_texture:Texture, metallic_roughness_texture:Texture, normal_map_texture:Texture):
-       self.base_color_texture = base_color_texture
-       self.metallic_roughness_texture = metallic_roughness_texture
-       self.normal_map_texture = normal_map_texture
+        self.base_color_texture = base_color_texture
+        self.metallic_roughness_texture = metallic_roughness_texture
+        self.normal_map_texture = normal_map_texture
 
-       self.buf = '{}\n'.format(self.base_color_texture.filename)
-       self.buf += '{}\n'.format(self.metallic_roughness_texture.filename)
-       self.buf += '{}\n'.format(self.normal_map_texture.filename)
-       self.hash = hashlib.md5(self.buf.encode('utf-8')).hexdigest()
+        self.buf = '{}\n'.format(self.base_color_texture.filename)
+        self.buf += '{}\n'.format(self.metallic_roughness_texture.filename)
+        self.buf += '{}\n'.format(self.normal_map_texture.filename)
+        self.hash = hashlib.md5(self.buf.encode('utf-8')).hexdigest()
 
     def pack_name(self):
         return self.base_color_texture.pack()
@@ -173,7 +173,6 @@ class Material:
         self.base_color_texture.convert(out_folder)
         self.metallic_roughness_texture.convert(out_folder)
         self.normal_map_texture.convert(out_folder)
-
 
 
 class Subset:
