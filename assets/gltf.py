@@ -7,12 +7,13 @@ import base64
 import struct
 import argparse
 import hashlib
+import uuid
 from raw import RawImage
 
 from typing import List
 
 MAX_PATH = 260
-SKIP_TEXTURES = False
+SKIP_TEXTURES = True
 
 def pack_string(s):
     assert(len(s) < MAX_PATH)
@@ -421,7 +422,7 @@ class GLTFConvert:
         assert material_id is not None
 
         material = self.materials[material_id]
-        name = material["name"]
+        name = material.get("name", str(uuid.uuid4()))
 
         out_mat = self.out_materials.get(name, None)
         if out_mat is not None:
