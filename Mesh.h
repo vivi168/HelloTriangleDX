@@ -96,11 +96,13 @@ struct Animation {
 
   DirectX::XMMATRIX Interpolate(float curTime, int boneId, Skin* skin);
 
-  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime, Skin* skin);
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime, Skin* skin,
+                                                  std::unordered_map<int, DirectX::XMMATRIX>& globalTransforms);
 };
 
 struct AnimationInfo {
   std::shared_ptr<Animation> animation = nullptr;
+  std::unordered_map<int, DirectX::XMMATRIX> globalTransforms;
 
   float curTime = 0.0f;
 
@@ -109,7 +111,7 @@ struct AnimationInfo {
     curTime += dt;
     if (curTime > animation->maxTime) curTime = animation->minTime;
 
-    return animation->BoneTransforms(curTime, skin);
+    return animation->BoneTransforms(curTime, skin, globalTransforms);
   }
 };
 
@@ -169,6 +171,9 @@ struct Mesh3D {
   std::wstring name;
   std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
 
+  int parentBone = -1;
+  DirectX::XMFLOAT4X4 localTransform;
+
   void Read(std::wstring filename, bool skinned = false)
   {
     FILE* fp;
@@ -195,6 +200,21 @@ struct Mesh3D {
       blendWeightsAndIndices.resize(header.numVerts);
       fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
     }
+
+    fread(&parentBone, sizeof(int), 1, fp);
+
+    struct {
+      DirectX::XMFLOAT3 scale;
+      DirectX::XMFLOAT3 translation;
+      DirectX::XMFLOAT4 rotation;
+    } transform;
+    fread(&transform, sizeof(transform), 1, fp);
+    DirectX::XMVECTOR scale = DirectX::XMLoadFloat3(&transform.scale);
+    DirectX::XMVECTOR trans = DirectX::XMLoadFloat3(&transform.translation);
+    DirectX::XMVECTOR rot = DirectX::XMLoadFloat4(&transform.rotation);
+
+    auto issou = DirectX::XMMatrixAffineTransformation(scale, DirectX::XMVectorZero(), rot, trans);
+    DirectX::XMStoreFloat4x4(&localTransform, issou);
 
     fclose(fp);
 
@@ -307,6 +327,8 @@ struct Mesh3D {
 
     return skin->header.numJoints;
   }
+
+  DirectX::XMMATRIX LocalTransformMatrix() const { return DirectX::XMLoadFloat4x4(&localTransform); }
 };
 
 struct Model3D {
@@ -438,7 +460,7 @@ struct Model3D {
 
   bool HasCurrentAnimation() { return currentAnimation.animation != nullptr; }
 
-  DirectX::XMMATRIX WorldMatrix();
+  DirectX::XMMATRIX WorldMatrix() const;
 
   Model3D& Scale(float s);
   Model3D& Rotate(float x, float y, float z);

@@ -57,6 +57,7 @@ struct MeshInstance {
   UINT instanceBufferOffset;
   UINT numMeshlets;
   std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
+  std::shared_ptr<Mesh3D> mesh = nullptr;
 };
 
 // only used for compute shader skinning pass
@@ -642,7 +643,7 @@ static void WaitForFrame(FrameContext* ctx);
 static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
-static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh);
+static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
 static TextureData* CreateTexture(std::wstring name);
 
 // ========== Global variables
@@ -733,7 +734,7 @@ void LoadAssets()
 
   for (auto &node : g_Scene.nodes) {
     for (auto &mesh : node.model->meshes) {
-      auto mi = LoadMesh3D(mesh.get());
+      auto mi = LoadMesh3D(mesh);
 
       node.meshInstances.push_back(mi);
       if (mi->skinnedMeshInstance) {
@@ -841,13 +842,26 @@ void Update(float time, float dt)
         }
       }  // else identity matrices ?
 
-      XMMATRIX worldViewProjection = model->WorldMatrix() * viewProjection;
-      XMMATRIX normalMatrix = XMMatrixInverse(nullptr, model->WorldMatrix());
+      XMMATRIX world = model->WorldMatrix();
+      XMMATRIX worldViewProjection = world * viewProjection;
+      XMMATRIX normalMatrix = XMMatrixInverse(nullptr, world);
 
       for (auto mi : node.meshInstances) {
-        XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
-        XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(model->WorldMatrix()));
-        XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
+        XMMATRIX w = world;
+        XMMATRIX wvp = w * viewProjection;
+        XMMATRIX n = XMMatrixInverse(nullptr, w);
+
+        if (model->HasCurrentAnimation() && mi->mesh->parentBone > -1) {
+          auto boneMatrix = model->currentAnimation.globalTransforms[mi->mesh->parentBone];
+
+          w = mi->mesh->LocalTransformMatrix() * boneMatrix * world;
+          wvp = w * viewProjection;
+          n = XMMatrixInverse(nullptr, w);
+        }
+
+        XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(wvp));
+        XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(w));
+        XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, n);
 
         g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
       }
@@ -1998,7 +2012,7 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
   }
 }
 
-static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
+static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 {
   auto meshBasePath = std::filesystem::path(mesh->name).parent_path();
   // first loop subsets and create textures (and soon to be materials)
@@ -2104,6 +2118,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(Mesh3D* mesh)
   }
 
   mi->numMeshlets = mesh->meshlets.size();
+  mi->mesh = mesh;
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
 
   return mi;

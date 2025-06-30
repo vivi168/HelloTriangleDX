@@ -87,10 +87,10 @@ XMMATRIX Animation::Interpolate(float curTime, int boneId, Skin* skin)
   return XMMatrixIdentity();
 }
 
-std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin)
+std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin,
+                                                  std::unordered_map<int, XMMATRIX>& globalTransforms)
 {
-  std::unordered_map<int, XMMATRIX> boneLocalTransforms;
-  boneLocalTransforms[skin->header.rootBone] = Interpolate(curTime, skin->header.rootBone, skin);
+  globalTransforms[skin->header.rootBone] = Interpolate(curTime, skin->header.rootBone, skin);
 
   std::stack<int> stack;
   stack.push(skin->header.rootBone);
@@ -99,12 +99,12 @@ std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin)
     int bone = stack.top();
     stack.pop();
 
-    auto parentLocalTransform = boneLocalTransforms[bone];
+    auto parentGlobalTransform = globalTransforms[bone];
 
     auto children = skin->boneHierarchy[bone];
     for (auto child : children) {
       auto localTransform = Interpolate(curTime, child, skin);
-      boneLocalTransforms[child] = localTransform * parentLocalTransform;
+      globalTransforms[child] = localTransform * parentGlobalTransform;
       stack.push(child);
     }
   }
@@ -115,7 +115,7 @@ std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin)
     auto joint = skin->jointIndices[i];
     XMMATRIX inverseBindMatrix = XMLoadFloat4x4(&skin->inverseBindMatrices[i]);
 
-    XMMATRIX boneTransform = XMMatrixTranspose(inverseBindMatrix * boneLocalTransforms[joint]);
+    XMMATRIX boneTransform = XMMatrixTranspose(inverseBindMatrix * globalTransforms[joint]);
     XMStoreFloat4x4(&boneTransforms[i], boneTransform);
   }
 
@@ -130,7 +130,7 @@ Model3D::Model3D()
 {
 }
 
-XMMATRIX Model3D::WorldMatrix()
+XMMATRIX Model3D::WorldMatrix() const
 {
   XMVECTOR scaleVector = XMLoadFloat3(&scale);
   XMVECTOR transVector = XMLoadFloat3(&translate);

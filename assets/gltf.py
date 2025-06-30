@@ -193,16 +193,13 @@ class Subset:
 
 
 class Mesh:
-    def __init__(self, translation=Vec3(), scale=Vec3()):
+    def __init__(self):
         self.cwd = ""
         self.vertices: List[Vertex] = []
         self.tris: List[Triangle] = []
         self.subsets: List[Subset] = []
         self.skinned = False
         self.parent_node = -1
-
-        self.translation = translation
-        self.scale = scale
 
     def pack(self, outfile):
         data = bytearray()
@@ -232,6 +229,12 @@ class Mesh:
                 weights_and_indices += v.pack_weights_and_indices()
 
         data += (positions_data + normals_data + uvs_data + weights_and_indices)
+        data += (
+            struct.pack("<i", self.parent_node)
+            + self.scale.pack_f32()
+            + self.translation.pack_f32()
+            + self.rotation.pack()
+        )
 
         with open(outfile, "wb") as f:
             f.write(data)
@@ -675,6 +678,7 @@ class GLTFConvert:
             print("mesh #{}: {}".format(i + 1, filename), end="")
 
             skinned = self.skinned and node.get("skin") is not None
+            parented = self.skinned and node.get("skin") is None
 
             if skinned:
                 skin_idx = self.skin_indices.index(node["skin"])
@@ -685,8 +689,12 @@ class GLTFConvert:
                 print()
 
             m = self.process_mesh(node["mesh"], skinned)
-            if self.skinned:
+            if parented:
                 m.parent_node = self.mesh_parent_nodes[ni]
+            # TODO: some nodes have a "matrix" component instead of individual transforms
+            m.translation = Vec3(*node.get("translation", [0, 0, 0]))
+            m.rotation = Vec4(*node.get("rotation", [0, 0, 0, 1]))
+            m.scale = Vec3(*node.get("scale", [1, 1, 1]))
             m.pack(outfile(filename))
 
         for i, m in self.out_materials.items():

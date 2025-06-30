@@ -61,16 +61,7 @@ void Game::Init()
       .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
   Renderer::AppendToScene(&cesium);
 
-  knight
-      .AddSkinnedMesh(L"assets/OPTIM_knight/OPTIM_knight_mesh_3.mesh", "assets/OPTIM_knight/OPTIM_knight_skin_1.skin",
-                      "assets/OPTIM_knight/OPTIM_knight_transforms.bin")
-      // .AddMesh("assets/OPTIM_knight/OPTIM_knight_mesh_1.mesh") // shield
-      // .AddMesh("assets/OPTIM_knight/OPTIM_knight_mesh_2.mesh") // sword
-      .AddAnimation("assets/OPTIM_knight/OPTIM_knight_animation_1.anim", "test")
-      .SetCurrentAnimation("test")
-      .Translate(10.f, 0, -15.f)
-      .Scale(1.5f)
-      .Rotate(0, XM_PI / 2, 0);
+  knight.Read("OPTIM_knight.mdl").SetCurrentAnimation("Armature|mixamo.com|Layer0").Translate(10.f, 0, -15.f);
   Renderer::AppendToScene(&knight);
 
   int yknight = 3;
@@ -81,8 +72,7 @@ void Game::Init()
       int i = y * xknight + x;
 
       knights[i] = knight.SpawnInstance()
-                         .SetCurrentAnimation("test")
-                         .Scale(1.5f)
+                         .SetCurrentAnimation("Armature|mixamo.com|Layer0")
                          .Translate(80 + x * 10, 20.f, 20.0f + y * 10.f);
 
       Renderer::AppendToScene(&knights[i]);
