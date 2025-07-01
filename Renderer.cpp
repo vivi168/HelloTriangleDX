@@ -842,26 +842,23 @@ void Update(float time, float dt)
         }
       }  // else identity matrices ?
 
-      XMMATRIX world = model->WorldMatrix();
-      XMMATRIX worldViewProjection = world * viewProjection;
-      XMMATRIX normalMatrix = XMMatrixInverse(nullptr, world);
+      XMMATRIX modelMat = model->WorldMatrix();
 
       for (auto mi : node.meshInstances) {
-        XMMATRIX w = world;
-        XMMATRIX wvp = w * viewProjection;
-        XMMATRIX n = XMMatrixInverse(nullptr, w);
+        XMMATRIX world = mi->mesh->LocalTransformMatrix() * modelMat;
 
         if (model->HasCurrentAnimation() && mi->mesh->parentBone > -1) {
           auto boneMatrix = model->currentAnimation.globalTransforms[mi->mesh->parentBone];
 
-          w = mi->mesh->LocalTransformMatrix() * boneMatrix * world;
-          wvp = w * viewProjection;
-          n = XMMatrixInverse(nullptr, w);
+          world = mi->mesh->LocalTransformMatrix() * boneMatrix * modelMat;
         }
 
-        XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(wvp));
-        XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(w));
-        XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, n);
+        XMMATRIX worldViewProjection = world * viewProjection;
+        XMMATRIX normalMatrix = XMMatrixInverse(nullptr, world);
+
+        XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
+        XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(world));
+        XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
 
         g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
       }
