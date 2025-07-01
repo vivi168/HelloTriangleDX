@@ -250,7 +250,7 @@ private:
   std::wstring resourceName;
 };
 
-// TODO: rename this
+// TODO: try use D3D12_HEAP_TYPE_GPU_UPLOAD instead
 struct UploadedHeapResource {
   void CreateResources(D3D12MA::Allocator* allocator, const D3D12_RESOURCE_DESC* pResourceDesc,
                        const D3D12_RESOURCE_DESC* pResourceUploadDesc,
@@ -628,7 +628,7 @@ static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE
 
 static const size_t FRAME_BUFFER_COUNT = 3;
 
-static const UINT PRESENT_SYNC_INTERVAL = 1;
+static const UINT PRESENT_SYNC_INTERVAL = 0;
 static const UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
 
 static const DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -660,7 +660,7 @@ static std::wstring g_AssetsPath;
 static IDXGIFactory4* g_Factory = nullptr;
 static ComPtr<IDXGIAdapter1> g_Adapter;
 
-static ComPtr<ID3D12Device2> g_Device;
+static ComPtr<ID3D12Device5> g_Device;
 static DXGI_ADAPTER_DESC1 g_AdapterDesc;
 static ComPtr<D3D12MA::Allocator> g_Allocator;
 // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
@@ -1221,19 +1221,25 @@ static void InitD3D()
 
   // Create Device
   {
-    ID3D12Device2* device = nullptr;
-    CHECK_HR(D3D12CreateDevice(g_Adapter.Get(), FEATURE_LEVEL,
-                               IID_PPV_ARGS(&device)));
+    ID3D12Device5* device = nullptr;
+    CHECK_HR(D3D12CreateDevice(g_Adapter.Get(), FEATURE_LEVEL, IID_PPV_ARGS(&device)));
     g_Device.Attach(device);
 
+    // Ray tracing capabilities
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
-                                           &options5, sizeof(options5)));
+    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
     assert(options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
 
+    // Mesh shading
     D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
-    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7,
-                                           &options7, sizeof(options7)));
+    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7)));
+    assert(options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1);
+
+    // GPU Upload Heap Supported
+    bool GPUUploadHeapSupported = false;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS16 options16 = {};
+    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &options16, sizeof(options16)));
+    assert(options16.GPUUploadHeapSupported);
   }
 
 #ifdef ENABLE_DEBUG_LAYER
