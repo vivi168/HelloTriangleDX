@@ -210,6 +210,7 @@ struct HeapResource {
                       D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
   {
+    currentState = InitialResourceState;
     CHECK_HR(allocator->CreateResource(allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue,
                                        &allocation, IID_PPV_ARGS(&resource)));
   }
@@ -222,6 +223,9 @@ struct HeapResource {
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
   {
+    // TODO: implement state tracking assert(currentState == stateBefore);
+    // maybe implement thin commandlist/queue wrapper?
+    currentState = stateAfter;
     return CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), stateBefore, stateAfter);
   }
 
@@ -247,6 +251,7 @@ private:
   HeapDescriptor uavDescriptor;
   D3D12MA::Allocation* allocation;
   void* address;
+  D3D12_RESOURCE_STATES currentState;
   std::wstring resourceName;
 };
 
@@ -825,6 +830,8 @@ void Update(float time, float dt)
 
     XMMATRIX view = g_Scene.camera->LookAt();
     XMMATRIX viewProjection = view * projection;
+
+    // TODO: here compute planes for frustum culling
 
     for (auto& node : g_Scene.nodes) {
       auto model = node.model;
