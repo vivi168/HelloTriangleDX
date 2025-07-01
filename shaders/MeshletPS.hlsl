@@ -1,5 +1,7 @@
 #include "MeshletCommon.hlsli"
 
+#define BASE_COLOR 1
+
 SamplerState s0 : register(s0);
 
 float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
@@ -9,27 +11,25 @@ float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
 
   uint meshletIndex = input.meshletIndex;
 
+ #ifdef BASE_COLOR
   StructuredBuffer<uint> MaterialIndices = ResourceDescriptorHeap[meshletMaterialsBufferId];
   uint materialId = MaterialIndices[meshletIndex];
 
   Texture2D tex = ResourceDescriptorHeap[NonUniformResourceIndex(materialId)];
-  float4 diffuseColor = tex.Sample(s0, input.texCoord);
+  float4 color = tex.Sample(s0, input.texCoord);
 
-  if (diffuseColor.a == 0)
+  if (color.a == 0)
     discard;
-
-  //float4 meshletColor = float4(
-  //          float(meshletIndex & 1),
-  //          float(meshletIndex & 3) / 4,
-  //          float(meshletIndex & 7) / 8,
-  //          1.0f);
-  //return meshletColor;
-
-  //float4 primitiveColor = float4(
-  //          float(primitiveId & 1),
-  //          float(primitiveId & 3) / 4,
-  //          float(primitiveId & 7) / 8,
-  //          1.0f);
-
-  return diffuseColor;
+#elif defined MESHLET_COLOR
+  float4 color = float4(float(meshletIndex & 1),
+                        float(meshletIndex & 3) / 4,
+                        float(meshletIndex & 7) / 8,
+                        1.0f);
+#else
+  float4 color = float4(float(primitiveId & 1),
+                        float(primitiveId & 3) / 4,
+                        float(primitiveId & 7) / 8,
+                        1.0f);
+#endif
+  return color;
 }

@@ -30,7 +30,7 @@ uint3 UnpackPrimitive(uint primitive)
 uint3 GetPrimitive(Meshlet m, uint gtid)
 {
   StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[meshletsPrimitivesBufferId];
-  
+
   return UnpackPrimitive(PrimitiveIndices[m.PrimOffset + gtid]);
 }
 
@@ -38,7 +38,7 @@ uint GetVertexIndex(Meshlet m, uint localIndex)
 {
   localIndex = m.VertOffset + localIndex;
   StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[meshletUniqueIndicesBufferId];
-  
+
   return UniqueVertexIndices[localIndex];
 }
 
@@ -81,7 +81,7 @@ void main(
 
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
   Meshlet m = meshlets[mi.meshletBufferOffset + gid.x];
-  
+
   SetMeshOutputCounts(m.VertCount, m.PrimCount);
 
   if (gtid < m.PrimCount)
