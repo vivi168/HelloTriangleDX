@@ -1,9 +1,9 @@
 Language:     Cpp
 BasedOnStyle: Google
 AccessModifierOffset: -2
+BinPackParameters: false
 BreakBeforeBraces: Linux
 ColumnLimit: 120
 DerivePointerAlignment: false
-InsertNewlineAtEOF: true
+IncludeBlocks: Preserve
 SeparateDefinitionBlocks: Always
-SortIncludes: false

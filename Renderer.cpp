@@ -101,9 +101,8 @@ struct Scene {
 
   std::vector<SceneNode> nodes;
 
-  // TODO: Mesh3D* instead of string? (use inheritance instead of generic programming)
   std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
-  std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // TODO: map for this as well? to help cache coherence when dispatching? group by skin ? or mesh ?
+  std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances;
 
   Camera* camera;
 };
@@ -217,9 +216,16 @@ struct HeapResource {
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
 
+  void Map2() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, nullptr)); }
+
   void Unmap() { resource->Unmap(0, nullptr); }
 
   void Copy(size_t offset, const void* data, size_t size) { memcpy((BYTE*)address + offset, data, size); }
+
+  void Copy(D3D12_SUBRESOURCE_DATA* data)
+  {
+    resource->WriteToSubresource(0, nullptr, data->pData, data->RowPitch, data->SlicePitch);
+  }
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
   {
@@ -341,7 +347,7 @@ struct TextureData {
 
   std::wstring name;
 
-  UploadedHeapResource m_Buffer;
+  HeapResource m_Buffer;
 
   std::vector<uint8_t> Read(std::wstring filename)
   {
@@ -361,8 +367,6 @@ struct TextureData {
 
   void Reset() { m_Buffer.Reset(); }
 
-  void ResetUploadBuffer() { m_Buffer.ResetUpload(); }
-
   DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
 
   uint32_t BytesPerPixel() const { return 4; }
@@ -377,23 +381,16 @@ struct TextureData {
 };
 
 struct Material {
-  struct Texture {
-    FILENAME name;
-    TextureData* data;
-  };
-
-  std::wstring name;
-
-  Texture baseColor;
-  Texture normalMap;
-  Texture metallicRoughness;
-
   struct {
     UINT baseColorId;
-    UINT normalMapId;
     UINT metallicRoughnessId;
+    UINT normalMapId;
     UINT pad;
-  } indices;
+  } m_GpuData;
+
+  UINT m_MaterialBufferOffset;
+
+  UINT MaterialIndex() const { return m_MaterialBufferOffset / sizeof(m_GpuData); }
 };
 
 struct FrameContext {
@@ -508,15 +505,6 @@ struct MeshStore {
     return offset;
   }
 
-  UINT CopyMeshletMaterials(const void* data, size_t size)
-  {
-    UINT offset = m_CurrentOffsets.meshletMaterialsBuffer;
-    m_MeshletMaterials.Copy(offset, data, size);
-    m_CurrentOffsets.meshletMaterialsBuffer += size;
-
-    return offset;
-  }
-
   // meta data
 
   UINT CopyMaterial(const void* data, size_t size)
@@ -565,8 +553,7 @@ struct MeshStore {
         m_VisibleMeshlets.SrvDescriptorIndex(),
         m_MeshletUniqueIndices.SrvDescriptorIndex(),
         m_MeshletPrimitives.SrvDescriptorIndex(),
-        m_MeshletMaterials.SrvDescriptorIndex(),
-        // TODO: materials
+        m_Materials.SrvDescriptorIndex(),
         m_Instances.SrvDescriptorIndex(),
     };
   }
@@ -588,10 +575,9 @@ struct MeshStore {
   UploadedHeapResource m_VertexBlendWeightsAndIndices;
 
   UploadedHeapResource m_Meshlets;
-  UploadedHeapResource m_VisibleMeshlets;
+  UploadedHeapResource m_VisibleMeshlets;  // written by compute shader
   UploadedHeapResource m_MeshletUniqueIndices;
   UploadedHeapResource m_MeshletPrimitives;
-  UploadedHeapResource m_MeshletMaterials;
 
   UploadedHeapResource m_Materials;
   UploadedHeapResource m_Instances; // updated each frame
@@ -611,7 +597,6 @@ struct MeshStore {
     UINT visibleMeshletsBuffer = 0;
     UINT uniqueIndicesBuffer = 0;
     UINT primitivesBuffer = 0;
-    UINT meshletMaterialsBuffer = 0;
 
     // meta data
     UINT materialsBuffer = 0;
@@ -649,7 +634,7 @@ static void WaitGPUIdle(size_t frameIndex);
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
-static TextureData* CreateTexture(std::wstring name);
+static UINT CreateTexture(std::filesystem::path filename);
 
 // ========== Global variables
 
@@ -699,9 +684,8 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
-static std::vector<Material> g_Materials;
-static std::unordered_map<std::wstring, UINT> g_MaterialMap;
-static std::unordered_map<std::wstring, TextureData> g_Textures;
+static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
+static std::unordered_map<std::wstring, std::shared_ptr<TextureData>> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -787,11 +771,10 @@ void LoadAssets()
     g_MeshStore.m_MeshletPrimitives.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.primitivesBuffer);
     uploadBarriers[6] = g_MeshStore.m_MeshletPrimitives.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    g_MeshStore.m_MeshletMaterials.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.meshletMaterialsBuffer);
-    uploadBarriers[7] = g_MeshStore.m_MeshletMaterials.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
     // meta data
-    // TODO: materials
+    g_MeshStore.m_Materials.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.materialsBuffer);
+    uploadBarriers[7] = g_MeshStore.m_Materials.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
     g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
     uploadBarriers[8] = g_MeshStore.m_Instances.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
@@ -807,11 +790,6 @@ void LoadAssets()
   g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   WaitGPUIdle(g_FrameIndex);
-
-  // Release upload buffers
-  for (auto& [k, tex] : g_Textures) {
-    tex.ResetUploadBuffer();
-  }
 }
 
 void Update(float time, float dt)
@@ -1086,8 +1064,8 @@ void Cleanup()
 
   for (auto& [k, tex] : g_Textures) {
     // TODO: do this from Texture#Reset() ?
-    g_SrvUavDescHeapAlloc.Free(tex.m_Buffer.SrvDescriptorIndex());
-    tex.Reset();
+    g_SrvUavDescHeapAlloc.Free(tex->m_Buffer.SrvDescriptorIndex());
+    tex->Reset();
   }
 
   {
@@ -1117,10 +1095,8 @@ void Cleanup()
     g_MeshStore.m_MeshletPrimitives.Reset();
     g_MeshStore.m_MeshletPrimitives.ResetUpload();
 
-    g_MeshStore.m_MeshletMaterials.Reset();
-    g_MeshStore.m_MeshletMaterials.ResetUpload();
-
-    // TODO: material
+    g_MeshStore.m_Materials.Reset();
+    g_MeshStore.m_Materials.ResetUpload();
 
     g_MeshStore.m_Instances.Reset();
     g_MeshStore.m_Instances.ResetUpload();
@@ -1182,6 +1158,40 @@ void AppendToScene(Model3D* model)
   node.model = model;
 
   g_Scene.nodes.push_back(node);
+}
+
+UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
+{
+  // TODO: CreateTextures won't work from here. split it to ? CreateTexture + UploadTexture
+  std::filesystem::path materialPath = baseDir / filename;
+  auto it = g_MaterialMap.find(materialPath);
+  if (it != g_MaterialMap.end()) return it->second->MaterialIndex();
+
+  auto material = std::make_shared<Material>();
+
+  std::ifstream file(materialPath);
+  std::string line;
+
+  // base color
+  std::getline(file, line);
+  std::filesystem::path baseColorPath = baseDir / line;
+  material->m_GpuData.baseColorId = CreateTexture(baseColorPath);
+
+  // metallic roughness
+  std::getline(file, line);
+  std::filesystem::path metallicRoughnessPath = baseDir / line;
+  material->m_GpuData.metallicRoughnessId = CreateTexture(metallicRoughnessPath);
+
+  // normal map
+  std::getline(file, line);
+  std::filesystem::path normalMapPath = baseDir / line;
+  material->m_GpuData.normalMapId = CreateTexture(normalMapPath);
+
+  material->m_MaterialBufferOffset = g_MeshStore.CopyMaterial(&material->m_GpuData, sizeof(material->m_GpuData));
+
+  g_MaterialMap[materialPath] = material;
+
+  return material->MaterialIndex();
 }
 
 // ========== Static functions
@@ -1639,7 +1649,7 @@ static void InitFrameResources()
     static constexpr size_t numIndices = 10'000'000;
     static constexpr size_t numPrimitives = 3'000'000;
     static constexpr size_t numInstances = 10000;
-    static constexpr size_t numMaterials = 100;
+    static constexpr size_t numMaterials = 1000;
     static constexpr size_t numMatrices = 3000;
 
     // Positions buffer
@@ -1790,6 +1800,7 @@ static void InitFrameResources()
       g_MeshStore.m_VisibleMeshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VisibleMeshlets.Resource(), &srvDesc,
                                          g_MeshStore.m_VisibleMeshlets.SrvDescriptorHandle());
+      // TODO: UAV as well (for writing)
     }
 
     // Meshlet unique vertex indices buffer
@@ -1836,31 +1847,26 @@ static void InitFrameResources()
                                          g_MeshStore.m_MeshletPrimitives.SrvDescriptorHandle());
     }
 
-    // Meshlet materials buffer
+    // Materials buffer
     {
-      size_t bufSiz = numMeshlets * sizeof(UINT);
+      size_t bufSiz = numMaterials * sizeof(Material::m_GpuData);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_MeshletMaterials.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
-      g_MeshStore.m_MeshletMaterials.SetName(L"Materials Store");
-      g_MeshStore.m_MeshletMaterials.Map();
+      g_MeshStore.m_Materials.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_Materials.SetName(L"Materials Store");
+      g_MeshStore.m_Materials.Map();
 
       // descriptor
       D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                               .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numMeshlets),
-                                                         .StructureByteStride = sizeof(UINT),
+                                                         .NumElements = static_cast<UINT>(numMaterials),
+                                                         .StructureByteStride = sizeof(Material::m_GpuData),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_MeshletMaterials.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(g_MeshStore.m_MeshletMaterials.Resource(), &srvDesc,
-                                         g_MeshStore.m_MeshletMaterials.SrvDescriptorHandle());
-    }
-
-    // Materials buffer
-    {
-      // TODO...
+      g_MeshStore.m_Materials.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_MeshStore.m_Materials.Resource(), &srvDesc,
+                                         g_MeshStore.m_Materials.SrvDescriptorHandle());
     }
 
     // Instances buffer
@@ -2025,21 +2031,6 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 {
   auto meshBasePath = std::filesystem::path(mesh->name).parent_path();
-  // first loop subsets and create textures (and soon to be materials)
-  for (auto& subset : mesh->subsets) {
-    // TODO: get assets path
-    std::wstring name(subset.name);
-    std::wstring fullName = (meshBasePath / name).wstring();
-
-    auto it = g_Textures.find(fullName);
-    if (it == std::end(g_Textures)) {
-      subset.texture = CreateTexture(fullName);
-      wprintf(L"CREATE TEXTURE %s\n", fullName.c_str());
-    } else {
-      subset.texture = &it->second;
-      wprintf(L"TEXTURE ALREADY EXISTS %s\n", fullName.c_str());
-    }
-  }
 
   // Create MeshInstance
   auto mi = std::make_shared<MeshInstance>();
@@ -2087,21 +2078,6 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
       mi->data.offsets.primitivesBuffer =
           g_MeshStore.CopyMeshletPrimitives(mesh->primitiveIndices.data(), mesh->MeshletPrimitiveBufferSize()) /
           sizeof(UINT);
-
-      {
-        std::vector<UINT> meshletMaterials(mesh->meshlets.size());
-
-        for (size_t i = 0; i < mesh->meshlets.size(); i++) {
-          auto subset = mesh->meshletSubsetIndices[i];
-
-          // TODO: in the future, should preprocess subsets to build a Material buffer.
-          // and this index should be an index into the correct Material.
-          meshletMaterials[i] = subset->texture->m_Buffer.SrvDescriptorIndex();
-        }
-        auto o = g_MeshStore.CopyMeshletMaterials(meshletMaterials.data(), meshletMaterials.size() * sizeof(UINT)) /
-                 sizeof(UINT);
-        assert(o == mi->data.offsets.meshletsBuffer);
-      }
     } else {
       auto i = it->second[0];
       mi->data.offsets = i->data.offsets;
@@ -2134,38 +2110,32 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
   return mi;
 }
 
-static TextureData* CreateTexture(std::wstring name)
+static UINT CreateTexture(std::filesystem::path filename)
 {
-  TextureData tex;
-  auto pixels = tex.Read(name);
+  auto it = g_Textures.find(filename);
+  if (it != g_Textures.end()) return it->second->m_Buffer.SrvDescriptorIndex();
+
+  auto tex = std::make_shared<TextureData>();
+  auto pixels = tex->Read(filename);
 
   D3D12_RESOURCE_DESC textureDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(tex.Format(), tex.Width(), tex.Height());
+      CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
   textureDesc.MipLevels = 1;
 
-  UINT64 textureUploadBufferSize;
-  g_Device->GetCopyableFootprints(&textureDesc,
-                                  0,        // FirstSubresource
-                                  1,        // NumSubresources
-                                  0,        // BaseOffset
-                                  nullptr,  // pLayouts
-                                  nullptr,  // pNumRows
-                                  nullptr,  // pRowSizeInBytes
-                                  &textureUploadBufferSize);  // pTotalBytes
+  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
+  tex->m_Buffer.CreateResource(g_Allocator.Get(), &allocDesc, & textureDesc, D3D12_RESOURCE_STATE_COMMON);
+  tex->m_Buffer.SetName(L"Texture: " + filename.wstring());
 
-  auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureUploadBufferSize);
-  tex.m_Buffer.CreateResources(g_Allocator.Get(), &textureDesc, &bufferDesc,
-                               D3D12_RESOURCE_STATE_COPY_DEST);
-  tex.m_Buffer.SetName(L"Texture: " + name);
+  tex->m_Buffer.Map2();
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = pixels.data();
-  textureSubresourceData.RowPitch = tex.BytesPerRow();
-  textureSubresourceData.SlicePitch = tex.ImageSize();
+  textureSubresourceData.RowPitch = tex->BytesPerRow();
+  textureSubresourceData.SlicePitch = tex->ImageSize();
 
-  tex.m_Buffer.Upload(g_CommandList.Get(), &textureSubresourceData);
-  auto barrier = tex.m_Buffer.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  g_CommandList->ResourceBarrier(1, &barrier);
+  tex->m_Buffer.Copy(&textureSubresourceData);
+
+  tex->m_Buffer.Unmap();
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -2173,12 +2143,12 @@ static TextureData* CreateTexture(std::wstring name)
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   srvDesc.Texture2D.MipLevels = 1;
 
-  tex.m_Buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-  g_Device->CreateShaderResourceView(tex.m_Buffer.Resource(), &srvDesc,
-                                     tex.m_Buffer.SrvDescriptorHandle());
+  tex->m_Buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+  g_Device->CreateShaderResourceView(tex->m_Buffer.Resource(), &srvDesc,
+                                     tex->m_Buffer.SrvDescriptorHandle());
 
-  g_Textures[name] = tex;
+  g_Textures[filename] = tex;
 
-  return &g_Textures[name];
+  return tex->m_Buffer.SrvDescriptorIndex();
 }
 }  // namespace Renderer

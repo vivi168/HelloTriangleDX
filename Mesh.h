@@ -21,82 +21,31 @@ struct Skin {
 
   std::unordered_map<int, DirectX::XMFLOAT4X4> staticTransforms;
 
-  void Read(std::string filename)
-  {
-    FILE* fp;
-    fopen_s(&fp, filename.c_str(), "rb");
-    assert(fp);
+  void Read(std::filesystem::path filename);
 
-    fread(&header, sizeof(header), 1, fp);
-
-    // bone hierarchy
-    std::vector<int> childBones(header.numBones);
-    std::vector<int> parentBones(header.numBones);
-
-    fread(childBones.data(), sizeof(int), header.numBones, fp);
-    fread(parentBones.data(), sizeof(int), header.numBones, fp);
-
-    for (int i = 0; i < header.numBones; i++) {
-      auto parent = parentBones[i];
-      if (parent < 0) continue;
-      boneHierarchy[parent].push_back(childBones[i]);
-    }
-
-    // joints + inverse bind matrices
-    jointIndices.resize(header.numJoints);
-    inverseBindMatrices.resize(header.numJoints);
-
-    fread(jointIndices.data(), sizeof(int), header.numJoints, fp);
-    fread(inverseBindMatrices.data(), sizeof(DirectX::XMFLOAT4X4),
-          header.numJoints, fp);
-  }
-
-  void ReadStaticTransforms(std::string filename);
-};
-
-struct Keyframe {
-  float time;
-  DirectX::XMFLOAT3 scale;
-  DirectX::XMFLOAT3 translation;
-  DirectX::XMFLOAT4 rotation;
+  void ReadStaticTransforms(std::filesystem::path filename);
 };
 
 struct Animation {
+  struct Keyframe {
+    float time;
+    DirectX::XMFLOAT3 scale;
+    DirectX::XMFLOAT3 translation;
+    DirectX::XMFLOAT4 rotation;
+  };
+
   // bone id -> keyframes
   std::unordered_map<int, std::vector<Keyframe>> bonesKeyframes;
 
   float minTime;
   float maxTime;
 
-  void Read(std::string filename)
-  {
-    FILE* fp;
-    fopen_s(&fp, filename.c_str(), "rb");
-    assert(fp);
-
-    UINT numAnimatedBones;
-
-    fread(&numAnimatedBones, sizeof(numAnimatedBones), 1, fp);
-
-    for (int i = 0; i < numAnimatedBones; i++) {
-      int info[2];  // boneId + numKeyframes
-      fread(info, sizeof(int), 2, fp);
-
-      bonesKeyframes[info[0]].resize(info[1]);
-      fread(bonesKeyframes[info[0]].data(), sizeof(Keyframe), info[1], fp);
-
-      auto [minEl, maxEl] = std::minmax_element(
-          bonesKeyframes[info[0]].begin(), bonesKeyframes[info[0]].end(),
-          [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
-
-      if (minEl->time < minTime) minTime = minEl->time;
-      if (maxEl->time > maxTime) maxTime = maxEl->time;
-    }
-  }
+  void Read(std::filesystem::path filename);
 
   DirectX::XMMATRIX Interpolate(float curTime, int boneId, Skin* skin);
 
-  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime, Skin* skin,
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float curTime,
+                                                  Skin* skin,
                                                   std::unordered_map<int, DirectX::XMMATRIX>& globalTransforms);
 };
 
@@ -115,29 +64,16 @@ struct AnimationInfo {
   }
 };
 
-// Forward declaration
-namespace Renderer
-{
-struct TextureData;
-struct Material;
-}  // namespace Renderer
-
 struct Subset {
-  uint32_t start, count;
-  FILENAME name;
-  // FILENAME materialName;
-
-  Renderer::TextureData* texture = nullptr;  // GPU data // TODO Material struct instead
+  uint32_t start, count, materialIndex;
 };
-
-using MeshletSubset = std::pair<size_t, size_t>; // start, count
 
 struct MeshletData {
   uint32_t numVerts;
   uint32_t firstVert;
   uint32_t numPrim;
   uint32_t firstPrim;
-  uint32_t subsetIndex;
+  uint32_t materialIndex;
 
   DirectX::BoundingSphere boundingSphere;       // xyz = center, w = radius
   DirectX::PackedVector::XMUBYTEN4 normalCone;  // xyz = axis, w = -cos(a + 90)
@@ -162,139 +98,20 @@ struct Mesh3D {
 
   // mesh shader specific
   std::vector<MeshletData> meshlets;
-  std::vector<uint8_t> uniqueVertexIndices; // underlying indices are uint32, but stored in uint8_t array
+  std::vector<uint8_t> uniqueVertexIndices;  // underlying indices are uint32, but stored in uint8_t array
   std::vector<DirectX::MeshletTriangle> primitiveIndices;
-  std::vector<Subset*> meshletSubsetIndices; // map meshlet -> subset TODO: remove when we use new Meshlet struct
 
   DirectX::BoundingSphere boundingSphere;
 
-  std::wstring name;
+  std::filesystem::path name;
   std::shared_ptr<Skin> skin = nullptr;  // in case of skinned mesh
 
   int parentBone = -1;
   DirectX::XMFLOAT4X4 localTransform;
 
-  void Read(std::wstring filename, bool skinned = false)
-  {
-    FILE* fp;
-    _wfopen_s(&fp, filename.c_str(), L"rb");
-    assert(fp);
+  void Read(std::filesystem::path filename, bool skinned = false);
 
-    name = filename;
-
-    fread(&header, sizeof(header), 1, fp);
-
-    positions.resize(header.numVerts);
-    normals.resize(header.numVerts);
-    uvs.resize(header.numVerts);
-    indices.resize(header.numIndices);
-    subsets.resize(header.numSubsets);
-
-    fread(indices.data(), sizeof(uint32_t), header.numIndices, fp);
-    fread(subsets.data(), sizeof(Subset), header.numSubsets, fp);
-
-    fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
-    fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
-    fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
-    if (skinned) {
-      blendWeightsAndIndices.resize(header.numVerts);
-      fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
-    }
-
-    fread(&parentBone, sizeof(int), 1, fp);
-
-    struct {
-      DirectX::XMFLOAT3 scale;
-      DirectX::XMFLOAT3 translation;
-      DirectX::XMFLOAT4 rotation;
-    } transform;
-    fread(&transform, sizeof(transform), 1, fp);
-    DirectX::XMVECTOR scale = DirectX::XMLoadFloat3(&transform.scale);
-    DirectX::XMVECTOR trans = DirectX::XMLoadFloat3(&transform.translation);
-    DirectX::XMVECTOR rot = DirectX::XMLoadFloat4(&transform.rotation);
-
-    auto issou = DirectX::XMMatrixAffineTransformation(scale, DirectX::XMVectorZero(), rot, trans);
-    DirectX::XMStoreFloat4x4(&localTransform, issou);
-
-    fclose(fp);
-
-    ComputeAdditionalData();
-
-    wprintf(
-        L"=== %s ===\nnumVerts: %d\nnumIndices: %d\nnumMeshlets: %d\nnumUniqueVertexIndices: %d\nnumPrimitives: %d\n\n",
-        name.c_str(), header.numVerts, header.numIndices, meshlets.size(), uniqueVertexIndices.size(),
-        primitiveIndices.size());
-  }
-
-  // TODO: cache all this
-  // check if meshlet data file is older than mesh file. if so regenerate. if not, load from disk.
-  void ComputeAdditionalData()
-  {
-    DirectX::BoundingSphere::CreateFromPoints(boundingSphere, positions.size(), positions.data(), sizeof(positions[0]));
-    std::vector<DirectX::Meshlet> dxMeshlets;
-
-    // Meshlet generation
-    {
-      std::vector<MeshletSubset> meshSubsets;
-      meshSubsets.reserve(header.numSubsets);
-
-      for (const auto& subset : subsets) {
-        meshSubsets.emplace_back(subset.start / 3, subset.count / 3);
-      }
-
-      std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
-
-      constexpr size_t maxPrims = 124;
-      constexpr size_t maxVerts = 64;
-      CHECK_HR(ComputeMeshlets(
-          indices.data(), indices.size() / 3,
-          positions.data(), positions.size(),
-          meshSubsets.data(), meshSubsets.size(),
-          nullptr,
-          dxMeshlets, uniqueVertexIndices, primitiveIndices,
-          meshletSubsets.data(), maxVerts, maxPrims));
-
-      assert(uniqueVertexIndices.size() % 4 == 0);
-
-      meshlets.resize(dxMeshlets.size());
-      for (size_t i = 0; i < dxMeshlets.size(); i++) {
-        meshlets[i].numVerts = dxMeshlets[i].VertCount;
-        meshlets[i].firstVert = dxMeshlets[i].VertOffset;
-        meshlets[i].numPrim = dxMeshlets[i].PrimCount;
-        meshlets[i].firstPrim = dxMeshlets[i].PrimOffset;
-      }
-
-      meshletSubsetIndices.resize(dxMeshlets.size());
-      for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
-        auto start = meshletSubsets[i].first;
-        auto end = start + meshletSubsets[i].second;
-
-        for (size_t j = start; j < end; j++) {
-          meshlets[j].subsetIndex = i; // TODO: material index instead.
-          // TODO: this is dangerous. if subsets changes (push_back(),...) all pointers are invalidated.
-          // instead store an index ? if we do this offline, we won't have a choice
-          // if we do it offline, add a fifth member to Meshlet struct?
-          meshletSubsetIndices[j] = &subsets[i];
-        }
-      }
-    }
-
-    // Meshlet cull data generation
-    {
-      std::vector<DirectX::CullData> cullData;
-      cullData.resize(dxMeshlets.size());
-      CHECK_HR(ComputeCullData(positions.data(), positions.size(), dxMeshlets.data(), dxMeshlets.size(),
-                               reinterpret_cast<uint32_t*>(uniqueVertexIndices.data()), uniqueVertexIndices.size(),
-                               primitiveIndices.data(), primitiveIndices.size(), cullData.data(),
-                               DirectX::MESHLET_WIND_CW));
-
-      for (size_t i = 0; i < meshlets.size(); i++) {
-        meshlets[i].boundingSphere = cullData[i].BoundingSphere;
-        meshlets[i].normalCone = cullData[i].NormalCone;
-        meshlets[i].apexOffset = cullData[i].ApexOffset;
-      }
-    }
-  }
+  void ComputeAdditionalData();
 
   bool Skinned() const { return skin != nullptr; }
 
@@ -333,7 +150,7 @@ struct Mesh3D {
 
 struct Model3D {
   std::vector<std::shared_ptr<Mesh3D>> meshes;
-  std::unordered_map<std::string, std::shared_ptr<Skin>> skins;
+  std::unordered_map<std::wstring, std::shared_ptr<Skin>> skins;
   std::unordered_map<std::string, std::shared_ptr<Animation>> animations;
 
   AnimationInfo currentAnimation;
@@ -342,57 +159,9 @@ struct Model3D {
   DirectX::XMFLOAT3 rotate;
   bool dirty;  // world position changed. Rename to collisionDirty?
 
-  Model3D();
+  Model3D() : scale(1.f, 1.f, 1.f), translate(0.f, 0.f, 0.f), rotate(0.f, 0.f, 0.f), dirty(false) {}
 
-  Model3D& Read(std::string filename)
-  {
-    std::filesystem::path basePath = "assets";
-
-    std::ifstream file((basePath / filename).string());
-    std::string line;
-
-    std::getline(file, line);
-    std::string baseDir = line.substr(line.find(":") + 2);
-
-    std::getline(file, line);
-    size_t numMesh = std::stoi(line.substr(line.find(":") + 1));
-
-    std::getline(file, line);
-    size_t numSkinnedMesh = std::stoi(line.substr(line.find(":") + 1));
-
-    std::getline(file, line);
-    size_t numAnimations = std::stoi(line.substr(line.find(":") + 1));
-
-    std::getline(file, line);
-    std::optional<std::string> staticTransform;
-    std::string transformFile = line.substr(line.find(":") + 2);
-    if (transformFile != "None") staticTransform = (basePath / baseDir / transformFile).string();
-
-    for (size_t i = 0; i < numMesh; ++i) {
-      std::getline(file, line);
-      AddMesh((basePath / baseDir / line).wstring());
-    }
-
-    for (size_t i = 0; i < numSkinnedMesh; ++i) {
-      std::getline(file, line);
-      auto sep = line.find(';');
-      std::string mesh = line.substr(0, sep);
-      std::string skin = line.substr(sep + 1);
-
-      AddSkinnedMesh((basePath / baseDir / mesh).wstring(), (basePath / baseDir / skin).string(), staticTransform);
-    }
-
-    for (size_t i = 0; i < numAnimations; ++i) {
-      std::getline(file, line);
-      auto sep = line.find(';');
-      std::string anim = line.substr(0, sep);
-      std::string name = line.substr(sep + 1);
-
-      AddAnimation((basePath / baseDir / anim).string(), name);
-    }
-
-    return *this;
-  }
+  Model3D& Read(std::filesystem::path filename);
 
   Model3D SpawnInstance() const
   {
@@ -404,7 +173,7 @@ struct Model3D {
     return instance;
   }
 
-  Model3D& AddMesh(std::wstring filename)
+  Model3D& AddMesh(std::filesystem::path filename)
   {
     auto mesh = std::make_unique<Mesh3D>();
     mesh->Read(filename);
@@ -414,8 +183,9 @@ struct Model3D {
     return *this;
   }
 
-  Model3D& AddSkinnedMesh(std::wstring meshFilename, std::string skinFilename,
-                          std::optional<std::string> transformFilename = std::nullopt)
+  Model3D& AddSkinnedMesh(std::filesystem::path meshFilename,
+                          std::filesystem::path skinFilename,
+                          std::optional<std::filesystem::path> transformFilename = std::nullopt)
   {
     auto mesh = std::make_shared<Mesh3D>();
     mesh->Read(meshFilename, true);
@@ -440,7 +210,7 @@ struct Model3D {
     return *this;
   }
 
-  Model3D& AddAnimation(std::string filename, std::string name)
+  Model3D& AddAnimation(std::filesystem::path filename, std::string name)
   {
     auto animation = std::make_shared<Animation>();
     animation->Read(filename);
@@ -462,9 +232,29 @@ struct Model3D {
 
   DirectX::XMMATRIX WorldMatrix() const;
 
-  Model3D& Scale(float s);
-  Model3D& Rotate(float x, float y, float z);
-  Model3D& Translate(float x, float y, float z);
+  Model3D& Scale(float s)
+  {
+    scale = {s, s, s};
+    dirty = true;
+
+    return *this;
+  }
+
+  Model3D& Rotate(float x, float y, float z)
+  {
+    rotate = {x, y, z};
+    dirty = true;
+
+    return *this;
+  }
+
+  Model3D& Translate(float x, float y, float z)
+  {
+    translate = {x, y, z};
+    dirty = true;
+
+    return *this;
+  }
 
   void Clean() { dirty = false; }
 };

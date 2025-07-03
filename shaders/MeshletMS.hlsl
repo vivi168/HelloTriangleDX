@@ -7,7 +7,8 @@ struct Meshlet
   uint PrimCount;
   uint PrimOffset;
 
-  uint subsetIndex;
+  uint materialIndex;
+
   float4 boundingSphere;
   uint normalCone;
   float apexOffset;
@@ -42,7 +43,7 @@ uint GetVertexIndex(Meshlet m, uint localIndex)
   return UniqueVertexIndices[localIndex];
 }
 
-MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex)
+MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex, uint materialIndex)
 {
   StructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
   StructuredBuffer<float3> normals = ResourceDescriptorHeap[vertexNormalsBufferId];
@@ -56,6 +57,7 @@ MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexInd
   float3 norm = mul(float4(normal, 1.0f), mi.NormalMatrix).xyz;
   vout.normal = normalize(norm);
   vout.meshletIndex = mi.meshletBufferOffset + meshletIndex;
+  vout.materialIndex = materialIndex;
   vout.texCoord = uv;
 
   return vout;
@@ -93,6 +95,6 @@ void main(
   if (gtid < m.VertCount)
   {
     uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
-    verts[gtid] = GetVertexAttributes(mi, gid.x, vertexIndex);
+    verts[gtid] = GetVertexAttributes(mi, gid.x, vertexIndex, m.materialIndex);
   }
 }

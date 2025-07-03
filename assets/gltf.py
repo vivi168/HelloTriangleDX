@@ -3,14 +3,14 @@
 # python3 gltf.py -i "$InFile" [--skinned]
 import json
 import os
+import re
+from urllib.parse import unquote
 import base64
 import struct
 import argparse
-import hashlib
-import uuid
 from raw import RawImage
 
-from typing import List
+from typing import List, Dict
 
 MAX_PATH = 260
 SKIP_TEXTURES = True
@@ -18,6 +18,9 @@ SKIP_TEXTURES = True
 def pack_string(s):
     assert(len(s) < MAX_PATH)
     return bytes(s.ljust(MAX_PATH, "\0"), "utf-16le")
+
+def sanitize_path(s):
+    return re.sub(r'[<>:"/\\|?*]', '_', s)
 
 class Vec2:
     def __init__(self, x=0, y=0):
@@ -133,9 +136,6 @@ class Texture:
             self.sourcepath = None
             self.filename = "{}-{}-{}-{}.raw".format(*self.color)
 
-    def pack(self):
-        return pack_string(self.filename)
-
     def convert(self, out_folder):
         # TODO: use DDS
         # or at least allow exporting 2, 3 or 4 channels image...
@@ -147,32 +147,35 @@ class Texture:
             f.write(m.pack())
 
 class Material:
-    def __init__(self, base_color_texture:Texture, metallic_roughness_texture:Texture, normal_map_texture:Texture):
+    def __init__(self, name, out_folder, base_color_texture:Texture, metallic_roughness_texture:Texture, normal_map_texture:Texture):
+        self.name = name
+        self.base_filename = sanitize_path(name)
+        self.out_folder = out_folder
+        self.filename = "{}.mtl".format(self.base_filename)
         self.base_color_texture = base_color_texture
         self.metallic_roughness_texture = metallic_roughness_texture
         self.normal_map_texture = normal_map_texture
 
-        self.buf = '{}\n'.format(self.base_color_texture.filename)
-        self.buf += '{}\n'.format(self.metallic_roughness_texture.filename)
-        self.buf += '{}\n'.format(self.normal_map_texture.filename)
-        self.hash = hashlib.md5(self.buf.encode('utf-8')).hexdigest()
-
     def pack_name(self):
-        return self.base_color_texture.pack()
+        return pack_string(self.filename)
 
-    def pack(self, out_folder):
-        with open("{}.mtl".format(os.path.join(out_folder, self.hash)), 'w') as f:
-            f.write(self.buf)
+    def pack(self):
+        buf = '{}\n'.format(self.base_color_texture.filename)
+        buf += '{}\n'.format(self.metallic_roughness_texture.filename)
+        buf += '{}\n'.format(self.normal_map_texture.filename)
 
-        self.convert_textures(out_folder)
+        with open(os.path.join(self.out_folder, self.filename), 'w') as f:
+            f.write(buf)
 
-    def convert_textures(self, out_folder):
+        self.convert_textures()
+
+    def convert_textures(self):
         if SKIP_TEXTURES:
             return
 
-        self.base_color_texture.convert(out_folder)
-        self.metallic_roughness_texture.convert(out_folder)
-        self.normal_map_texture.convert(out_folder)
+        self.base_color_texture.convert(self.out_folder)
+        self.metallic_roughness_texture.convert(self.out_folder)
+        self.normal_map_texture.convert(self.out_folder)
 
 
 class Subset:
@@ -188,18 +191,19 @@ class Subset:
         assert(self.istart % 3 == 0)
         assert(self.icount % 3 == 0)
         data = struct.pack("<II", self.istart, self.icount)
-        pointer = struct.pack("<Q", 0)  # pointer to material
-        return data + self.material.pack_name() + pointer
+        return data + self.material.pack_name()
 
 
 class Mesh:
     def __init__(self):
-        self.cwd = ""
         self.vertices: List[Vertex] = []
         self.tris: List[Triangle] = []
         self.subsets: List[Subset] = []
         self.skinned = False
         self.parent_node = -1
+        self.translation = Vec3()
+        self.rotation = Vec4()
+        self.scale = Vec3()
 
     def pack(self, outfile):
         data = bytearray()
@@ -335,8 +339,8 @@ NORMALIZE_FACTOR = {5120: 127.0, 5121: 255.0, 5122: 32767.0, 5123: 65535.0}
 class GLTFConvert:
     def __init__(self, file_rel_path, skinned):
         file_abs_path = os.path.abspath(file_rel_path)
-        self.original_filename = os.path.splitext(os.path.basename(file_abs_path))[0]
-        self.cwd = os.path.dirname(file_abs_path)
+        self.base_name = os.path.splitext(os.path.basename(file_abs_path))[0]
+        self.source_dir = os.path.dirname(file_abs_path)
         self.skinned = skinned
 
         with open(file_abs_path, "r") as file:
@@ -369,19 +373,19 @@ class GLTFConvert:
         self.buffers = []
         self.construct_buffers()
 
-        self.out_materials = {}
+        self.out_materials: Dict[str, Material] = {}
 
     def construct_buffers(self):
         raw_buffers = self.gltf["buffers"]
 
         for buf in raw_buffers:
-            uri = buf["uri"]
+            uri = unquote(buf["uri"])
             if uri.startswith("data:"):
                 base64_data = uri.split("base64,")[-1]
                 data = base64.b64decode(base64_data)
                 self.buffers.append(data)
             else:
-                with open(os.path.join(self.cwd, uri), "rb") as bin_file:
+                with open(os.path.join(self.source_dir, uri), "rb") as bin_file:
                     data = bin_file.read()
                 self.buffers.append(data)
 
@@ -424,7 +428,7 @@ class GLTFConvert:
         assert material_id is not None
 
         material = self.materials[material_id]
-        name = material.get("name", str(uuid.uuid4()))
+        name = material.get("name", "material_{}".format(material_id + 1))
 
         out_mat = self.out_materials.get(name, None)
         if out_mat is not None:
@@ -436,8 +440,8 @@ class GLTFConvert:
         if base_color_texture_info is not None:
             texture = self.textures[base_color_texture_info["index"]]
             image = self.images[texture["source"]]
-            file = image["uri"]  # TODO: can be base64?
-            base_color_texture = Texture(sourcepath=os.path.join(self.cwd, file))
+            file = unquote(image["uri"])  # TODO: can be base64?
+            base_color_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
         else:
             base_color_texture = Texture(color=Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1, 1])))
 
@@ -445,8 +449,8 @@ class GLTFConvert:
         if metallic_roughness_texture_info is not None:
             texture = self.textures[metallic_roughness_texture_info["index"]]
             image = self.images[texture["source"]]
-            file = image["uri"]  # TODO: can be base64?
-            metallic_roughness_texture = Texture(sourcepath=os.path.join(self.cwd, file))
+            file = unquote(image["uri"])  # TODO: can be base64?
+            metallic_roughness_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
         else:
             metallic_factor = pbr_mr.get("metallicFactor", 1)
             roughness_factor = pbr_mr.get("roughnessFactor", 1)
@@ -458,12 +462,12 @@ class GLTFConvert:
         if normal_map_texture_info is not None:
             texture = self.textures[normal_map_texture_info["index"]]
             image = self.images[texture["source"]]
-            file = image["uri"]  # TODO: can be base64?
-            normal_map_texture = Texture(sourcepath=os.path.join(self.cwd, file))
+            file = unquote(image["uri"])  # TODO: can be base64?
+            normal_map_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
         else:
             normal_map_texture = Texture(color=Vec4(0, 0, 1, 1))
 
-        new_mat = Material(base_color_texture, metallic_roughness_texture, normal_map_texture)
+        new_mat = Material(name, self.base_name, base_color_texture, metallic_roughness_texture, normal_map_texture)
         self.out_materials[name] = new_mat
         return new_mat
 
@@ -648,10 +652,14 @@ class GLTFConvert:
         out_animations = []
         out_static_transforms = None
 
-        skin_filename = lambda i: "{}_skin_{}.skin".format(self.original_filename, i)
-        outfile = lambda f: os.path.join(self.original_filename, f)
+        def get_skin_filename(i):
+            skin_name = self.skins[i].get('name', "skin_{}".format(i+1))
+            return sanitize_path("{}.skin".format(skin_name))
+
+        outfile = lambda f: os.path.join(self.base_name, f)
+
         def write_model_file():
-            buf = "base_dir: {}\n".format(self.original_filename)
+            buf = "base_dir: {}\n".format(self.base_name)
             buf += '#mesh: {}\n'.format(len(out_meshes))
             buf += '#skinned_mesh: {}\n'.format(len(out_skinned_meshes))
             buf += '#animations: {}\n'.format(len(out_animations))
@@ -666,24 +674,26 @@ class GLTFConvert:
                 for a in out_animations:
                     buf += "{};{}".format(a[0], a[1]) + '\n'
 
-            with open("{}.mdl".format(self.original_filename), 'w') as f:
+            with open("{}.mdl".format(self.base_name), 'w') as f:
                 f.write(buf)
 
-        if not os.path.exists(self.original_filename):
-            os.makedirs(self.original_filename)
+        if not os.path.exists(self.base_name):
+            os.makedirs(self.base_name)
 
         for i, ni in enumerate(self.mesh_nodes):
             node = self.nodes[ni]
-            filename = "{}_mesh_{}.mesh".format(self.original_filename, i + 1)
+            mesh_name = node.get('name', "mesh_{}".format(i+1))
+            filename = sanitize_path("{}.mesh".format(mesh_name))
+
             print("mesh #{}: {}".format(i + 1, filename), end="")
 
             skinned = self.skinned and node.get("skin") is not None
             parented = self.skinned and node.get("skin") is None
 
             if skinned:
-                skin_idx = self.skin_indices.index(node["skin"])
-                out_skinned_meshes.append([filename, skin_filename(skin_idx + 1)])
-                print(" (-> skin #{})".format(skin_idx + 1))
+                skin_filename = get_skin_filename(node["skin"])
+                out_skinned_meshes.append([filename, skin_filename])
+                print(" (-> skin #{}: {})".format(node["skin"] + 1, skin_filename))
             else:
                 out_meshes.append(filename)
                 print()
@@ -698,7 +708,7 @@ class GLTFConvert:
             m.pack(outfile(filename))
 
         for i, m in self.out_materials.items():
-            m.pack(self.original_filename)
+            m.pack()
 
         if not self.skinned:
             write_model_file()
@@ -715,7 +725,7 @@ class GLTFConvert:
             joints = self.skins[i]["joints"]
             inverse_bind_matrices = self.get_values(self.skins[i]["inverseBindMatrices"])
 
-            filename = skin_filename(i + 1)
+            filename = get_skin_filename(i)
             s = Skin(root_bone, joints, inverse_bind_matrices, bh)
             s.pack(outfile(filename))
             print("skin #{}: {}".format(i + 1, filename))
@@ -748,10 +758,10 @@ class GLTFConvert:
                     local_transform[time] = t
                 nodes_keyframe_transforms[node_index] = local_transform
 
-            filename = "{}_animation_{}.anim".format(self.original_filename, ai + 1)
+            anim_name = self.animations[ai].get("name", "animation_{}".format(ai + 1))
+            filename = sanitize_path("{}.anim".format(anim_name))
             a = Animation(nodes_keyframe_transforms)
             a.pack(outfile(filename))
-            anim_name = self.animations[ai].get("name", "noname {}".format(ai))
             out_animations.append([filename, anim_name])
             print("animation #{}: {} -- [{}]".format(ai + 1, filename, anim_name))
 
@@ -760,8 +770,9 @@ class GLTFConvert:
                 missing_bones.update(missing)
 
         # wonder how does this behave with multiple different skins...
+        # should have one bh + one missing_bones per skin...
         if len(missing_bones) > 0:
-            filename = "{}_transforms.bin".format(self.original_filename)
+            filename = "{}_transforms.bin".format(self.base_name)
             print("transforms: {}".format(filename))
             st = StaticTransforms(missing_bones, nodes_static_transforms)
             st.pack(outfile(filename))

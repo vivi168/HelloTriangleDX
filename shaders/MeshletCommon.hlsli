@@ -22,9 +22,8 @@ cbuffer BuffersDescriptorIndices : register(b2)
   uint visibleMeshletsBufferId;
   uint meshletUniqueIndicesBufferId;
   uint meshletsPrimitivesBufferId;
-  uint meshletMaterialsBufferId;
 
-  // TODO: materials
+  uint materialsBufferId;
   uint instancesBufferId;
 };
 
@@ -52,4 +51,5 @@ struct MS_OUTPUT
   float3 normal : NORMAL;
   float2 texCoord : TEXCOORD;
   uint meshletIndex : COLOR0;
+  uint materialIndex : COLOR1;
 };

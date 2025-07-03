@@ -1,5 +1,7 @@
 #include "stdafx.h"
+
 #include "Mesh.h"
+#include "Renderer.h"
 
 #include <stack>
 
@@ -7,10 +9,39 @@ using namespace DirectX;
 
 static XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
 
-void Skin::ReadStaticTransforms(std::string filename)
+void Skin::Read(std::filesystem::path filename)
 {
   FILE* fp;
-  fopen_s(&fp, filename.c_str(), "rb");
+  fopen_s(&fp, filename.string().c_str(), "rb");
+  assert(fp);
+
+  fread(&header, sizeof(header), 1, fp);
+
+  // bone hierarchy
+  std::vector<int> childBones(header.numBones);
+  std::vector<int> parentBones(header.numBones);
+
+  fread(childBones.data(), sizeof(int), header.numBones, fp);
+  fread(parentBones.data(), sizeof(int), header.numBones, fp);
+
+  for (int i = 0; i < header.numBones; i++) {
+    auto parent = parentBones[i];
+    if (parent < 0) continue;
+    boneHierarchy[parent].push_back(childBones[i]);
+  }
+
+  // joints + inverse bind matrices
+  jointIndices.resize(header.numJoints);
+  inverseBindMatrices.resize(header.numJoints);
+
+  fread(jointIndices.data(), sizeof(int), header.numJoints, fp);
+  fread(inverseBindMatrices.data(), sizeof(XMFLOAT4X4), header.numJoints, fp);
+}
+
+void Skin::ReadStaticTransforms(std::filesystem::path filename)
+{
+  FILE* fp;
+  fopen_s(&fp, filename.string().c_str(), "rb");
   assert(fp);
 
   UINT numBones;
@@ -21,9 +52,9 @@ void Skin::ReadStaticTransforms(std::string filename)
 
   for (auto i : boneIds) {
     struct {
-      DirectX::XMFLOAT3 scale;
-      DirectX::XMFLOAT3 translation;
-      DirectX::XMFLOAT4 rotation;
+      XMFLOAT3 scale;
+      XMFLOAT3 translation;
+      XMFLOAT4 rotation;
     } transform;
 
     fread(&transform, sizeof(transform), 1, fp);
@@ -34,6 +65,31 @@ void Skin::ReadStaticTransforms(std::string filename)
 
     auto issou = XMMatrixAffineTransformation(scale, zero, rot, trans);
     XMStoreFloat4x4(&staticTransforms[i], issou);
+  }
+}
+
+void Animation::Read(std::filesystem::path filename)
+{
+  FILE* fp;
+  fopen_s(&fp, filename.string().c_str(), "rb");
+  assert(fp);
+
+  UINT numAnimatedBones;
+
+  fread(&numAnimatedBones, sizeof(numAnimatedBones), 1, fp);
+
+  for (int i = 0; i < numAnimatedBones; i++) {
+    int info[2];  // boneId + numKeyframes
+    fread(info, sizeof(int), 2, fp);
+
+    bonesKeyframes[info[0]].resize(info[1]);
+    fread(bonesKeyframes[info[0]].data(), sizeof(Keyframe), info[1], fp);
+
+    auto [minEl, maxEl] = std::minmax_element(bonesKeyframes[info[0]].begin(), bonesKeyframes[info[0]].end(),
+                                              [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
+
+    if (minEl->time < minTime) minTime = minEl->time;
+    if (maxEl->time > maxTime) maxTime = maxEl->time;
   }
 }
 
@@ -87,7 +143,8 @@ XMMATRIX Animation::Interpolate(float curTime, int boneId, Skin* skin)
   return XMMatrixIdentity();
 }
 
-std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin,
+std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime,
+                                                  Skin* skin,
                                                   std::unordered_map<int, XMMATRIX>& globalTransforms)
 {
   globalTransforms[skin->header.rootBone] = Interpolate(curTime, skin->header.rootBone, skin);
@@ -122,12 +179,189 @@ std::vector<XMFLOAT4X4> Animation::BoneTransforms(float curTime, Skin* skin,
   return boneTransforms;
 }
 
-Model3D::Model3D()
-    : scale(1.f, 1.f, 1.f),
-      translate(0.f, 0.f, 0.f),
-      rotate(0.f, 0.f, 0.f),
-      dirty(false)
+void Mesh3D::Read(std::filesystem::path filename, bool skinned)
 {
+  FILE* fp;
+  fopen_s(&fp, filename.string().c_str(), "rb");
+  assert(fp);
+
+  name = filename;
+
+  fread(&header, sizeof(header), 1, fp);
+
+  indices.resize(header.numIndices);
+  fread(indices.data(), sizeof(uint32_t), header.numIndices, fp);
+
+  {
+    struct TmpSubset {
+      uint32_t start, count;
+      FILENAME materialName;
+    };
+
+    std::vector<TmpSubset> tmpSubsets;
+    subsets.resize(header.numSubsets);
+    tmpSubsets.resize(header.numSubsets);
+    fread(tmpSubsets.data(), sizeof(TmpSubset), header.numSubsets, fp);
+
+    std::filesystem::path baseDir = name.parent_path();
+
+    for (size_t i = 0; i < header.numSubsets; i++) {
+      subsets[i].start = tmpSubsets[i].start;
+      subsets[i].count = tmpSubsets[i].count;
+      subsets[i].materialIndex = Renderer::CreateMaterial(baseDir, std::wstring(tmpSubsets[i].materialName));
+    }
+  }
+
+  positions.resize(header.numVerts);
+  normals.resize(header.numVerts);
+  uvs.resize(header.numVerts);
+
+  fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
+  fread(normals.data(), sizeof(normals[0]), header.numVerts, fp);
+  fread(uvs.data(), sizeof(uvs[0]), header.numVerts, fp);
+  if (skinned) {
+    blendWeightsAndIndices.resize(header.numVerts);
+    fread(blendWeightsAndIndices.data(), sizeof(blendWeightsAndIndices[0]), header.numVerts, fp);
+  }
+
+  fread(&parentBone, sizeof(int), 1, fp);
+
+  struct {
+    XMFLOAT3 scale;
+    XMFLOAT3 translation;
+    XMFLOAT4 rotation;
+  } transform;
+
+  fread(&transform, sizeof(transform), 1, fp);
+  XMVECTOR scale = XMLoadFloat3(&transform.scale);
+  XMVECTOR trans = XMLoadFloat3(&transform.translation);
+  XMVECTOR rot = XMLoadFloat4(&transform.rotation);
+
+  auto issou = XMMatrixAffineTransformation(scale, XMVectorZero(), rot, trans);
+  XMStoreFloat4x4(&localTransform, issou);
+
+  fclose(fp);
+
+  ComputeAdditionalData();
+
+  wprintf(
+      L"=== %s ===\nnumVerts: %d\nnumIndices: %d\nnumMeshlets: %d\nnumUniqueVertexIndices: %d\nnumPrimitives: %d\n\n",
+      name.wstring().c_str(), header.numVerts, header.numIndices, meshlets.size(), uniqueVertexIndices.size(),
+      primitiveIndices.size());
+}
+
+// TODO: cache all this
+// check if meshlet data file is older than mesh file. if so regenerate. if not, load from disk.
+void Mesh3D::ComputeAdditionalData()
+{
+  BoundingSphere::CreateFromPoints(boundingSphere, positions.size(), positions.data(), sizeof(positions[0]));
+  std::vector<Meshlet> dxMeshlets;
+
+  // Meshlet generation
+  {
+    using MeshletSubset = std::pair<size_t, size_t>;  // start, count
+
+    std::vector<MeshletSubset> meshSubsets;
+    meshSubsets.reserve(header.numSubsets);
+
+    for (const auto& subset : subsets) {
+      meshSubsets.emplace_back(subset.start / 3, subset.count / 3);
+    }
+
+    std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
+
+    constexpr size_t maxPrims = 124;
+    constexpr size_t maxVerts = 64;
+    CHECK_HR(ComputeMeshlets(indices.data(), indices.size() / 3, positions.data(), positions.size(), meshSubsets.data(),
+                             meshSubsets.size(), nullptr, dxMeshlets, uniqueVertexIndices, primitiveIndices,
+                             meshletSubsets.data(), maxVerts, maxPrims));
+
+    assert(uniqueVertexIndices.size() % 4 == 0);
+
+    meshlets.resize(dxMeshlets.size());
+    for (size_t i = 0; i < dxMeshlets.size(); i++) {
+      meshlets[i].numVerts = dxMeshlets[i].VertCount;
+      meshlets[i].firstVert = dxMeshlets[i].VertOffset;
+      meshlets[i].numPrim = dxMeshlets[i].PrimCount;
+      meshlets[i].firstPrim = dxMeshlets[i].PrimOffset;
+    }
+
+    for (uint32_t i = 0; i < meshletSubsets.size(); i++) {
+      auto start = meshletSubsets[i].first;
+      auto end = start + meshletSubsets[i].second;
+
+      for (size_t j = start; j < end; j++) {
+        meshlets[j].materialIndex = subsets[i].materialIndex;
+      }
+    }
+  }
+
+  // Meshlet cull data generation
+  {
+    std::vector<CullData> cullData;
+    cullData.resize(dxMeshlets.size());
+    CHECK_HR(ComputeCullData(positions.data(), positions.size(), dxMeshlets.data(), dxMeshlets.size(),
+                             reinterpret_cast<uint32_t*>(uniqueVertexIndices.data()), uniqueVertexIndices.size(),
+                             primitiveIndices.data(), primitiveIndices.size(), cullData.data(), MESHLET_WIND_CW));
+
+    for (size_t i = 0; i < meshlets.size(); i++) {
+      meshlets[i].boundingSphere = cullData[i].BoundingSphere;
+      meshlets[i].normalCone = cullData[i].NormalCone;
+      meshlets[i].apexOffset = cullData[i].ApexOffset;
+    }
+  }
+}
+
+Model3D& Model3D::Read(std::filesystem::path filename)
+{
+  // TODO: add this as constexpr in stdafx.h or something and add an helper function
+  std::filesystem::path basePath = "assets";
+
+  std::ifstream file(basePath / filename);
+  std::string line;
+
+  std::getline(file, line);
+  std::string baseDir = line.substr(line.find(":") + 2);
+  std::filesystem::path dir = basePath / baseDir;
+
+  std::getline(file, line);
+  size_t numMesh = std::stoi(line.substr(line.find(":") + 1));
+
+  std::getline(file, line);
+  size_t numSkinnedMesh = std::stoi(line.substr(line.find(":") + 1));
+
+  std::getline(file, line);
+  size_t numAnimations = std::stoi(line.substr(line.find(":") + 1));
+
+  std::getline(file, line);
+  std::optional<std::filesystem::path> staticTransform;
+  std::string transformFile = line.substr(line.find(":") + 2);
+  if (transformFile != "None") staticTransform = dir / transformFile;
+
+  for (size_t i = 0; i < numMesh; ++i) {
+    std::getline(file, line);
+    AddMesh(dir / line);
+  }
+
+  for (size_t i = 0; i < numSkinnedMesh; ++i) {
+    std::getline(file, line);
+    auto sep = line.find(';');
+    std::string mesh = line.substr(0, sep);
+    std::string skin = line.substr(sep + 1);
+
+    AddSkinnedMesh(dir / mesh, dir / skin, staticTransform);
+  }
+
+  for (size_t i = 0; i < numAnimations; ++i) {
+    std::getline(file, line);
+    auto sep = line.find(';');
+    std::string anim = line.substr(0, sep);
+    std::string name = line.substr(sep + 1);
+
+    AddAnimation(dir / anim, name);
+  }
+
+  return *this;
 }
 
 XMMATRIX Model3D::WorldMatrix() const
@@ -138,28 +372,4 @@ XMMATRIX Model3D::WorldMatrix() const
   XMVECTOR q = XMQuaternionRotationRollPitchYawFromVector(rotVector);
 
   return XMMatrixAffineTransformation(scaleVector, zero, q, transVector);
-}
-
-Model3D& Model3D::Scale(float s)
-{
-  scale = {s, s, s};
-  dirty = true;
-
-  return *this;
-}
-
-Model3D& Model3D::Rotate(float x, float y, float z)
-{
-  rotate = {x, y, z};
-  dirty = true;
-
-  return *this;
-}
-
-Model3D& Model3D::Translate(float x, float y, float z)
-{
-  translate = {x, y, z};
-  dirty = true;
-
-  return *this;
 }

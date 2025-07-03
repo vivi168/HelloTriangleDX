@@ -49,14 +49,14 @@ void Game::Init()
   Renderer::AppendToScene(&sponza);
 
   brainstem.Read("OPTIM_BrainStem.mdl")
-      .SetCurrentAnimation("noname 0")
+      .SetCurrentAnimation("animation_1")
       .Scale(5.f)
       .Rotate(-XM_PIDIV2, XM_PIDIV2, 0.0f)
       .Translate(-10.f, 0.f, 0.f);
   Renderer::AppendToScene(&brainstem);
 
   cesium.Read("OPTIM_CesiumMan.mdl")
-      .SetCurrentAnimation("noname 0")
+      .SetCurrentAnimation("animation_1")
       .Scale(5.f)
       .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
   Renderer::AppendToScene(&cesium);

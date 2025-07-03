@@ -21,4 +21,6 @@ const WCHAR* GetTitle();
 void SetSceneCamera(Camera* cam);
 
 void AppendToScene(Model3D* model);
+
+UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename);
 }  // namespace Renderer

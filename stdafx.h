@@ -11,50 +11,51 @@
 
 #include <windows.h>
 
-#include <wrl.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <wrl.h>
 
-#include <initguid.h>
-#include <d3d12.h> // TODO: this is in fact coming DirectX-Headers.
 #include <dxgi1_6.h>
+#include <initguid.h>
+
 #include <DirectXMath.h>
 
-#include "D3D12MemAlloc.h"
-#include "d3dx12_root_signature.h"
-#include "d3dx12_resource_helpers.h"
 #include "d3dx12_barriers.h"
 #include "d3dx12_pipeline_state_stream.h"
+#include "d3dx12_resource_helpers.h"
+#include "d3dx12_root_signature.h"
 
-#include "imgui_impl_win32.h"
+#include "D3D12MemAlloc.h"
+
 #include "imgui_impl_dx12.h"
+#include "imgui_impl_win32.h"
 
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <filesystem>
-#include <list>
-#include <vector>
-#include <unordered_map>
-#include <memory>
 #include <algorithm>
-#include <numeric>
 #include <array>
-#include <type_traits>
-#include <utility>
 #include <chrono>
-#include <string>
-#include <exception>
-#include <stdexcept>
 #include <deque>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <list>
+#include <memory>
+#include <numeric>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <cassert>
-#include <cstdlib>
-#include <cstdio>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 static_assert(sizeof(WORD) == 2);
 static_assert(sizeof(DWORD) == 4);
@@ -63,13 +64,12 @@ static_assert(sizeof(UINT) == 4);
 #define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x
 #define LINE_STRING STRINGIZE(__LINE__)
-#define CHECK_HR(expr)                                                      \
-  do {                                                                      \
-    if (FAILED(expr)) {                                                     \
-      assert(0 && #expr);                                                   \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr \
-                                        " )");                              \
-    }                                                                       \
+#define CHECK_HR(expr)                                                             \
+  do {                                                                             \
+    if (FAILED(expr)) {                                                            \
+      assert(0 && #expr);                                                          \
+      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr " )"); \
+    }                                                                              \
   } while (false)
 
 template <typename T, typename U>

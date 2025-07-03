@@ -2,6 +2,14 @@
 
 #define BASE_COLOR 1
 
+struct Material
+{
+  uint baseColorId;
+  uint metallicRoughnessId;
+  uint normalMapId;
+  uint pad;
+};
+
 SamplerState s0 : register(s0);
 
 float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
@@ -12,10 +20,11 @@ float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
   uint meshletIndex = input.meshletIndex;
 
  #ifdef BASE_COLOR
-  StructuredBuffer<uint> MaterialIndices = ResourceDescriptorHeap[meshletMaterialsBufferId];
-  uint materialId = MaterialIndices[meshletIndex];
+  uint materialIndex = input.materialIndex;
+  StructuredBuffer<Material> materials = ResourceDescriptorHeap[materialsBufferId];
+  Material material = materials[materialIndex];
 
-  Texture2D tex = ResourceDescriptorHeap[NonUniformResourceIndex(materialId)];
+  Texture2D tex = ResourceDescriptorHeap[NonUniformResourceIndex(material.baseColorId)];
   float4 color = tex.Sample(s0, input.texCoord);
 
   if (color.a == 0)
