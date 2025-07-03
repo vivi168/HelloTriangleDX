@@ -187,7 +187,7 @@ struct HeapDescriptor
   }
 };
 
-struct HeapResource {
+struct GpuBuffer {
   ID3D12Resource* Resource() const { return resource.Get(); };
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return resource->GetGPUVirtualAddress() + offset; }
@@ -206,7 +206,7 @@ struct HeapResource {
 
   void CreateResource(D3D12MA::Allocator* allocator, const D3D12MA::ALLOCATION_DESC* allocDesc,
                       const D3D12_RESOURCE_DESC* pResourceDesc,
-                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_GENERIC_READ,
+                      D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON,
                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
   {
     currentState = InitialResourceState;
@@ -216,7 +216,7 @@ struct HeapResource {
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
 
-  void Map2() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, nullptr)); }
+  void MapOpaque() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, nullptr)); }
 
   void Unmap() { resource->Unmap(0, nullptr); }
 
@@ -261,84 +261,6 @@ private:
   std::wstring resourceName;
 };
 
-// TODO: try use D3D12_HEAP_TYPE_GPU_UPLOAD instead
-struct UploadedHeapResource {
-  void CreateResources(D3D12MA::Allocator* allocator, const D3D12_RESOURCE_DESC* pResourceDesc,
-                       const D3D12_RESOURCE_DESC* pResourceUploadDesc,
-                       D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON,
-                       const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr)
-  {
-    // create default heap
-    // Default heap is memory on the GPU. Only the GPU has access to this memory. To get data into this heap, we will
-    // have to upload the data using an upload heap
-    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-    buffer.CreateResource(allocator, &allocDesc, pResourceDesc, InitialResourceState, pOptimizedClearValue);
-    // create upload heap
-    // Upload heaps are used to upload data to the GPU. CPU can write to it, GPU can read from it. We will upload the
-    // buffer using this heap to the default heap
-    D3D12MA::CALLOCATION_DESC uploadAllocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_UPLOAD};
-    uploadBuffer.CreateResource(allocator, &uploadAllocDesc, pResourceUploadDesc);
-  }
-
-  void Map() { uploadBuffer.Map(); }
-
-  void Copy(size_t offset, const void* data, size_t size) { uploadBuffer.Copy(offset, data, size); }
-
-  void Upload(ID3D12GraphicsCommandList* pCmdList, D3D12_SUBRESOURCE_DATA* data, UINT64 offset = 0)
-  {
-    UINT64 r = UpdateSubresources(pCmdList, Resource(), UploadResource(), offset, 0, 1, data);
-    assert(r);
-  }
-
-  void Upload(ID3D12GraphicsCommandList* pCmdList, UINT64 DstOffset, UINT64 SrcOffset, UINT64 NumBytes)
-  {
-    pCmdList->CopyBufferRegion(buffer.Resource(), DstOffset, uploadBuffer.Resource(), SrcOffset, NumBytes);
-  }
-
-  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
-  {
-    return buffer.Transition(stateBefore, stateAfter);
-  }
-
-  D3D12_RESOURCE_BARRIER TransitionFromCopyTo(D3D12_RESOURCE_STATES stateAfter)
-  {
-    return buffer.Transition(D3D12_RESOURCE_STATE_COPY_DEST, stateAfter);
-  }
-
-  D3D12_RESOURCE_BARRIER TransitionToCopyFrom(D3D12_RESOURCE_STATES stateBefore)
-  {
-    return buffer.Transition(stateBefore, D3D12_RESOURCE_STATE_COPY_DEST);
-  }
-
-  ID3D12Resource* Resource() const { return buffer.Resource(); };
-
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return buffer.GpuAddress(offset); }
-
-  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { buffer.AllocSrvDescriptor(allocator); }
-
-  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { buffer.AllocUavDescriptor(allocator); }
-
-  UINT SrvDescriptorIndex() const { return buffer.SrvDescriptorIndex(); }
-
-  UINT UavDescriptorIndex() const { return buffer.UavDescriptorIndex(); }
-
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return buffer.SrvDescriptorHandle(); }
-
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return buffer.UavDescriptorHandle(); }
-
-  void SetName(std::wstring name) { buffer.SetName(name); }
-
-  void Reset() { buffer.Reset(); }
-
-  void ResetUpload() { uploadBuffer.Reset(); }
-
-private:
-  HeapResource buffer;
-  HeapResource uploadBuffer;
-
-  ID3D12Resource* UploadResource() const { return uploadBuffer.Resource(); };
-};
-
 struct TextureData {
   struct {
     uint16_t width;
@@ -347,7 +269,7 @@ struct TextureData {
 
   std::wstring name;
 
-  HeapResource m_Buffer;
+  GpuBuffer m_Buffer;
 
   std::vector<uint8_t> Read(std::wstring filename)
   {
@@ -420,7 +342,6 @@ struct FrameContext {
 
 struct MeshStore {
   // Vertex data
-  // TODO: DRY these methods
   UINT CopyPositions(const void* data, size_t size)
   {
     // TODO: should ensure it is mapped
@@ -568,21 +489,21 @@ struct MeshStore {
     };
   }
 
-  UploadedHeapResource m_VertexPositions;
-  UploadedHeapResource m_VertexNormals;
-  // TODO: UploadedHeapResource m_VertexTangents;
-  UploadedHeapResource m_VertexUVs;
-  UploadedHeapResource m_VertexBlendWeightsAndIndices;
+  GpuBuffer m_VertexPositions;
+  GpuBuffer m_VertexNormals;
+  // TODO: GpuBuffer m_VertexTangents;
+  GpuBuffer m_VertexUVs;
+  GpuBuffer m_VertexBlendWeightsAndIndices;
 
-  UploadedHeapResource m_Meshlets;
-  UploadedHeapResource m_VisibleMeshlets;  // written by compute shader
-  UploadedHeapResource m_MeshletUniqueIndices;
-  UploadedHeapResource m_MeshletPrimitives;
+  GpuBuffer m_Meshlets;
+  GpuBuffer m_VisibleMeshlets;  // written by compute shader
+  GpuBuffer m_MeshletUniqueIndices;
+  GpuBuffer m_MeshletPrimitives;
 
-  UploadedHeapResource m_Materials;
-  UploadedHeapResource m_Instances; // updated each frame
+  GpuBuffer m_Materials;
+  GpuBuffer m_Instances; // updated each frame
 
-  UploadedHeapResource m_BoneMatrices;
+  GpuBuffer m_BoneMatrices;
 
   struct {
     // vertex data
@@ -675,7 +596,7 @@ static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
 static UINT g_RtvDescriptorSize;
 
-static HeapResource g_DepthStencilBuffer;
+static GpuBuffer g_DepthStencilBuffer;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
 // PSO
@@ -718,9 +639,6 @@ void Init()
 
 void LoadAssets()
 {
-  auto cmdAllocator = g_FrameContext[g_FrameIndex].commandAllocator.Get();
-  CHECK_HR(g_CommandList->Reset(cmdAllocator, NULL));
-
   for (auto &node : g_Scene.nodes) {
     for (auto &mesh : node.model->meshes) {
       auto mi = LoadMesh3D(mesh);
@@ -738,58 +656,6 @@ void LoadAssets()
       mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
     }
   }
-
-  // TODO: mesh store method
-  // We should ideally ensure that what we want to copy is not empty/null
-  {
-    // TODO transition mesh store buffer for upload
-    // TODO: enum or something for these indices
-    std::array<D3D12_RESOURCE_BARRIER, 10> uploadBarriers;
-
-    // vertex data
-    g_MeshStore.m_VertexPositions.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.positionsBuffer);
-    uploadBarriers[0] = g_MeshStore.m_VertexPositions.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_VertexNormals.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.normalsBuffer);
-    uploadBarriers[1] = g_MeshStore.m_VertexNormals.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    // TODO: tangents
-    g_MeshStore.m_VertexUVs.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.uvsBuffer);
-    uploadBarriers[2] = g_MeshStore.m_VertexUVs.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_VertexBlendWeightsAndIndices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.bwiBuffer);
-    uploadBarriers[3] = g_MeshStore.m_VertexBlendWeightsAndIndices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // meshlet data
-    g_MeshStore.m_Meshlets.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.meshletsBuffer);
-    uploadBarriers[4] = g_MeshStore.m_Meshlets.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // TODO: visible meshlets
-
-    g_MeshStore.m_MeshletUniqueIndices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.uniqueIndicesBuffer);
-    uploadBarriers[5] = g_MeshStore.m_MeshletUniqueIndices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_MeshletPrimitives.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.primitivesBuffer);
-    uploadBarriers[6] = g_MeshStore.m_MeshletPrimitives.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    // meta data
-    g_MeshStore.m_Materials.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.materialsBuffer);
-    uploadBarriers[7] = g_MeshStore.m_Materials.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
-    uploadBarriers[8] = g_MeshStore.m_Instances.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
-    uploadBarriers[9] = g_MeshStore.m_BoneMatrices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_CommandList->ResourceBarrier(uploadBarriers.size(), uploadBarriers.data());
-  }
-
-  g_CommandList->Close();
-
-  ID3D12CommandList* ppCommandLists[] = {g_CommandList.Get()};
-  g_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-
-  WaitGPUIdle(g_FrameIndex);
 }
 
 void Update(float time, float dt)
@@ -944,19 +810,6 @@ void Render()
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
-  // record data transfers from upload heap -> default heap
-  {
-    std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
-
-    g_MeshStore.m_Instances.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.instancesBuffer);
-    preRenderBarriers[0] = g_MeshStore.m_Instances.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_MeshStore.m_BoneMatrices.Upload(g_CommandList.Get(), 0, 0, g_MeshStore.m_CurrentOffsets.boneMatricesBuffer);
-    preRenderBarriers[1] = g_MeshStore.m_BoneMatrices.TransitionFromCopyTo(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-    g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
-  }
-
   // record skinning compute commands if needed
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
@@ -999,19 +852,14 @@ void Render()
   ImGui::Render();
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
 
-  std::array<D3D12_RESOURCE_BARRIER, 3> postRenderBarriers;
   // transition the "g_FrameIndex" render target from the render target state to
   // the present state. If the debug layer is enabled, you will receive a
   // warning if present is called on the render target when it's not in the
   // present state
-  postRenderBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
-      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
-      D3D12_RESOURCE_STATE_PRESENT);
+  auto postRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
-  // transition buffers back to COPY_DEST for next frame
-  postRenderBarriers[1] = g_MeshStore.m_Instances.TransitionToCopyFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  postRenderBarriers[2] = g_MeshStore.m_BoneMatrices.TransitionToCopyFrom(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
+  g_CommandList->ResourceBarrier(1, &postRenderBarrier);
 
   CHECK_HR(g_CommandList->Close());
 
@@ -1069,40 +917,40 @@ void Cleanup()
   }
 
   {
+    g_MeshStore.m_VertexPositions.Unmap();
     g_MeshStore.m_VertexPositions.Reset();
-    g_MeshStore.m_VertexPositions.ResetUpload();
 
+    g_MeshStore.m_VertexNormals.Unmap();
     g_MeshStore.m_VertexNormals.Reset();
-    g_MeshStore.m_VertexNormals.ResetUpload();
 
     // TODO: tangents
 
+    g_MeshStore.m_VertexUVs.Unmap();
     g_MeshStore.m_VertexUVs.Reset();
-    g_MeshStore.m_VertexUVs.ResetUpload();
 
+    g_MeshStore.m_VertexBlendWeightsAndIndices.Unmap();
     g_MeshStore.m_VertexBlendWeightsAndIndices.Reset();
-    g_MeshStore.m_VertexBlendWeightsAndIndices.ResetUpload();
 
+    g_MeshStore.m_Meshlets.Unmap();
     g_MeshStore.m_Meshlets.Reset();
-    g_MeshStore.m_Meshlets.ResetUpload();
 
+    g_MeshStore.m_VisibleMeshlets.Unmap();
     g_MeshStore.m_VisibleMeshlets.Reset();
-    g_MeshStore.m_VisibleMeshlets.ResetUpload();
 
+    g_MeshStore.m_MeshletUniqueIndices.Unmap();
     g_MeshStore.m_MeshletUniqueIndices.Reset();
-    g_MeshStore.m_MeshletUniqueIndices.ResetUpload();
 
+    g_MeshStore.m_MeshletPrimitives.Unmap();
     g_MeshStore.m_MeshletPrimitives.Reset();
-    g_MeshStore.m_MeshletPrimitives.ResetUpload();
 
+    g_MeshStore.m_Materials.Unmap();
     g_MeshStore.m_Materials.Reset();
-    g_MeshStore.m_Materials.ResetUpload();
 
+    g_MeshStore.m_Instances.Unmap();
     g_MeshStore.m_Instances.Reset();
-    g_MeshStore.m_Instances.ResetUpload();
 
+    g_MeshStore.m_BoneMatrices.Unmap();
     g_MeshStore.m_BoneMatrices.Reset();
-    g_MeshStore.m_BoneMatrices.ResetUpload();
   }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
@@ -1652,13 +1500,15 @@ static void InitFrameResources()
     static constexpr size_t numMaterials = 1000;
     static constexpr size_t numMatrices = 3000;
 
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
+
     // Positions buffer
     {
       size_t bufSiz = numVertices * sizeof(XMFLOAT3);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
       auto uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VertexPositions.CreateResources(g_Allocator.Get(), &bufferDesc, &uploadBufferDesc);
+      g_MeshStore.m_VertexPositions.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VertexPositions.SetName(L"Positions Store");
       g_MeshStore.m_VertexPositions.Map();
 
@@ -1690,7 +1540,7 @@ static void InitFrameResources()
       size_t bufSiz = numVertices * sizeof(XMFLOAT3);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VertexNormals.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_VertexNormals.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VertexNormals.SetName(L"Normals Store");
       g_MeshStore.m_VertexNormals.Map();
 
@@ -1718,7 +1568,7 @@ static void InitFrameResources()
       size_t bufSiz = numVertices * sizeof(XMFLOAT2);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VertexUVs.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_VertexUVs.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VertexUVs.SetName(L"UVs Store");
       g_MeshStore.m_VertexUVs.Map();
 
@@ -1741,7 +1591,7 @@ static void InitFrameResources()
       size_t bufSiz = numVertices * sizeof(XMUINT2);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VertexBlendWeightsAndIndices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_VertexBlendWeightsAndIndices.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VertexBlendWeightsAndIndices.SetName(L"Blend weights/indices Store");
       g_MeshStore.m_VertexBlendWeightsAndIndices.Map();
 
@@ -1763,7 +1613,7 @@ static void InitFrameResources()
       size_t bufSiz = numMeshlets * sizeof(MeshletData);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_Meshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_Meshlets.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_Meshlets.SetName(L"Meshlets Store");
       g_MeshStore.m_Meshlets.Map();
 
@@ -1785,7 +1635,7 @@ static void InitFrameResources()
       size_t bufSiz = numMeshlets * sizeof(VisibleMeshlet);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_VisibleMeshlets.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_VisibleMeshlets.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VisibleMeshlets.SetName(L"Visible Meshlets Store");
       g_MeshStore.m_VisibleMeshlets.Map();
 
@@ -1808,7 +1658,7 @@ static void InitFrameResources()
       size_t bufSiz = numIndices * sizeof(UINT);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_MeshletUniqueIndices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_MeshletUniqueIndices.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_MeshletUniqueIndices.SetName(L"Unique vertex indices Store");
       g_MeshStore.m_MeshletUniqueIndices.Map();
 
@@ -1830,7 +1680,7 @@ static void InitFrameResources()
       size_t bufSiz = numPrimitives * sizeof(MeshletTriangle);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_MeshletPrimitives.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_MeshletPrimitives.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_MeshletPrimitives.SetName(L"Primitives Store");
       g_MeshStore.m_MeshletPrimitives.Map();
 
@@ -1852,7 +1702,7 @@ static void InitFrameResources()
       size_t bufSiz = numMaterials * sizeof(Material::m_GpuData);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_Materials.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_Materials.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_Materials.SetName(L"Materials Store");
       g_MeshStore.m_Materials.Map();
 
@@ -1874,7 +1724,7 @@ static void InitFrameResources()
       size_t bufSiz = numInstances * sizeof(MeshInstance::data);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_Instances.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_Instances.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_Instances.SetName(L"Instances Store");
       g_MeshStore.m_Instances.Map();
 
@@ -1896,7 +1746,7 @@ static void InitFrameResources()
       size_t bufSiz = numMatrices * sizeof(XMFLOAT4X4);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_BoneMatrices.CreateResources(g_Allocator.Get(), &bufferDesc, &bufferDesc);
+      g_MeshStore.m_BoneMatrices.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_BoneMatrices.SetName(L"Bone Matrices Store");
       g_MeshStore.m_BoneMatrices.Map();
 
@@ -2118,15 +1968,14 @@ static UINT CreateTexture(std::filesystem::path filename)
   auto tex = std::make_shared<TextureData>();
   auto pixels = tex->Read(filename);
 
-  D3D12_RESOURCE_DESC textureDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
+  D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
   textureDesc.MipLevels = 1;
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
-  tex->m_Buffer.CreateResource(g_Allocator.Get(), &allocDesc, & textureDesc, D3D12_RESOURCE_STATE_COMMON);
+  tex->m_Buffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
   tex->m_Buffer.SetName(L"Texture: " + filename.wstring());
 
-  tex->m_Buffer.Map2();
+  tex->m_Buffer.MapOpaque();
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
   textureSubresourceData.pData = pixels.data();
@@ -2144,8 +1993,7 @@ static UINT CreateTexture(std::filesystem::path filename)
   srvDesc.Texture2D.MipLevels = 1;
 
   tex->m_Buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-  g_Device->CreateShaderResourceView(tex->m_Buffer.Resource(), &srvDesc,
-                                     tex->m_Buffer.SrvDescriptorHandle());
+  g_Device->CreateShaderResourceView(tex->m_Buffer.Resource(), &srvDesc, tex->m_Buffer.SrvDescriptorHandle());
 
   g_Textures[filename] = tex;
 
