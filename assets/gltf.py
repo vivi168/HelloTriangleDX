@@ -9,11 +9,14 @@ import base64
 import struct
 import argparse
 from raw import RawImage
+from PIL import Image
+import tempfile
+import subprocess
 
 from typing import List, Dict
 
 MAX_PATH = 260
-SKIP_TEXTURES = True
+SKIP_TEXTURES = False
 
 def pack_string(s):
     assert(len(s) < MAX_PATH)
@@ -124,27 +127,38 @@ class Triangle:
         return "{} {} {}".format(self.vertIndices[0], self.vertIndices[1], self.vertIndices[2])
 
 class Texture:
-    def __init__(self, sourcepath:str|None=None, color=Vec4(1, 1, 1, 1)):
+    def __init__(self, sourcepath:str|None=None, color=Vec3(1, 1, 1), ddsformat="BC7_UNORM"):
+        self.ddsformat = ddsformat
         if sourcepath is not None:
             self.sourcepath = sourcepath
-            self.filename = "{}.raw".format(os.path.splitext(os.path.basename(self.sourcepath))[0])
+            self.filename = "{}.dds".format(os.path.splitext(os.path.basename(self.sourcepath))[0])
         else:
             self.color = (round(color.x * 255),
                           round(color.y * 255),
-                          round(color.z * 255),
-                          round(color.w * 255))
+                          round(color.z * 255))
             self.sourcepath = None
-            self.filename = "{}-{}-{}-{}.raw".format(*self.color)
+            self.filename = "{}-{}-{}-{}.dds".format(self.ddsformat, *self.color)
 
     def convert(self, out_folder):
-        # TODO: use DDS
-        # or at least allow exporting 2, 3 or 4 channels image...
+        texconv = "../third_party/DirectXTex/Texconv/Bin/Desktop_2022/x64/Release/texconv.exe"
+        in_img = None
+        out_dds = os.path.join(out_folder, self.filename)
+        out_dds_tmp = None
+
         if self.sourcepath is not None:
-            m = RawImage(filename=self.sourcepath)
+            in_img = self.sourcepath
         else:
-            m = RawImage(color=self.color)
-        with open(os.path.join(out_folder, self.filename), "wb") as f:
-            f.write(m.pack())
+            img = Image.new("RGB", (1,1), self.color)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                in_img = tmp.name
+                img.save(tmp.name)
+                out_dds_tmp = os.path.join(out_folder, "{}.dds".format(os.path.splitext(os.path.basename(tmp.name))[0]))
+
+        # TODO: don't run conversion command here!! buffer the filenames for each format, and run in batch!!
+        # TODO2: -pow2 option?
+        subprocess.run([texconv, in_img, "-y", "-f", self.ddsformat, "-m", "1", "-o", out_folder])
+        if out_dds_tmp is not None:
+            os.replace(out_dds_tmp, out_dds)
 
 class Material:
     def __init__(self, name, out_folder, base_color_texture:Texture, metallic_roughness_texture:Texture, normal_map_texture:Texture):
@@ -443,29 +457,29 @@ class GLTFConvert:
             file = unquote(image["uri"])  # TODO: can be base64?
             base_color_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
         else:
-            base_color_texture = Texture(color=Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1, 1])))
+            base_color_texture = Texture(color=Vec4(*pbr_mr.get("baseColorFactor", [1, 1, 1])))
 
         metallic_roughness_texture_info = pbr_mr.get("metallicRoughnessTexture", None)
         if metallic_roughness_texture_info is not None:
             texture = self.textures[metallic_roughness_texture_info["index"]]
             image = self.images[texture["source"]]
             file = unquote(image["uri"])  # TODO: can be base64?
-            metallic_roughness_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
+            metallic_roughness_texture = Texture(sourcepath=os.path.join(self.source_dir, file), ddsformat="BC5_UNORM")
         else:
             metallic_factor = pbr_mr.get("metallicFactor", 1)
             roughness_factor = pbr_mr.get("roughnessFactor", 1)
             # The metalness values are sampled from the B channel
             # The roughness values are sampled from the G channel
-            metallic_roughness_texture = Texture(color=Vec4(1, roughness_factor, metallic_factor, 1))
+            metallic_roughness_texture = Texture(color=Vec4(1, roughness_factor, metallic_factor, 1), ddsformat="BC5_UNORM")
 
         normal_map_texture_info = material.get("normalTexture", None)
         if normal_map_texture_info is not None:
             texture = self.textures[normal_map_texture_info["index"]]
             image = self.images[texture["source"]]
             file = unquote(image["uri"])  # TODO: can be base64?
-            normal_map_texture = Texture(sourcepath=os.path.join(self.source_dir, file))
+            normal_map_texture = Texture(sourcepath=os.path.join(self.source_dir, file), ddsformat="BC5_UNORM")
         else:
-            normal_map_texture = Texture(color=Vec4(0, 0, 1, 1))
+            normal_map_texture = Texture(color=Vec4(0.5, 0.5, 1), ddsformat="BC5_UNORM")
 
         new_mat = Material(name, self.base_name, base_color_texture, metallic_roughness_texture, normal_map_texture)
         self.out_materials[name] = new_mat

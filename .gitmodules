@@ -10,3 +10,6 @@
 [submodule "third_party/DirectXMesh"]
 	path = third_party/DirectXMesh
 	url = https://github.com/microsoft/DirectXMesh
+[submodule "third_party/DirectXTex"]
+	path = third_party/DirectXTex
+	url = https://github.com/microsoft/DirectXTex

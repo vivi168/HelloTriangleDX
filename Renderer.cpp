@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include "DirectXTex.h"
+
 #include "Renderer.h"
 #include "RendererHelper.h"
 
@@ -222,9 +224,9 @@ struct GpuBuffer {
 
   void Copy(size_t offset, const void* data, size_t size) { memcpy((BYTE*)address + offset, data, size); }
 
-  void Copy(D3D12_SUBRESOURCE_DATA* data)
+  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT DstSubresource = 0)
   {
-    resource->WriteToSubresource(0, nullptr, data->pData, data->RowPitch, data->SlicePitch);
+    resource->WriteToSubresource(DstSubresource, nullptr, data->pData, data->RowPitch, data->SlicePitch);
   }
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
@@ -259,47 +261,6 @@ private:
   void* address;
   D3D12_RESOURCE_STATES currentState;
   std::wstring resourceName;
-};
-
-struct TextureData {
-  struct {
-    uint16_t width;
-    uint16_t height;
-  } header;
-
-  std::wstring name;
-
-  GpuBuffer m_Buffer;
-
-  std::vector<uint8_t> Read(std::wstring filename)
-  {
-    FILE* fp;
-    _wfopen_s(&fp, filename.c_str(), L"rb");
-    assert(fp);
-
-    std::vector<uint8_t> pixels;
-    name = filename;
-
-    fread(&header, sizeof(header), 1, fp);
-    pixels.resize(ImageSize());
-    fread(pixels.data(), sizeof(uint8_t), ImageSize(), fp);
-
-    return pixels;
-  }
-
-  void Reset() { m_Buffer.Reset(); }
-
-  DXGI_FORMAT Format() const { return DXGI_FORMAT_R8G8B8A8_UNORM; }
-
-  uint32_t BytesPerPixel() const { return 4; }
-
-  uint32_t Width() const { return header.width; }
-
-  uint32_t Height() const { return header.height; }
-
-  size_t BytesPerRow() const { return Width() * BytesPerPixel(); }
-
-  size_t ImageSize() const { return Height() * BytesPerRow(); }
 };
 
 struct Material {
@@ -606,7 +567,7 @@ static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
-static std::unordered_map<std::wstring, std::shared_ptr<TextureData>> g_Textures;
+static std::unordered_map<std::wstring, std::shared_ptr<GpuBuffer>> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -911,8 +872,7 @@ void Cleanup()
   WaitGPUIdle(0);
 
   for (auto& [k, tex] : g_Textures) {
-    // TODO: do this from Texture#Reset() ?
-    g_SrvUavDescHeapAlloc.Free(tex->m_Buffer.SrvDescriptorIndex());
+    g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
     tex->Reset();
   }
 
@@ -1963,40 +1923,47 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 static UINT CreateTexture(std::filesystem::path filename)
 {
   auto it = g_Textures.find(filename);
-  if (it != g_Textures.end()) return it->second->m_Buffer.SrvDescriptorIndex();
+  if (it != g_Textures.end()) return it->second->SrvDescriptorIndex();
 
-  auto tex = std::make_shared<TextureData>();
-  auto pixels = tex->Read(filename);
+  auto tex = std::make_shared<GpuBuffer>(); // unique_ptr?
 
-  D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(tex->Format(), tex->Width(), tex->Height());
-  textureDesc.MipLevels = 1;
+  TexMetadata metadata;
+  ScratchImage image;
+
+  LoadFromDDSFile(filename.wstring().c_str(), DDS_FLAGS_NONE, &metadata, image);
+
+  // TODO: handle multiple mips level + handle 3d textures
+  // ref: DirectXTex\DirectXTexD3D12.cpp#PrepareUpload
+  D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(metadata.format, metadata.width, metadata.height,
+                                                                 metadata.arraySize, metadata.mipLevels);
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
-  tex->m_Buffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
-  tex->m_Buffer.SetName(L"Texture: " + filename.wstring());
+  tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
+  tex->SetName(L"Texture: " + filename.wstring());
+  tex->MapOpaque();
 
-  tex->m_Buffer.MapOpaque();
+  const Image* img = image.GetImage(0, 0, 0);
 
   D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
-  textureSubresourceData.pData = pixels.data();
-  textureSubresourceData.RowPitch = tex->BytesPerRow();
-  textureSubresourceData.SlicePitch = tex->ImageSize();
+  textureSubresourceData.pData = img->pixels;
+  textureSubresourceData.RowPitch = img->rowPitch;
+  textureSubresourceData.SlicePitch = img->slicePitch;
 
-  tex->m_Buffer.Copy(&textureSubresourceData);
+  tex->Copy(&textureSubresourceData);
 
-  tex->m_Buffer.Unmap();
+  tex->Unmap();
 
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
   srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
   srvDesc.Format = textureDesc.Format;
   srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Texture2D.MipLevels = 1;
+  srvDesc.Texture2D.MipLevels = textureDesc.MipLevels;
 
-  tex->m_Buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-  g_Device->CreateShaderResourceView(tex->m_Buffer.Resource(), &srvDesc, tex->m_Buffer.SrvDescriptorHandle());
+  tex->AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+  g_Device->CreateShaderResourceView(tex->Resource(), &srvDesc, tex->SrvDescriptorHandle());
 
   g_Textures[filename] = tex;
 
-  return tex->m_Buffer.SrvDescriptorIndex();
+  return tex->SrvDescriptorIndex();
 }
 }  // namespace Renderer
