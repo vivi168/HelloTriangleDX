@@ -15,6 +15,26 @@ using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {
+// ========== Constants
+
+#ifdef _DEBUG
+#define ENABLE_DEBUG_LAYER true
+#endif
+
+static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
+static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
+static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
+
+static constexpr size_t FRAME_BUFFER_COUNT = 3;
+static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
+static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
+
+static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
+static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
+
+// ========== Enums
+
 enum class PSO { BasicMS, SkinningCS };
 
 namespace RootParameter
@@ -26,6 +46,8 @@ namespace SkinningCSRootParameter
 {
 enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 }
+
+// ========== Structs
 
 struct VisibleMeshlet {
   UINT meshletIndex;
@@ -401,13 +423,18 @@ struct MeshStore {
   UINT CopyInstance(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.instancesBuffer;
-    m_Instances.Copy(offset, data, size);
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      m_Instances[i].Copy(offset, data, size);
+    }
     m_CurrentOffsets.instancesBuffer += size;
 
     return offset;
   }
 
-  void UpdateInstance(const void* data, size_t size, UINT offset) { m_Instances.Copy(offset, data, size); }
+  void UpdateInstance(const void* data, size_t size, UINT offset, UINT frameIndex)
+  {
+    m_Instances[frameIndex].Copy(offset, data, size);
+  }
 
   UINT ReserveBoneMatrices(size_t size)
   {
@@ -417,13 +444,16 @@ struct MeshStore {
     return offset;
   }
 
-  void UpdateBoneMatrices(const void* data, size_t size, UINT offset) { m_BoneMatrices.Copy(offset, data, size); }
+  void UpdateBoneMatrices(const void* data, size_t size, UINT offset, UINT frameIndex)
+  {
+    m_BoneMatrices[frameIndex].Copy(offset, data, size);
+  }
 
   static constexpr size_t NumDescriptorIndices = 9;
   static constexpr size_t NumSkinningCSDescriptorIndices = 4;
 
   // TODO: struct for these 2? enum?
-  std::array<UINT, NumDescriptorIndices> BuffersDescriptorIndices() const
+  std::array<UINT, NumDescriptorIndices> BuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
         m_VertexPositions.SrvDescriptorIndex(),
@@ -436,17 +466,17 @@ struct MeshStore {
         m_MeshletUniqueIndices.SrvDescriptorIndex(),
         m_MeshletPrimitives.SrvDescriptorIndex(),
         m_Materials.SrvDescriptorIndex(),
-        m_Instances.SrvDescriptorIndex(),
+        m_Instances[frameIndex].SrvDescriptorIndex(),
     };
   }
 
-  std::array<UINT, NumSkinningCSDescriptorIndices> ComputeBuffersDescriptorIndices() const
+  std::array<UINT, NumSkinningCSDescriptorIndices> ComputeBuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
         m_VertexPositions.UavDescriptorIndex(),
         m_VertexNormals.UavDescriptorIndex(),
         m_VertexBlendWeightsAndIndices.SrvDescriptorIndex(),
-        m_BoneMatrices.SrvDescriptorIndex(),
+        m_BoneMatrices[frameIndex].SrvDescriptorIndex(),
     };
   }
 
@@ -462,9 +492,12 @@ struct MeshStore {
   GpuBuffer m_MeshletPrimitives;
 
   GpuBuffer m_Materials;
-  GpuBuffer m_Instances; // updated each frame
+  GpuBuffer m_Instances[FRAME_BUFFER_COUNT];  // updated by CPU
 
-  GpuBuffer m_BoneMatrices;
+  GpuBuffer m_BoneMatrices[FRAME_BUFFER_COUNT];  // updated by CPU
+
+  GpuBuffer m_MeshletCullCommands[FRAME_BUFFER_COUNT];
+  GpuBuffer m_DrawMeshletCommands[FRAME_BUFFER_COUNT];
 
   struct {
     // vertex data
@@ -487,25 +520,6 @@ struct MeshStore {
     UINT boneMatricesBuffer = 0;
   } m_CurrentOffsets;
 };
-
-// ========== Constants
-
-#ifdef _DEBUG
-#define ENABLE_DEBUG_LAYER true
-#endif
-
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
-static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
-
-static const size_t FRAME_BUFFER_COUNT = 3;
-
-static const UINT PRESENT_SYNC_INTERVAL = 0;
-static const UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
-
-static const DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
-static const D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 // ========== Static functions declarations
 
@@ -649,7 +663,7 @@ void Update(float time, float dt)
           for (auto &smi : node.skinnedMeshInstances) {
             // TODO: should reuse bone matrice buffer for meshes of same model which share skin
             g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
-                                           smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4));
+                                           smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4), g_FrameIndex);
           }
         }
       }  // else identity matrices ?
@@ -672,7 +686,7 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(world));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
 
-        g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset);
+        g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset, g_FrameIndex);
       }
     }
   }
@@ -761,7 +775,7 @@ void Render()
 
   g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
                                                &ctx->frameConstants, 0);
-  auto h = g_MeshStore.BuffersDescriptorIndices();
+  auto h = g_MeshStore.BuffersDescriptorIndices(g_FrameIndex);
   g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices, MeshStore::NumDescriptorIndices,
                                                h.data(), 0);
 
@@ -778,7 +792,7 @@ void Render()
 
     g_ComputeCommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
-    auto h = g_MeshStore.ComputeBuffersDescriptorIndices();
+    auto h = g_MeshStore.ComputeBuffersDescriptorIndices(g_FrameIndex);
     g_ComputeCommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
                                                 MeshStore::NumSkinningCSDescriptorIndices, h.data(), 0);
     auto b0 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -906,11 +920,13 @@ void Cleanup()
     g_MeshStore.m_Materials.Unmap();
     g_MeshStore.m_Materials.Reset();
 
-    g_MeshStore.m_Instances.Unmap();
-    g_MeshStore.m_Instances.Reset();
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      g_MeshStore.m_Instances[i].Unmap();
+      g_MeshStore.m_Instances[i].Reset();
 
-    g_MeshStore.m_BoneMatrices.Unmap();
-    g_MeshStore.m_BoneMatrices.Reset();
+      g_MeshStore.m_BoneMatrices[i].Unmap();
+      g_MeshStore.m_BoneMatrices[i].Reset();
+    }
   }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
@@ -1684,21 +1700,23 @@ static void InitFrameResources()
       size_t bufSiz = numInstances * sizeof(MeshInstance::data);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_Instances.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
-      g_MeshStore.m_Instances.SetName(L"Instances Store");
-      g_MeshStore.m_Instances.Map();
+      for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+        g_MeshStore.m_Instances[i].CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+        g_MeshStore.m_Instances[i].SetName(std::format(L"Instances Store {}", i));
+        g_MeshStore.m_Instances[i].Map();
 
-      // descriptor
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                              .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numInstances),
-                                                         .StructureByteStride = sizeof(MeshInstance::data),
-                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_Instances.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(g_MeshStore.m_Instances.Resource(), &srvDesc,
-                                         g_MeshStore.m_Instances.SrvDescriptorHandle());
+        // descriptor
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                                .Buffer = {.FirstElement = 0,
+                                                           .NumElements = static_cast<UINT>(numInstances),
+                                                           .StructureByteStride = sizeof(MeshInstance::data),
+                                                           .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+        g_MeshStore.m_Instances[i].AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+        g_Device->CreateShaderResourceView(g_MeshStore.m_Instances[i].Resource(), &srvDesc,
+                                           g_MeshStore.m_Instances[i].SrvDescriptorHandle());
+      }
     }
 
     // Bone Matrices buffer
@@ -1706,21 +1724,23 @@ static void InitFrameResources()
       size_t bufSiz = numMatrices * sizeof(XMFLOAT4X4);
       auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
 
-      g_MeshStore.m_BoneMatrices.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
-      g_MeshStore.m_BoneMatrices.SetName(L"Bone Matrices Store");
-      g_MeshStore.m_BoneMatrices.Map();
+      for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+        g_MeshStore.m_BoneMatrices[i].CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+        g_MeshStore.m_BoneMatrices[i].SetName(std::format(L"Bone Matrices Store {}", i));
+        g_MeshStore.m_BoneMatrices[i].Map();
 
-      // descriptor
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                              .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numMatrices),
-                                                         .StructureByteStride = sizeof(XMFLOAT4X4),
-                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      g_MeshStore.m_BoneMatrices.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(g_MeshStore.m_BoneMatrices.Resource(), &srvDesc,
-                                         g_MeshStore.m_BoneMatrices.SrvDescriptorHandle());
+        // descriptor
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                                .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                                .Buffer = {.FirstElement = 0,
+                                                           .NumElements = static_cast<UINT>(numMatrices),
+                                                           .StructureByteStride = sizeof(XMFLOAT4X4),
+                                                           .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+        g_MeshStore.m_BoneMatrices[i].AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+        g_Device->CreateShaderResourceView(g_MeshStore.m_BoneMatrices[i].Resource(), &srvDesc,
+                                           g_MeshStore.m_BoneMatrices[i].SrvDescriptorHandle());
+      }
     }
   }
 }
