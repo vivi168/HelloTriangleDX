@@ -526,7 +526,8 @@ struct MeshStore {
 static void InitD3D();
 static void InitFrameResources();
 static void WaitForFrame(FrameContext* ctx);
-static void WaitGPUIdle(size_t frameIndex);
+static void MoveToNextFrame();
+static void WaitGPUIdle();
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
@@ -662,6 +663,7 @@ void Update(float time, float dt)
 
           for (auto &smi : node.skinnedMeshInstances) {
             // TODO: should reuse bone matrice buffer for meshes of same model which share skin
+            // TODO: should buffer these updates and do only one memcpy...
             g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
                                            smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4), g_FrameIndex);
           }
@@ -686,6 +688,7 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(world));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
 
+        // TODO: should buffer these updates and do only one memcpy...
         g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset, g_FrameIndex);
       }
     }
@@ -708,16 +711,7 @@ void Update(float time, float dt)
 // Add a PSO helper struct ?
 void Render()
 {
-  // swap the current rtv buffer index so we draw on the correct buffer
-  g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
   auto ctx = &g_FrameContext[g_FrameIndex];
-
-  // We have to wait for the gpu to finish with the command allocator before we
-  // reset it
-  WaitForFrame(ctx);
-
-  // increment fenceValue for next frame
-  ctx->fenceValue++;
 
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in
@@ -853,14 +847,10 @@ void Render()
   std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
   g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
-  // this command goes in at the end of our command queue. we will know when our
-  // command queue has finished because the fence value will be set to
-  // "fenceValue" from the GPU since the command queue is being executed on
-  // the GPU
-  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
-
   // present the current backbuffer
   CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
+
+  MoveToNextFrame();
 }
 
 void Cleanup()
@@ -873,8 +863,9 @@ void Cleanup()
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     // TODO: Method from FrameContext
     auto ctx = &g_FrameContext[i];
+
+    CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
     WaitForFrame(ctx);
-    CHECK_HR(g_CommandQueue->Wait(ctx->fence.Get(), ctx->fenceValue));
   }
 
   // get swapchain out of full screen before exiting
@@ -883,7 +874,7 @@ void Cleanup()
 
   if (fs) g_SwapChain->SetFullscreenState(false, NULL);
 
-  WaitGPUIdle(0);
+  WaitGPUIdle();
 
   for (auto& [k, tex] : g_Textures) {
     g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
@@ -1745,6 +1736,21 @@ static void InitFrameResources()
   }
 }
 
+static void MoveToNextFrame()
+{
+  auto ctx = &g_FrameContext[g_FrameIndex];
+  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
+
+  g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
+  auto nextCtx = &g_FrameContext[g_FrameIndex];
+
+  // If the next frame is not ready to be rendered yet, wait until it is ready
+  WaitForFrame(nextCtx);
+
+  // Set the fence value for the next frame
+  nextCtx->fenceValue++;
+}
+
 // wait until gpu is finished with command list
 static void WaitForFrame(FrameContext* ctx)
 {
@@ -1763,13 +1769,15 @@ static void WaitForFrame(FrameContext* ctx)
   }
 }
 
-static void WaitGPUIdle(size_t frameIndex)
+static void WaitGPUIdle()
 {
-  auto ctx = &g_FrameContext[frameIndex];
+  auto ctx = &g_FrameContext[g_FrameIndex];
 
-  ctx->fenceValue++;
   CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
-  WaitForFrame(ctx);
+
+  CHECK_HR(ctx->fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
+  WaitForSingleObject(g_FenceEvent, INFINITE);
+  ctx->fenceValue++;
 }
 
 // Helper function for resolving the full path of assets.
