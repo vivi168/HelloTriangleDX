@@ -26,6 +26,8 @@ static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
 static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
 
 static constexpr size_t FRAME_BUFFER_COUNT = 3;
+static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
+static constexpr size_t AVG_MESHLET_COUNT_PER_INSTANCE = 700;
 static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
 
@@ -63,6 +65,8 @@ struct MeshInstance {
       XMFLOAT4X4 WorldViewProj;
       XMFLOAT4X4 WorldMatrix;
       XMFLOAT4X4 NormalMatrix;
+      XMFLOAT4 BoundingSphere;
+      FLOAT scale;
     } matrices; // updated each frame
 
     struct {
@@ -74,7 +78,7 @@ struct MeshInstance {
       UINT meshletsBuffer;
       UINT uniqueIndicesBuffer;
       UINT primitivesBuffer;
-      UINT pad[2];
+      UINT pad;
     } offsets;
   } data;  // upload this struct on the GPU in MeshInstanceBuffer
 
@@ -244,6 +248,8 @@ struct GpuBuffer {
 
   void Unmap() { resource->Unmap(0, nullptr); }
 
+  void Clear(size_t size) { ZeroMemory((BYTE*)address, size); }
+
   void Copy(size_t offset, const void* data, size_t size) { memcpy((BYTE*)address + offset, data, size); }
 
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT DstSubresource = 0)
@@ -301,7 +307,9 @@ struct Material {
 struct FrameContext {
   struct {
     float time;
-    float deltaTime;
+    XMFLOAT3 cameraWS;
+    XMFLOAT4 planes[6];
+    XMFLOAT2 screenSize;
   } frameConstants;
 
   static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
@@ -496,8 +504,10 @@ struct MeshStore {
 
   GpuBuffer m_BoneMatrices[FRAME_BUFFER_COUNT];  // updated by CPU
 
-  GpuBuffer m_MeshletCullCommands[FRAME_BUFFER_COUNT];
-  GpuBuffer m_DrawMeshletCommands[FRAME_BUFFER_COUNT];
+  GpuBuffer m_CullInstanceCommands;
+  GpuBuffer m_CullMeshletCommands;
+  GpuBuffer m_DrawCulledMeshletCommands;
+  GpuBuffer m_CommandBufferCounterReset;
 
   struct {
     // vertex data
@@ -641,7 +651,8 @@ void Update(float time, float dt)
   // Per frame root constants
   {
     ctx->frameConstants.time = time;
-    ctx->frameConstants.deltaTime = dt;
+    ctx->frameConstants.cameraWS = g_Scene.camera->WorldPos();
+    ctx->frameConstants.screenSize = {static_cast<float>(g_Width), static_cast<float>(g_Height)};
   }
 
   // Per object constant buffer
@@ -651,7 +662,20 @@ void Update(float time, float dt)
     XMMATRIX view = g_Scene.camera->LookAt();
     XMMATRIX viewProjection = view * projection;
 
-    // TODO: here compute planes for frustum culling
+    // Extract planes for frustum culling
+    XMMATRIX vp = XMMatrixTranspose(viewProjection);
+    std::array<XMVECTOR, 6> planes = {
+        XMPlaneNormalize(vp.r[3] + vp.r[0]),  // Left
+        XMPlaneNormalize(vp.r[3] - vp.r[0]),  // Right
+        XMPlaneNormalize(vp.r[3] + vp.r[1]),  // Bottom
+        XMPlaneNormalize(vp.r[3] - vp.r[1]),  // Top
+        XMPlaneNormalize(vp.r[2]),            // Near
+        XMPlaneNormalize(vp.r[3] - vp.r[2]),  // Far
+    };
+
+    for (size_t i = 0; i < planes.size(); i++) {
+      XMStoreFloat4(&ctx->frameConstants.planes[i], planes[i]);
+    }
 
     for (auto& node : g_Scene.nodes) {
       auto model = node.model;
@@ -666,6 +690,7 @@ void Update(float time, float dt)
             // TODO: should buffer these updates and do only one memcpy...
             g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
                                            smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4), g_FrameIndex);
+            // TODO: should also update the collision data...
           }
         }
       }  // else identity matrices ?
@@ -687,6 +712,10 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(world));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
+
+        XMVECTOR scale, rot, pos;
+        XMMatrixDecompose(&scale, &rot, &pos, world);
+        mi->data.matrices.scale = XMVectorGetX(scale);
 
         // TODO: should buffer these updates and do only one memcpy...
         g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset, g_FrameIndex);
@@ -808,14 +837,17 @@ void Render()
 
   // record draw calls
   for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
-    auto mi = instances[0];
-    struct {
-      UINT firstInstanceIndex;
-      UINT numMeshlets;
-      UINT numInstances;
-    } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
-    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT), &ronre, 0);
-    g_CommandList->DispatchMesh(mi->numMeshlets, instances.size(), 1);
+    for (auto mi : instances) {
+      struct {
+        UINT firstInstanceIndex;
+        UINT numMeshlets;
+        UINT numInstances;
+      } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
+
+      g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
+                                                   &ronre, 0);
+      g_CommandList->DispatchMesh(DivRoundUp(mi->numMeshlets, 32), 1, 1);
+    }
   }
 
   ImGui::Render();
@@ -1355,6 +1387,7 @@ static void InitFrameResources()
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
     rootParameters[RootParameter::PerMeshConstants].InitAsConstants(3, 0);  // b0
+    // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 2);  // b2
 
@@ -1405,6 +1438,9 @@ static void InitFrameResources()
   // Mesh Shader Pipeline State for static objects
   {
     // Mesh Shader
+    auto amplificationShaderBlob = ReadData(GetAssetFullPath(L"MeshletAS.cso").c_str());
+    D3D12_SHADER_BYTECODE amplificationShader = {amplificationShaderBlob.data(), amplificationShaderBlob.size()};
+
     auto meshShaderBlob = ReadData(GetAssetFullPath(L"MeshletMS.cso").c_str());
     D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
                                         meshShaderBlob.size()};
@@ -1415,6 +1451,7 @@ static void InitFrameResources()
 
     D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.AS = amplificationShader;
     psoDesc.MS = meshShader;
     psoDesc.PS = pixelShader;
     psoDesc.NumRenderTargets = 1;
@@ -1463,7 +1500,8 @@ static void InitFrameResources()
     static constexpr size_t numMeshlets = 50'000;
     static constexpr size_t numIndices = 10'000'000;
     static constexpr size_t numPrimitives = 3'000'000;
-    static constexpr size_t numInstances = 10000;
+    static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
+    static constexpr size_t numVisibleMeshlets = AVG_MESHLET_COUNT_PER_INSTANCE * MESH_INSTANCE_COUNT;
     static constexpr size_t numMaterials = 1000;
     static constexpr size_t numMatrices = 3000;
 
@@ -1866,6 +1904,7 @@ static void PrintAdapterInformation(IDXGIAdapter1* adapter)
   }
 }
 
+// TODO: rewrite this mess
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 {
   auto meshBasePath = std::filesystem::path(mesh->name).parent_path();

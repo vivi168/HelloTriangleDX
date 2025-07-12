@@ -214,6 +214,7 @@ void Mesh3D::Read(std::filesystem::path filename, bool skinned)
 
   positions.resize(header.numVerts);
   normals.resize(header.numVerts);
+  tangents.resize(header.numVerts);
   uvs.resize(header.numVerts);
 
   fread(positions.data(), sizeof(positions[0]), header.numVerts, fp);
@@ -255,6 +256,10 @@ void Mesh3D::Read(std::filesystem::path filename, bool skinned)
 void Mesh3D::ComputeAdditionalData()
 {
   BoundingSphere::CreateFromPoints(boundingSphere, positions.size(), positions.data(), sizeof(positions[0]));
+
+  ComputeTangentFrame(indices.data(), indices.size() / 3, positions.data(), normals.data(), uvs.data(), header.numVerts,
+                      tangents.data());
+
   std::vector<Meshlet> dxMeshlets;
 
   // Meshlet generation
@@ -302,7 +307,7 @@ void Mesh3D::ComputeAdditionalData()
     cullData.resize(dxMeshlets.size());
     CHECK_HR(ComputeCullData(positions.data(), positions.size(), dxMeshlets.data(), dxMeshlets.size(),
                              reinterpret_cast<uint32_t*>(uniqueVertexIndices.data()), uniqueVertexIndices.size(),
-                             primitiveIndices.data(), primitiveIndices.size(), cullData.data(), MESHLET_WIND_CW));
+                             primitiveIndices.data(), primitiveIndices.size(), cullData.data(), MESHLET_DEFAULT));
 
     for (size_t i = 0; i < meshlets.size(); i++) {
       meshlets[i].boundingSphere = cullData[i].BoundingSphere;

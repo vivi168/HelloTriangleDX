@@ -10,6 +10,7 @@ public:
   void Orient(float pitch, float yaw);
   void ProcessKeyboard(float dt);
   DirectX::XMMATRIX LookAt();
+  DirectX::XMFLOAT3 WorldPos() const;
 
   void DebugWindow();
 

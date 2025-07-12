@@ -31,6 +31,8 @@ XMMATRIX Camera::LookAt()
   return XMMatrixLookToRH(position, front, worldUp);
 }
 
+XMFLOAT3 Camera::WorldPos() const { return m_Translate; }
+
 void Camera::Translate(float x, float y, float z) { m_Translate = {x, y, z}; }
 
 void Camera::Target(float x, float y, float z)

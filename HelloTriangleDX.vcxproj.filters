@@ -120,5 +120,8 @@
     <FxCompile Include="shaders\SkinningCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="shaders\MeshletAS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
