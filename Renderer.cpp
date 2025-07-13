@@ -60,25 +60,24 @@ struct VisibleMeshlet {
 static constexpr UINT VISIBLE_MESHLETS_SIZE = VISIBLE_MESHLETS_COUNT * sizeof(VisibleMeshlet);
 static constexpr UINT VISIBLE_MESHLETS_COUNTER_OFFSET = AlignForUavCounter(VISIBLE_MESHLETS_SIZE);
 
-struct CullInstanceCommands {
+struct CullInstanceCommand {
   struct {
     UINT instanceIndex;
   } constants;
   D3D12_DISPATCH_ARGUMENTS args;
 };
 
-static constexpr UINT CULL_INSTANCE_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(CullInstanceCommands);
+static constexpr UINT CULL_INSTANCE_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(CullInstanceCommand);
 static constexpr UINT CULL_INSTANCE_CMDS_COUNTER_OFFSET = AlignForUavCounter(CULL_INSTANCE_CMDS_SIZE);
 
-struct DrawMeshCommands {
+struct DrawMeshCommand {
   struct {
     UINT instanceIndex;
-    UINT numMeshlets;
   } constants;
   D3D12_DISPATCH_MESH_ARGUMENTS args;
 };
 
-static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommands);
+static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommand);
 static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
 struct SkinnedMeshInstance;
@@ -94,6 +93,7 @@ struct MeshInstance {
       FLOAT scale;
     } matrices; // updated each frame
 
+    // Geometry. this doesn't change
     struct {
       UINT positionsBuffer;
       UINT normalsBuffer;
@@ -103,12 +103,12 @@ struct MeshInstance {
       UINT meshletsBuffer;
       UINT uniqueIndicesBuffer;
       UINT primitivesBuffer;
-      UINT pad;
     } offsets;
+
+    UINT numMeshlets;
   } data;  // upload this struct on the GPU in MeshInstanceBuffer
 
   UINT instanceBufferOffset;
-  UINT numMeshlets;
   std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
   std::shared_ptr<Mesh3D> mesh = nullptr;
 };
@@ -662,28 +662,27 @@ void LoadAssets()
   }
 
   // TMP: create m_DrawMeshletCommands on CPU to validate ExecuteIndirect
-  std::vector<DrawMeshCommands> cmds;
+  std::vector<DrawMeshCommand> cmds;
   for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
     for (auto mi : instances) {
-      DrawMeshCommands cmd = {
+      DrawMeshCommand cmd = {
           .constants =
               {
                   .instanceIndex = mi->instanceBufferOffset / sizeof(MeshInstance::data),
-                  .numMeshlets = mi->numMeshlets,
               },
           .args =
               {
-                  .ThreadGroupCountX = DivRoundUp(mi->numMeshlets, 32),
+                  .ThreadGroupCountX = DivRoundUp(mi->data.numMeshlets, 32), // WAVE_GROUP_SIZE
                   .ThreadGroupCountY = 1,
                   .ThreadGroupCountZ = 1,
               },
       };
-
+      
       cmds.push_back(cmd);
     }
   }
   UINT clear = cmds.size();
-  g_DrawMeshCommands.Copy(0, cmds.data(), sizeof(DrawMeshCommands) * cmds.size());
+  g_DrawMeshCommands.Copy(0, cmds.data(), sizeof(DrawMeshCommand) * cmds.size());
   g_DrawMeshCommands.Copy(DRAW_MESH_CMDS_COUNTER_OFFSET, &clear, sizeof(UINT));
 }
 
@@ -878,6 +877,10 @@ void Render()
     auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     g_ComputeCommandList->ResourceBarrier(1, &b1);
+  }
+  // record culling command
+  {
+
   }
   CHECK_HR(g_ComputeCommandList->Close());
 
@@ -1462,12 +1465,12 @@ static void InitFrameResources()
     argDesc[0].Constant = {
         .RootParameterIndex = RootParameter::PerMeshConstants,
         .DestOffsetIn32BitValues = 0,
-        .Num32BitValuesToSet = sizeof(DrawMeshCommands::constants) / sizeof(UINT),
+        .Num32BitValuesToSet = sizeof(DrawMeshCommand::constants) / sizeof(UINT),
     };
     argDesc[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
 
     D3D12_COMMAND_SIGNATURE_DESC signatureDesc = {
-        .ByteStride = sizeof(DrawMeshCommands),
+        .ByteStride = sizeof(DrawMeshCommand),
         .NumArgumentDescs = argDesc.size(),
         .pArgumentDescs = argDesc.data(),
     };
@@ -1859,13 +1862,13 @@ static void InitFrameResources()
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
                                                          .NumElements = static_cast<UINT>(numInstances),
-                                                         .StructureByteStride = sizeof(CullInstanceCommands),
+                                                         .StructureByteStride = sizeof(CullInstanceCommand),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
       D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
                                                .Buffer = {.FirstElement = 0,
                                                           .NumElements = static_cast<UINT>(numInstances),
-                                                          .StructureByteStride = sizeof(CullInstanceCommands),
+                                                          .StructureByteStride = sizeof(CullInstanceCommand),
                                                           .CounterOffsetInBytes = CULL_INSTANCE_CMDS_COUNTER_OFFSET,
                                                           .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
 
@@ -1893,13 +1896,13 @@ static void InitFrameResources()
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
                                                          .NumElements = static_cast<UINT>(numInstances),
-                                                         .StructureByteStride = sizeof(DrawMeshCommands),
+                                                         .StructureByteStride = sizeof(DrawMeshCommand),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
       D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
                                                .Buffer = {.FirstElement = 0,
                                                           .NumElements = static_cast<UINT>(numInstances),
-                                                          .StructureByteStride = sizeof(DrawMeshCommands),
+                                                          .StructureByteStride = sizeof(DrawMeshCommand),
                                                           .CounterOffsetInBytes = DRAW_MESH_CMDS_COUNTER_OFFSET,
                                                           .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
 
@@ -2132,7 +2135,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
     }
   }
 
-  mi->numMeshlets = mesh->meshlets.size();
+  mi->data.numMeshlets = mesh->meshlets.size();
   mi->mesh = mesh;
   mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
 

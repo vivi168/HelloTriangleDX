@@ -6,7 +6,6 @@
 cbuffer MeshletConstants : register(b0)
 {
   uint InstanceIndex;
-  uint NumMeshlets;
 };
 
 cbuffer FrameConstants : register(b1)
@@ -50,7 +49,7 @@ struct MeshInstance
   uint indexBufferOffset;
   uint primBufferOffset;
 
-  uint pad;
+  uint numMeshlets;
 };
 
 struct Meshlet

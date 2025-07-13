@@ -62,7 +62,7 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
   Meshlet m = meshlets[mi.meshletBufferOffset + dtid];
 
-  if (dtid < NumMeshlets) {
+  if (dtid < mi.numMeshlets) {
     visible = IsVisible(m, mi.WorldMatrix, mi.scale, CameraWS);
   }
 
