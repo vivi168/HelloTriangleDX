@@ -57,12 +57,12 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
   bool visible = false;
 
   StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[instanceBufferOffset];
+  MeshInstance mi = meshInstances[InstanceIndex];
 
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
   Meshlet m = meshlets[mi.meshletBufferOffset + dtid];
 
-  if (dtid < numMeshlets) {
+  if (dtid < NumMeshlets) {
     visible = IsVisible(m, mi.WorldMatrix, mi.scale, CameraWS);
   }
 

@@ -5,9 +5,8 @@
 
 cbuffer MeshletConstants : register(b0)
 {
-  uint instanceBufferOffset;
-  uint numMeshlets;
-  uint numInstances;
+  uint InstanceIndex;
+  uint NumMeshlets;
 };
 
 cbuffer FrameConstants : register(b1)

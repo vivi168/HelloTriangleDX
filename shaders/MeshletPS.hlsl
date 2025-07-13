@@ -15,7 +15,7 @@ SamplerState s0 : register(s0);
 float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
   StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[instanceBufferOffset];
+  MeshInstance mi = meshInstances[InstanceIndex];
 
   uint meshletIndex = input.meshletIndex;
 

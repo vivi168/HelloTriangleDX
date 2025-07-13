@@ -73,10 +73,10 @@ void main(
 )
 {
   StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[instanceBufferOffset];
+  MeshInstance mi = meshInstances[InstanceIndex];
 
   uint meshletIndex = payload.MeshletIndices[gid];
-  if (meshletIndex >= numMeshlets) return;
+  if (meshletIndex >= NumMeshlets) return;
 
   StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
   Meshlet m = meshlets[mi.meshletBufferOffset + meshletIndex];

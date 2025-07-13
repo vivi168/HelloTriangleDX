@@ -28,8 +28,9 @@ static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE
 static constexpr size_t FRAME_BUFFER_COUNT = 3;
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
 static constexpr size_t AVG_MESHLET_COUNT_PER_INSTANCE = 700;
+static constexpr size_t VISIBLE_MESHLETS_COUNT = MESH_INSTANCE_COUNT * AVG_MESHLET_COUNT_PER_INSTANCE;
 static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
-static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 1024;
+static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
 static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
@@ -55,6 +56,30 @@ struct VisibleMeshlet {
   UINT meshletIndex;
   UINT primitiveIndex;
 };
+
+static constexpr UINT VISIBLE_MESHLETS_SIZE = VISIBLE_MESHLETS_COUNT * sizeof(VisibleMeshlet);
+static constexpr UINT VISIBLE_MESHLETS_COUNTER_OFFSET = AlignForUavCounter(VISIBLE_MESHLETS_SIZE);
+
+struct CullInstanceCommands {
+  struct {
+    UINT instanceIndex;
+  } constants;
+  D3D12_DISPATCH_ARGUMENTS args;
+};
+
+static constexpr UINT CULL_INSTANCE_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(CullInstanceCommands);
+static constexpr UINT CULL_INSTANCE_CMDS_COUNTER_OFFSET = AlignForUavCounter(CULL_INSTANCE_CMDS_SIZE);
+
+struct DrawMeshCommands {
+  struct {
+    UINT instanceIndex;
+    UINT numMeshlets;
+  } constants;
+  D3D12_DISPATCH_MESH_ARGUMENTS args;
+};
+
+static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommands);
+static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
 struct SkinnedMeshInstance;
 
@@ -504,11 +529,6 @@ struct MeshStore {
 
   GpuBuffer m_BoneMatrices[FRAME_BUFFER_COUNT];  // updated by CPU
 
-  GpuBuffer m_CullInstanceCommands;
-  GpuBuffer m_CullMeshletCommands;
-  GpuBuffer m_DrawCulledMeshletCommands;
-  GpuBuffer m_CommandBufferCounterReset;
-
   struct {
     // vertex data
     UINT positionsBuffer = 0;
@@ -589,6 +609,11 @@ static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
 static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
+static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
+
+static GpuBuffer g_CullInstanceCommands;  // written by compute shader
+static GpuBuffer g_DrawMeshCommands;      // written by compute shader
+static GpuBuffer g_UAVCounterReset;
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
@@ -636,12 +661,30 @@ void LoadAssets()
     }
   }
 
-  // Allocate instances in a contiguous manner
+  // TMP: create m_DrawMeshletCommands on CPU to validate ExecuteIndirect
+  std::vector<DrawMeshCommands> cmds;
   for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
     for (auto mi : instances) {
-      mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
+      DrawMeshCommands cmd = {
+          .constants =
+              {
+                  .instanceIndex = mi->instanceBufferOffset / sizeof(MeshInstance::data),
+                  .numMeshlets = mi->numMeshlets,
+              },
+          .args =
+              {
+                  .ThreadGroupCountX = DivRoundUp(mi->numMeshlets, 32),
+                  .ThreadGroupCountY = 1,
+                  .ThreadGroupCountZ = 1,
+              },
+      };
+
+      cmds.push_back(cmd);
     }
   }
+  UINT clear = cmds.size();
+  g_DrawMeshCommands.Copy(0, cmds.data(), sizeof(DrawMeshCommands) * cmds.size());
+  g_DrawMeshCommands.Copy(DRAW_MESH_CMDS_COUNTER_OFFSET, &clear, sizeof(UINT));
 }
 
 void Update(float time, float dt)
@@ -712,6 +755,9 @@ void Update(float time, float dt)
         XMStoreFloat4x4(&mi->data.matrices.WorldViewProj, XMMatrixTranspose(worldViewProjection));
         XMStoreFloat4x4(&mi->data.matrices.WorldMatrix, XMMatrixTranspose(world));
         XMStoreFloat4x4(&mi->data.matrices.NormalMatrix, normalMatrix);
+        mi->data.matrices.BoundingSphere =
+            XMFLOAT4(mi->mesh->boundingSphere.Center.x, mi->mesh->boundingSphere.Center.y,
+                     mi->mesh->boundingSphere.Center.z, mi->mesh->boundingSphere.Radius);
 
         XMVECTOR scale, rot, pos;
         XMMatrixDecompose(&scale, &rot, &pos, world);
@@ -835,20 +881,8 @@ void Render()
   }
   CHECK_HR(g_ComputeCommandList->Close());
 
-  // record draw calls
-  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
-    for (auto mi : instances) {
-      struct {
-        UINT firstInstanceIndex;
-        UINT numMeshlets;
-        UINT numInstances;
-      } ronre = {mi->instanceBufferOffset / sizeof(MeshInstance::data), mi->numMeshlets, instances.size()};
-
-      g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::PerMeshConstants, sizeof(ronre) / sizeof(UINT),
-                                                   &ronre, 0);
-      g_CommandList->DispatchMesh(DivRoundUp(mi->numMeshlets, 32), 1, 1);
-    }
-  }
+  g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
+                                 0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
   ImGui::Render();
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
@@ -955,6 +989,11 @@ void Cleanup()
   g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::SkinningCS].Reset();
   g_RootSignature.Reset();
+  g_DrawMeshCommandSignature.Reset();
+
+  g_CullInstanceCommands.Reset();
+  g_DrawMeshCommands.Reset();
+  g_UAVCounterReset.Reset();
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
@@ -1386,7 +1425,7 @@ static void InitFrameResources()
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(3, 0);  // b0
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(2, 0);  // b0
     // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 2);  // b2
@@ -1414,6 +1453,27 @@ static void InitFrameResources()
         0, signatureBlobPtr->GetBufferPointer(),
         signatureBlobPtr->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
     g_RootSignature.Attach(rootSignature);
+  }
+
+  // Command signature for DrawMeshCommands
+  {
+    std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2> argDesc{};
+    argDesc[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+    argDesc[0].Constant = {
+        .RootParameterIndex = RootParameter::PerMeshConstants,
+        .DestOffsetIn32BitValues = 0,
+        .Num32BitValuesToSet = sizeof(DrawMeshCommands::constants) / sizeof(UINT),
+    };
+    argDesc[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+
+    D3D12_COMMAND_SIGNATURE_DESC signatureDesc = {
+        .ByteStride = sizeof(DrawMeshCommands),
+        .NumArgumentDescs = argDesc.size(),
+        .pArgumentDescs = argDesc.data(),
+    };
+
+    CHECK_HR(g_Device->CreateCommandSignature(&signatureDesc, g_RootSignature.Get(),
+                                              IID_PPV_ARGS(&g_DrawMeshCommandSignature)));
   }
 
   // Compute skinning root signature
@@ -1496,13 +1556,13 @@ static void InitFrameResources()
   // MeshStore: TODO: make an instance method / DRY
   {
     // TODO: better estimate
-    static constexpr size_t numVertices = 2'000'000;
-    static constexpr size_t numMeshlets = 50'000;
+    static constexpr size_t numVertices = 5'000'000;
+    static constexpr size_t numMeshlets = 100'000;
     static constexpr size_t numIndices = 10'000'000;
-    static constexpr size_t numPrimitives = 3'000'000;
+    static constexpr size_t numPrimitives = 7'000'000;
     static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
-    static constexpr size_t numVisibleMeshlets = AVG_MESHLET_COUNT_PER_INSTANCE * MESH_INSTANCE_COUNT;
-    static constexpr size_t numMaterials = 1000;
+    static constexpr size_t numVisibleMeshlets = VISIBLE_MESHLETS_COUNT;
+    static constexpr size_t numMaterials = 5000;
     static constexpr size_t numMatrices = 3000;
 
     D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
@@ -1637,8 +1697,8 @@ static void InitFrameResources()
 
     // Visible meshlets buffer
     {
-      size_t bufSiz = numMeshlets * sizeof(VisibleMeshlet);
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+      size_t bufSiz = VISIBLE_MESHLETS_COUNTER_OFFSET + sizeof(UINT);  // counter
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
       g_MeshStore.m_VisibleMeshlets.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
       g_MeshStore.m_VisibleMeshlets.SetName(L"Visible Meshlets Store");
@@ -1649,13 +1709,25 @@ static void InitFrameResources()
                                               .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                                               .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                               .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numMeshlets),
+                                                         .NumElements = static_cast<UINT>(numVisibleMeshlets),
                                                          .StructureByteStride = sizeof(VisibleMeshlet),
                                                          .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                                               .Buffer = {.FirstElement = 0,
+                                                          .NumElements = static_cast<UINT>(numVisibleMeshlets),
+                                                          .StructureByteStride = sizeof(VisibleMeshlet),
+                                                          .CounterOffsetInBytes = VISIBLE_MESHLETS_COUNTER_OFFSET,
+                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
+
       g_MeshStore.m_VisibleMeshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VisibleMeshlets.Resource(), &srvDesc,
                                          g_MeshStore.m_VisibleMeshlets.SrvDescriptorHandle());
-      // TODO: UAV as well (for writing)
+
+      g_MeshStore.m_VisibleMeshlets.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateUnorderedAccessView(g_MeshStore.m_VisibleMeshlets.Resource(),
+                                          g_MeshStore.m_VisibleMeshlets.Resource(), &uavDesc,
+                                          g_MeshStore.m_VisibleMeshlets.UavDescriptorHandle());
     }
 
     // Meshlet unique vertex indices buffer
@@ -1770,6 +1842,86 @@ static void InitFrameResources()
         g_Device->CreateShaderResourceView(g_MeshStore.m_BoneMatrices[i].Resource(), &srvDesc,
                                            g_MeshStore.m_BoneMatrices[i].SrvDescriptorHandle());
       }
+    }
+
+    // Cull Instances commands
+    {
+      size_t bufSiz = CULL_INSTANCE_CMDS_COUNTER_OFFSET + sizeof(UINT);  // counter
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+      g_CullInstanceCommands.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+      g_CullInstanceCommands.SetName(L"Cull Instances command buffer");
+      g_CullInstanceCommands.Map();
+
+      // descriptor
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                              .Buffer = {.FirstElement = 0,
+                                                         .NumElements = static_cast<UINT>(numInstances),
+                                                         .StructureByteStride = sizeof(CullInstanceCommands),
+                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                                               .Buffer = {.FirstElement = 0,
+                                                          .NumElements = static_cast<UINT>(numInstances),
+                                                          .StructureByteStride = sizeof(CullInstanceCommands),
+                                                          .CounterOffsetInBytes = CULL_INSTANCE_CMDS_COUNTER_OFFSET,
+                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
+
+      g_CullInstanceCommands.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_CullInstanceCommands.Resource(), &srvDesc,
+                                         g_CullInstanceCommands.SrvDescriptorHandle());
+
+      g_CullInstanceCommands.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateUnorderedAccessView(g_CullInstanceCommands.Resource(), g_CullInstanceCommands.Resource(),
+                                          &uavDesc, g_CullInstanceCommands.UavDescriptorHandle());
+    }
+
+    // Draw Meshlets commands
+    {
+      size_t bufSiz = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT);  // counter
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+      g_DrawMeshCommands.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+      g_DrawMeshCommands.SetName(L"Draw Meshlets command buffer");
+      g_DrawMeshCommands.Map();
+
+      // descriptor
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                              .Buffer = {.FirstElement = 0,
+                                                         .NumElements = static_cast<UINT>(numInstances),
+                                                         .StructureByteStride = sizeof(DrawMeshCommands),
+                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                                               .Buffer = {.FirstElement = 0,
+                                                          .NumElements = static_cast<UINT>(numInstances),
+                                                          .StructureByteStride = sizeof(DrawMeshCommands),
+                                                          .CounterOffsetInBytes = DRAW_MESH_CMDS_COUNTER_OFFSET,
+                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
+
+      g_DrawMeshCommands.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_DrawMeshCommands.Resource(), &srvDesc,
+                                         g_DrawMeshCommands.SrvDescriptorHandle());
+
+      g_DrawMeshCommands.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateUnorderedAccessView(g_DrawMeshCommands.Resource(), g_DrawMeshCommands.Resource(), &uavDesc,
+                                          g_DrawMeshCommands.UavDescriptorHandle());
+    }
+
+    // Buffer containg just a UINT (0) used to reset UAV counter.
+    {
+      size_t bufSiz = sizeof(UINT);
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+      g_UAVCounterReset.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+      g_UAVCounterReset.SetName(L"UAV Reset counter");
+
+      g_UAVCounterReset.Map();
+      g_UAVCounterReset.Clear(bufSiz);
+      g_UAVCounterReset.Unmap();
     }
   }
 }
@@ -1982,6 +2134,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
   mi->numMeshlets = mesh->meshlets.size();
   mi->mesh = mesh;
+  mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
+
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
 
   return mi;

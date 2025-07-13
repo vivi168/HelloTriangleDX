@@ -83,3 +83,10 @@ inline constexpr T AlignUp(T val, U align)
 {
   return DivRoundUp(val, align) * align;
 }
+
+// UAV counter must be aligned on 4K boundaries
+inline constexpr UINT AlignForUavCounter(UINT bufferSize)
+{
+  const UINT alignment = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
+  return (bufferSize + (alignment - 1)) & ~(alignment - 1);
+}
