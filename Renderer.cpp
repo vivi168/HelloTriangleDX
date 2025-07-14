@@ -342,17 +342,13 @@ struct FrameContext {
   ComPtr<ID3D12Resource> renderTarget;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
-  ComPtr<ID3D12CommandAllocator> computeCommandAllocator;
   ComPtr<ID3D12Fence> fence;
-  ComPtr<ID3D12Fence> computeFence;
   UINT64 fenceValue;
 
   void Reset() {
     renderTarget.Reset();
     commandAllocator.Reset();
-    computeCommandAllocator.Reset();
     fence.Reset();
-    computeFence.Reset();
   }
 };
 
@@ -587,9 +583,7 @@ static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks;
 static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
 static ComPtr<ID3D12CommandQueue> g_CommandQueue;
-static ComPtr<ID3D12CommandQueue> g_ComputeCommandQueue;
 static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
-static ComPtr<ID3D12GraphicsCommandList6> g_ComputeCommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
@@ -790,7 +784,6 @@ void Render()
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in
   CHECK_HR(ctx->commandAllocator->Reset());
-  CHECK_HR(ctx->computeCommandAllocator->Reset());
 
   // reset the command list. by resetting the command list we are putting it
   // into a recording state so we can start recording commands into the command
@@ -798,8 +791,7 @@ void Render()
   // command lists associated with it, but only one can be recording at any
   // time. Make sure that any other command lists associated to this command
   // allocator are in the closed state (not recording).
-  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), g_PipelineStateObjects[PSO::BasicMS].Get()));
-  CHECK_HR(g_ComputeCommandList->Reset(ctx->computeCommandAllocator.Get(), g_PipelineStateObjects[PSO::SkinningCS].Get()));
+  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), g_PipelineStateObjects[PSO::SkinningCS].Get()));
 
   // here we start recording commands into the g_CommandList (which all the
   // commands will be stored in the g_CommandAllocators)
@@ -839,53 +831,55 @@ void Render()
   std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
 
-  g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
-
-  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
-                                               &ctx->frameConstants, 0);
-  auto h = g_MeshStore.BuffersDescriptorIndices(g_FrameIndex);
-  g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices, MeshStore::NumDescriptorIndices,
-                                               h.data(), 0);
-
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
 
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
+  // record culling commands if enable
+  {
+    // TODO
+  }
+
   // record skinning compute commands if needed
   if (g_Scene.skinnedMeshInstances.size() > 0) {
-    std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
-    g_ComputeCommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
-
-    g_ComputeCommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
+    g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
     auto h = g_MeshStore.ComputeBuffersDescriptorIndices(g_FrameIndex);
-    g_ComputeCommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
+    g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
                                                 MeshStore::NumSkinningCSDescriptorIndices, h.data(), 0);
     auto b0 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_ComputeCommandList->ResourceBarrier(1, &b0);
+    g_CommandList->ResourceBarrier(1, &b0);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
-      g_ComputeCommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
+      g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
                                                   SkinnedMeshInstance::NumOffsets, o.data(), 0);
 
-      g_ComputeCommandList->Dispatch(DivRoundUp(smi->numVertices, 64), 1, 1);
+      g_CommandList->Dispatch(DivRoundUp(smi->numVertices, 64), 1, 1);
     }
     auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    g_ComputeCommandList->ResourceBarrier(1, &b1);
+    g_CommandList->ResourceBarrier(1, &b1);
   }
-  // record culling command
+
+  // Record drawing commands
   {
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
+    g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
+
+    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
+                                                 &ctx->frameConstants, 0);
+    auto h = g_MeshStore.BuffersDescriptorIndices(g_FrameIndex);
+    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
+                                                 MeshStore::NumDescriptorIndices, h.data(), 0);
+
+    g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
+                                   0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
   }
-  CHECK_HR(g_ComputeCommandList->Close());
-
-  g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
-                                 0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
   ImGui::Render();
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
@@ -903,16 +897,7 @@ void Render()
 
   // ==========
 
-  // execute skinning command list if needed
-  if (g_Scene.skinnedMeshInstances.size() > 0) {
-    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_ComputeCommandList.Get())};
-    g_ComputeCommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
-
-    CHECK_HR(g_ComputeCommandQueue->Signal(ctx->computeFence.Get(), ctx->fenceValue));
-    CHECK_HR(g_CommandQueue->Wait(ctx->computeFence.Get(), ctx->fenceValue));
-  }
-
-  // execute graphic command list
+  // execute command list
   std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
   g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
 
@@ -1000,9 +985,7 @@ void Cleanup()
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
-  g_ComputeCommandList.Reset();
   g_CommandQueue.Reset();
-  g_ComputeCommandQueue.Reset();
 
   g_SrvUavDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
@@ -1185,74 +1168,33 @@ static void InitD3D()
     };
 
     ID3D12CommandQueue* commandQueue = nullptr;
-    CHECK_HR(
-        g_Device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&commandQueue)));
-    g_CommandQueue.Attach(commandQueue);
-  }
-
-  // Create Compute Command Queue
-  {
-    D3D12_COMMAND_QUEUE_DESC cqDesc{
-        .Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-    };
-
-    ID3D12CommandQueue* commandQueue = nullptr;
     CHECK_HR(g_Device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&commandQueue)));
-    g_ComputeCommandQueue.Attach(commandQueue);
+    g_CommandQueue.Attach(commandQueue);
   }
 
   // Create Command Allocator
   {
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      {
-        ID3D12CommandAllocator* commandAllocator = nullptr;
-        CHECK_HR(g_Device->CreateCommandAllocator(
-            D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-        g_FrameContext[i].commandAllocator.Attach(commandAllocator);
-      }
-
-      // Compute
-      {
-        ID3D12CommandAllocator* commandAllocator = nullptr;
-        CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&commandAllocator)));
-        g_FrameContext[i].computeCommandAllocator.Attach(commandAllocator);
-      }
+      ID3D12CommandAllocator* commandAllocator = nullptr;
+      CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+      g_FrameContext[i].commandAllocator.Attach(commandAllocator);
     }
 
     // create the command list with the first allocator
-    CHECK_HR(
-        g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                    g_FrameContext[0].commandAllocator.Get(),
-                                    NULL, IID_PPV_ARGS(&g_CommandList)));
-
-    // Compute
-    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
-                                         g_FrameContext[0].computeCommandAllocator.Get(), NULL,
-                                         IID_PPV_ARGS(&g_ComputeCommandList)));
+    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_FrameContext[0].commandAllocator.Get(),
+                                         NULL, IID_PPV_ARGS(&g_CommandList)));
 
     // command lists are created in the recording state. our main loop will set
     // it up for recording again so close it now
     g_CommandList->Close();
-    g_ComputeCommandList->Close();
   }
 
   // Create Synchronization objects
   {
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      {
-        ID3D12Fence* fence = nullptr;
-        CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                       IID_PPV_ARGS(&fence)));
-        g_FrameContext[i].fence.Attach(fence);
-      }
-      // Compute
-      {
-        ID3D12Fence* fence = nullptr;
-        CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-        g_FrameContext[i].computeFence.Attach(fence);
-      }
-
+      ID3D12Fence* fence = nullptr;
+      CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+      g_FrameContext[i].fence.Attach(fence);
       g_FrameContext[i].fenceValue = 0;
     }
 
