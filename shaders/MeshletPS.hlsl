@@ -17,8 +17,6 @@ float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
   StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
   MeshInstance mi = meshInstances[InstanceIndex];
 
-  uint meshletIndex = input.meshletIndex;
-
 #ifdef BASE_COLOR
   uint materialIndex = input.materialIndex;
   StructuredBuffer<Material> materials = ResourceDescriptorHeap[materialsBufferId];
@@ -27,24 +25,20 @@ float4 main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
   Texture2D tex = ResourceDescriptorHeap[NonUniformResourceIndex(material.baseColorId)];
   float4 color = tex.Sample(s0, input.texCoord);
 
-  if (color.a == 0)
-    discard;
-#elif defined MESHLET_COLOR
-  float4 color = float4(float(meshletIndex & 1),
-                        float(meshletIndex & 3) / 4,
-                        float(meshletIndex & 7) / 8,
-                        1.0f);
+  if (color.a == 0) discard;
+#else
+#if defined MESHLET_COLOR
+  uint h = input.meshletIndex * 2654435761;
 #elif defined PRIMITIVE_COLOR
-  float4 color = float4(float(primitiveId & 1),
-                        float(primitiveId & 3) / 4,
-                        float(primitiveId & 7) / 8,
-                        1.0f);
+  uint h = primitiveId * 2654435761;
 #else
   uint h = InstanceIndex * 2654435761;
+#endif
   uint r = (h >> 0) & 0xff;
   uint g = (h >> 8) & 0xff;
   uint b = (h >> 16) & 0xff;
   float4 color = float4(float(r), float(g), float(b), 255.0f) / 255.0f;
 #endif
+
   return color;
 }

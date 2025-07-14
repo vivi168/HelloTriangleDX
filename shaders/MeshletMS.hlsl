@@ -42,7 +42,7 @@ MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexInd
   vout.posWS = mul(float4(position, 1.0f), mi.WorldMatrix);
   float3 norm = mul(float4(normal, 1.0f), mi.NormalMatrix).xyz;
   vout.normal = normalize(norm);
-  vout.meshletIndex = mi.meshletBufferOffset + meshletIndex;
+  vout.meshletIndex = meshletIndex;
   vout.materialIndex = materialIndex;
   vout.texCoord = uv;
 
@@ -86,7 +86,7 @@ void main(
   if (gtid < m.VertCount)
   {
     uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
-    MS_OUTPUT v = GetVertexAttributes(mi, gid, vertexIndex, m.materialIndex);
+    MS_OUTPUT v = GetVertexAttributes(mi, mi.meshletBufferOffset + meshletIndex, vertexIndex, m.materialIndex);
     verts[gtid] = v;
     s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, ScreenSize), v.posCS.w);
   }
