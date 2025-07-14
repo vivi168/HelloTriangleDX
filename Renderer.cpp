@@ -38,7 +38,7 @@ static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 // ========== Enums
 
-enum class PSO { BasicMS, SkinningCS };
+enum class PSO { BasicMS, SkinningCS, InstanceCullingCS };
 
 namespace RootParameter
 {
@@ -155,6 +155,7 @@ struct Scene {
   std::vector<SceneNode> nodes;
 
   std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
+  UINT numMeshInstances = 0;
   std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances;
 
   Camera* camera;
@@ -509,6 +510,8 @@ struct MeshStore {
     };
   }
 
+  UINT InstancesBufferId(UINT frameIndex) const { return m_Instances[frameIndex].SrvDescriptorIndex(); }
+
   GpuBuffer m_VertexPositions;
   GpuBuffer m_VertexNormals;
   // TODO: GpuBuffer m_VertexTangents;
@@ -654,30 +657,6 @@ void LoadAssets()
       }
     }
   }
-
-  // TMP: create m_DrawMeshletCommands on CPU to validate ExecuteIndirect
-  std::vector<DrawMeshCommand> cmds;
-  for (const auto& [k, instances] : g_Scene.meshInstanceMap) {
-    for (auto mi : instances) {
-      DrawMeshCommand cmd = {
-          .constants =
-              {
-                  .instanceIndex = mi->instanceBufferOffset / sizeof(MeshInstance::data),
-              },
-          .args =
-              {
-                  .ThreadGroupCountX = DivRoundUp(mi->data.numMeshlets, 32), // WAVE_GROUP_SIZE
-                  .ThreadGroupCountY = 1,
-                  .ThreadGroupCountZ = 1,
-              },
-      };
-      
-      cmds.push_back(cmd);
-    }
-  }
-  UINT clear = cmds.size();
-  g_DrawMeshCommands.Copy(0, cmds.data(), sizeof(DrawMeshCommand) * cmds.size());
-  g_DrawMeshCommands.Copy(DRAW_MESH_CMDS_COUNTER_OFFSET, &clear, sizeof(UINT));
 }
 
 void Update(float time, float dt)
@@ -776,7 +755,6 @@ void Update(float time, float dt)
   }
 }
 
-// Add a PSO helper struct ?
 void Render()
 {
   auto ctx = &g_FrameContext[g_FrameIndex];
@@ -837,11 +815,6 @@ void Render()
   D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
-  // record culling commands if enable
-  {
-    // TODO
-  }
-
   // record skinning compute commands if needed
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
@@ -863,6 +836,35 @@ void Render()
     auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &b1);
+  }
+
+  // record culling commands
+  {
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
+
+    g_CommandList->SetComputeRootSignature(g_RootSignature.Get());
+
+    g_CommandList->SetComputeRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
+                                                 &ctx->frameConstants, 0);
+    std::array<UINT, 2> h{
+        g_MeshStore.InstancesBufferId(g_FrameIndex),
+        g_DrawMeshCommands.UavDescriptorIndex(),
+    };
+    g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices, h.size(), h.data(), 0);
+
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerMeshConstants, g_Scene.numMeshInstances, 0);
+
+    g_CommandList->CopyBufferRegion(g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
+                                    g_UAVCounterReset.Resource(), 0, sizeof(UINT));
+
+    auto before = g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    g_CommandList->ResourceBarrier(1, &before);
+
+    g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, 64), 1, 1);
+
+    auto after =
+        g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    g_CommandList->ResourceBarrier(1, &after);
   }
 
   // Record drawing commands
@@ -888,10 +890,13 @@ void Render()
   // the present state. If the debug layer is enabled, you will receive a
   // warning if present is called on the render target when it's not in the
   // present state
-  auto postRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+  std::array<D3D12_RESOURCE_BARRIER, 2> postRenderBarriers;
+  postRenderBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
       ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+  postRenderBarriers[1] =
+      g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
-  g_CommandList->ResourceBarrier(1, &postRenderBarrier);
+  g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
 
   CHECK_HR(g_CommandList->Close());
 
@@ -1370,7 +1375,7 @@ static void InitFrameResources()
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(2, 0);  // b0
+    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(1, 0);  // b0
     // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 2);  // b2
@@ -1380,12 +1385,7 @@ static void InitFrameResources()
     staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
 
     // Root Signature
-    D3D12_ROOT_SIGNATURE_FLAGS flags =
-        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
-        D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
-        D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
-        D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
         RootParameter::Count, rootParameters, 1, staticSamplers, flags);
 
@@ -1422,6 +1422,7 @@ static void InitFrameResources()
   }
 
   // Compute skinning root signature
+  // TODO: reuse same command signature as above to avoid switching?
   {
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
@@ -1496,7 +1497,20 @@ static void InitFrameResources()
     g_PipelineStateObjects[PSO::SkinningCS].Attach(pipelineStateObject);
   }
 
-  // TODO: we need a PSO for the 2nd pass (lighting pass) that will use the G buffer to compute the final image
+  // Compute culling pipeline
+  {
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"InstanceCullingCS.cso").c_str());
+    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+        .pRootSignature = g_RootSignature.Get(),
+        .CS = computeShader,
+    };
+
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::InstanceCullingCS].Attach(pipelineStateObject);
+  }
 
   // MeshStore: TODO: make an instance method / DRY
   {
@@ -2082,6 +2096,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
   mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
 
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
+  g_Scene.numMeshInstances++;
 
   return mi;
 }
