@@ -32,13 +32,14 @@ static constexpr size_t VISIBLE_MESHLETS_COUNT = MESH_INSTANCE_COUNT * AVG_MESHL
 static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
+static constexpr DXGI_FORMAT VISIBILITY_BUFFER_FORMAT = DXGI_FORMAT_R32_UINT;
 static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
 static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 // ========== Enums
 
-enum class PSO { BasicMS, SkinningCS, InstanceCullingCS };
+enum class PSO { BasicMS, SkinningCS, InstanceCullingCS, FillGBufferCS, FinalComposeVS };
 
 namespace RootParameter
 {
@@ -93,14 +94,16 @@ struct MeshInstance {
       FLOAT scale;
     } matrices; // updated each frame
 
-    // Geometry. this doesn't change
+    // Geometry. this doesn't change. split into two GpuBuffer?
+    // if instead we add a uint geometryId to MeshInstance,
+    // we could also do LODing. uint geometryId[MAX_LOD];
     struct {
       UINT positionsBuffer;
       UINT normalsBuffer;
       // TODO: tangents
       UINT uvsBuffer;
 
-      UINT meshletsBuffer;
+      UINT meshletsBuffer; // TODO: make this the otherway arround. Have instance index on meshlet
       UINT uniqueIndicesBuffer;
       UINT primitivesBuffer;
     } offsets;
@@ -170,7 +173,11 @@ struct DescriptorHeapListAllocator {
     D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
     m_HeapType = desc.Type;
     m_HeapStartCpu = m_Heap->GetCPUDescriptorHandleForHeapStart();
-    m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
+
+    if (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {
+      m_HeapStartGpu = m_Heap->GetGPUDescriptorHandleForHeapStart();
+    }
+
     m_HeapHandleIncrement =
         device->GetDescriptorHandleIncrementSize(m_HeapType);
 
@@ -250,6 +257,8 @@ struct GpuBuffer {
 
   void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { uavDescriptor.Alloc(allocator); }
 
+  void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { rtvDescriptor.Alloc(allocator); }
+
   UINT SrvDescriptorIndex() const { return srvDescriptor.index; }
 
   UINT UavDescriptorIndex() const { return uavDescriptor.index; }
@@ -257,6 +266,10 @@ struct GpuBuffer {
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return srvDescriptor.handle; }
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.handle; }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return rtvDescriptor.handle; }
+
+  void Attach(ID3D12Resource* other) { resource.Attach(other); }
 
   void CreateResource(D3D12MA::Allocator* allocator, const D3D12MA::ALLOCATION_DESC* allocDesc,
                       const D3D12_RESOURCE_DESC* pResourceDesc,
@@ -303,16 +316,19 @@ struct GpuBuffer {
   void Reset()
   {
     resource.Reset();
-    allocation->Release();
-    allocation = nullptr;
+    if (allocation) {
+      allocation->Release();
+      allocation = nullptr;
+    }
   }
 
 private:
   ComPtr<ID3D12Resource> resource;
   HeapDescriptor srvDescriptor;
   HeapDescriptor uavDescriptor;
-  D3D12MA::Allocation* allocation;
-  void* address;
+  HeapDescriptor rtvDescriptor;
+  D3D12MA::Allocation* allocation = nullptr;
+  void* address = nullptr;
   D3D12_RESOURCE_STATES currentState;
   std::wstring resourceName;
 };
@@ -340,7 +356,7 @@ struct FrameContext {
 
   static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
 
-  ComPtr<ID3D12Resource> renderTarget;
+  GpuBuffer renderTarget;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
   ComPtr<ID3D12Fence> fence;
@@ -597,7 +613,7 @@ static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
 static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
 
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
-static UINT g_RtvDescriptorSize;
+static DescriptorHeapListAllocator g_RtvDescHeapAlloc;
 
 static GpuBuffer g_DepthStencilBuffer;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
@@ -611,6 +627,9 @@ static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 static GpuBuffer g_CullInstanceCommands;  // written by compute shader
 static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
+
+static GpuBuffer g_VisibilityBuffer;
+static GpuBuffer g_GBuffer;
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
@@ -776,34 +795,31 @@ void Render()
 
   // transition the "g_FrameIndex" render target from the present state to the
   // render target state so the command list draws to it starting from here
-  auto presentToRenderTargetBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_PRESENT,
-      D3D12_RESOURCE_STATE_RENDER_TARGET);
-  g_CommandList->ResourceBarrier(1, &presentToRenderTargetBarrier);
+  std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
+  preRenderBarriers[0] = ctx->renderTarget.Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  preRenderBarriers[1] =
+      g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
 
   // here we again get the handle to our current render target view so we can
   // set it as the render target in the output merger stage of the pipeline
-  D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {
-      g_RtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr +
-      g_FrameIndex * g_RtvDescriptorSize};
   D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
       g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-  // set the render target for the output merger stage (the output of the
-  // pipeline)
-  g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
   g_CommandList->ClearDepthStencilView(
       g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
       D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
+  const float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
+  g_CommandList->ClearRenderTargetView(g_VisibilityBuffer.RtvDescriptorHandle(), visBufferClearColor, 0, nullptr);
+
   // Clear the render target by using the ClearRenderTargetView command
   if (g_Raster) {
     const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
   } else {
     const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
   }
 
   std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
@@ -816,6 +832,7 @@ void Render()
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
   // record skinning compute commands if needed
+  // TODO: we should also update culling data. And move to Indirect?
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
@@ -869,6 +886,9 @@ void Render()
 
   // Record drawing commands
   {
+    auto rtvHandle = g_VisibilityBuffer.RtvDescriptorHandle();
+    g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
     g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
@@ -881,6 +901,24 @@ void Render()
 
     g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
                                    0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+
+    auto after =
+        g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    g_CommandList->ResourceBarrier(1, &after);
+  }
+
+  //
+  {
+    auto rtvHandle = ctx->renderTarget.RtvDescriptorHandle();
+    g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
+
+    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::BuffersDescriptorIndices,
+                                                g_VisibilityBuffer.SrvDescriptorIndex(), 0);
+
+    g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g_CommandList->DrawInstanced(3, 1, 0, 0);
   }
 
   ImGui::Render();
@@ -891,8 +929,8 @@ void Render()
   // warning if present is called on the render target when it's not in the
   // present state
   std::array<D3D12_RESOURCE_BARRIER, 2> postRenderBarriers;
-  postRenderBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(
-      ctx->renderTarget.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+  postRenderBarriers[0] =
+      ctx->renderTarget.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   postRenderBarriers[1] =
       g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
@@ -981,12 +1019,18 @@ void Cleanup()
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::SkinningCS].Reset();
+  g_PipelineStateObjects[PSO::InstanceCullingCS].Reset();
+  g_PipelineStateObjects[PSO::FillGBufferCS].Reset();
+  g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
   g_CullInstanceCommands.Reset();
   g_DrawMeshCommands.Reset();
   g_UAVCounterReset.Reset();
+
+  g_VisibilityBuffer.Reset();
+  g_GBuffer.Reset();
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
@@ -1255,48 +1299,25 @@ static void InitFrameResources()
 
   // RTV
   {
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors = FRAME_BUFFER_COUNT;
-    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-
-    // This heap will not be directly referenced by the shaders (not shader
-    // visible), as this will store the output from the pipeline otherwise we
-    // would set the heap's flag to D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-    rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                                           .NumDescriptors = FRAME_BUFFER_COUNT + 2,  // g_VisibilityBuffer + g_GBuffer
+                                           .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE};
     ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
-    CHECK_HR(g_Device->CreateDescriptorHeap(&rtvHeapDesc,
-                                            IID_PPV_ARGS(&rtvDescriptorHeap)));
+    CHECK_HR(g_Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap)));
     g_RtvDescriptorHeap.Attach(rtvDescriptorHeap);
 
-    // get the size of a descriptor in this heap (this is a rtv heap, so only
-    // rtv descriptors should be stored in it. Descriptor sizes may vary from
-    // g_Device to g_Device, which is why there is no set size and we must ask
-    // the g_Device to give us the size. we will use this size to increment a
-    // descriptor handle offset
-    g_RtvDescriptorSize = g_Device->GetDescriptorHandleIncrementSize(
-        D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    g_RtvDescHeapAlloc.Create(g_Device.Get(), g_RtvDescriptorHeap.Get());
 
-    // get a handle to the first descriptor in the descriptor heap. a handle is
-    // basically a pointer, but we cannot literally use it like a c++ pointer.
-    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle{
-        g_RtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart()};
-
-    // Create a RTV for each buffer (double buffering is two buffers, tripple
-    // buffering is 3).
+    // Create a RTV for each buffer (double buffering is two buffers, tripple buffering is 3).
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      // first we get the n'th buffer in the swap chain and store it in the n'th
-      // position of our ID3D12Resource array
+      // store the n'th buffer in the swap chain in the n'th position of render target
       ID3D12Resource* res = nullptr;
       CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
       g_FrameContext[i].renderTarget.Attach(res);
 
-      // then we "create" a render target view which binds the swap chain buffer
-      // (ID3D12Resource[n]) to the rtv handle
-      g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Get(),
-                                       nullptr, rtvHandle);
-
-      // we increment the rtv handle by the rtv descriptor size we got above
-      rtvHandle.ptr += g_RtvDescriptorSize;
+      g_FrameContext[i].renderTarget.AllocRtvDescriptor(g_RtvDescHeapAlloc);
+      g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Resource(), nullptr,
+                                       g_FrameContext[i].renderTarget.RtvDescriptorHandle());
     }
   }
 
@@ -1461,7 +1482,7 @@ static void InitFrameResources()
     psoDesc.MS = meshShader;
     psoDesc.PS = pixelShader;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.RTVFormats[0] = VISIBILITY_BUFFER_FORMAT;
     psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
@@ -1510,6 +1531,51 @@ static void InitFrameResources()
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::InstanceCullingCS].Attach(pipelineStateObject);
+  }
+
+  // Fill G-Buffer pipeline
+  {
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"FillGBufferCS.cso").c_str());
+    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+        .pRootSignature = g_RootSignature.Get(),
+        .CS = computeShader,
+    };
+
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::FillGBufferCS].Attach(pipelineStateObject);
+  }
+
+  // Final image composition VS/PS pipeline
+  {
+    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"FullScreenTriangleVS.cso").c_str());
+    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(), vertexShaderBlob.size()};
+
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"FinalComposePS.cso").c_str());
+    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(), pixelShaderBlob.size()};
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.InputLayout.NumElements = 0;
+    psoDesc.InputLayout.pInputElementDescs = nullptr;
+    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.VS = vertexShader;
+    psoDesc.PS = pixelShader;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
+    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    psoDesc.DepthStencilState.DepthEnable = FALSE;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.SampleDesc = DefaultSampleDesc();
+
+    ID3D12PipelineState* pipelineStateObject;
+    CHECK_HR(g_Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+    g_PipelineStateObjects[PSO::FinalComposeVS].Attach(pipelineStateObject);
   }
 
   // MeshStore: TODO: make an instance method / DRY
@@ -1882,6 +1948,63 @@ static void InitFrameResources()
       g_UAVCounterReset.Clear(bufSiz);
       g_UAVCounterReset.Unmap();
     }
+  }
+
+  // Vis Buffer output
+  {
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
+
+    D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(VISIBILITY_BUFFER_FORMAT, g_Width, g_Height);
+    textureDesc.MipLevels = 1;
+    textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    D3D12_CLEAR_VALUE clear{.Format = textureDesc.Format, .Color = {0.0f, 0.0f, 0.0f, 1.0f}};
+    g_VisibilityBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc,
+                                      D3D12_RESOURCE_STATE_COMMON, &clear);  // clear value ???
+    g_VisibilityBuffer.SetName(L"Visibility Buffer");
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = textureDesc.Format,
+                                            .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                            .Texture2D = {
+                                                .MipLevels = textureDesc.MipLevels,
+                                            }};
+    g_VisibilityBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+    g_Device->CreateShaderResourceView(g_VisibilityBuffer.Resource(), &srvDesc,
+                                       g_VisibilityBuffer.SrvDescriptorHandle());
+
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{
+        .Format = textureDesc.Format,
+        .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
+        .Texture2D = {},
+    };
+    g_VisibilityBuffer.AllocRtvDescriptor(g_RtvDescHeapAlloc);
+    g_Device->CreateRenderTargetView(g_VisibilityBuffer.Resource(), nullptr, g_VisibilityBuffer.RtvDescriptorHandle());
+
+  }
+
+  // G-Buffer output
+  {
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
+
+    D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(VISIBILITY_BUFFER_FORMAT, g_Width, g_Height);
+    textureDesc.MipLevels = 1;
+    textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    g_GBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);  // clear value ???
+    g_GBuffer.SetName(L"Visibility Buffer");
+
+    // descriptor
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = textureDesc.Format,
+                                            .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                            .Texture2D = {
+                                                .MipLevels = textureDesc.MipLevels,
+                                            }};
+    g_GBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+    g_Device->CreateShaderResourceView(g_GBuffer.Resource(), &srvDesc,
+                                       g_GBuffer.SrvDescriptorHandle());
   }
 }
 

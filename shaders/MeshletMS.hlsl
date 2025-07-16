@@ -28,23 +28,14 @@ uint GetVertexIndex(Meshlet m, uint localIndex)
   return UniqueVertexIndices[localIndex];
 }
 
-MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex, uint materialIndex)
+MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex)
 {
   StructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
-  StructuredBuffer<float3> normals = ResourceDescriptorHeap[vertexNormalsBufferId];
-  StructuredBuffer<float3> uvs = ResourceDescriptorHeap[vertexUVsBufferId];
   float3 position = positions[mi.positionsBufferOffset + vertexIndex];
-  float3 normal = normals[mi.normalsBufferOffset + vertexIndex];
-  float2 uv = uvs[mi.uvsBufferOffset + vertexIndex];
 
   MS_OUTPUT vout;
   vout.posCS = mul(float4(position, 1.0f), mi.WorldViewProj);
-  vout.posWS = mul(float4(position, 1.0f), mi.WorldMatrix);
-  float3 norm = mul(float4(normal, 1.0f), mi.NormalMatrix).xyz;
-  vout.normal = normalize(norm);
   vout.meshletIndex = meshletIndex;
-  vout.materialIndex = materialIndex;
-  vout.texCoord = uv;
 
   return vout;
 }
@@ -86,7 +77,7 @@ void main(
   if (gtid < m.VertCount)
   {
     uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
-    MS_OUTPUT v = GetVertexAttributes(mi, mi.meshletBufferOffset + meshletIndex, vertexIndex, m.materialIndex);
+    MS_OUTPUT v = GetVertexAttributes(mi, mi.meshletBufferOffset + meshletIndex, vertexIndex);
     verts[gtid] = v;
     s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, ScreenSize), v.posCS.w);
   }
