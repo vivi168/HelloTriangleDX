@@ -24,7 +24,6 @@ cbuffer BuffersDescriptorIndices : register(b2)
   uint vertexUVsBufferId;
 
   uint meshletsBufferId;
-  uint visibleMeshletsBufferId;
   uint meshletUniqueIndicesBufferId;
   uint meshletsPrimitivesBufferId;
 
@@ -59,12 +58,12 @@ struct Meshlet
   uint PrimCount;
   uint PrimOffset;
 
+  uint instanceIndex;
   uint materialIndex;
 
   float4 boundingSphere;
   uint normalCone;
   float apexOffset;
-  uint pad;
 };
 
 struct ASPayload

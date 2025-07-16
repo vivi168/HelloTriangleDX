@@ -27,8 +27,6 @@ static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE
 
 static constexpr size_t FRAME_BUFFER_COUNT = 3;
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
-static constexpr size_t AVG_MESHLET_COUNT_PER_INSTANCE = 700;
-static constexpr size_t VISIBLE_MESHLETS_COUNT = MESH_INSTANCE_COUNT * AVG_MESHLET_COUNT_PER_INSTANCE;
 static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
@@ -43,7 +41,7 @@ enum class PSO { BasicMS, SkinningCS, InstanceCullingCS, FillGBufferCS, FinalCom
 
 namespace RootParameter
 {
-enum Slots : size_t { PerMeshConstants = 0, FrameConstants, BuffersDescriptorIndices, Count };
+enum Slots : size_t { PerDrawConstants = 0, FrameConstants, BuffersDescriptorIndices, Count };
 }
 
 namespace SkinningCSRootParameter
@@ -448,12 +446,9 @@ struct MeshStore {
     return offset;
   }
 
-  UINT CopyInstance(const void* data, size_t size)
+  UINT ReserveInstance(size_t size)
   {
     UINT offset = m_CurrentOffsets.instancesBuffer;
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      m_Instances[i].Copy(offset, data, size);
-    }
     m_CurrentOffsets.instancesBuffer += size;
 
     return offset;
@@ -848,7 +843,7 @@ void Render()
     };
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices, h.size(), h.data(), 0);
 
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerMeshConstants, g_Scene.numMeshInstances, 0);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.numMeshInstances, 0);
 
     g_CommandList->CopyBufferRegion(g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
                                     g_UAVCounterReset.Resource(), 0, sizeof(UINT));
@@ -893,7 +888,7 @@ void Render()
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
 
-    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::BuffersDescriptorIndices,
+    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants,
                                                 g_VisibilityBuffer.SrvDescriptorIndex(), 0);
 
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1371,7 +1366,7 @@ static void InitFrameResources()
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::PerMeshConstants].InitAsConstants(1, 0);  // b0
+    rootParameters[RootParameter::PerDrawConstants].InitAsConstants(1, 0);  // b0
     // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(MeshStore::NumDescriptorIndices, 2);  // b2
@@ -1401,7 +1396,7 @@ static void InitFrameResources()
     std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2> argDesc{};
     argDesc[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
     argDesc[0].Constant = {
-        .RootParameterIndex = RootParameter::PerMeshConstants,
+        .RootParameterIndex = RootParameter::PerDrawConstants,
         .DestOffsetIn32BitValues = 0,
         .Num32BitValuesToSet = sizeof(DrawMeshCommand::constants) / sizeof(UINT),
     };
@@ -1555,13 +1550,13 @@ static void InitFrameResources()
 
   // MeshStore: TODO: make an instance method / DRY
   {
-    // TODO: better estimate
+    // TODO: compute worst case scenario from the scene.
+    // wait, everyone has more than 8GB VRAM in 2025, right? right?
     static constexpr size_t numVertices = 5'000'000;
-    static constexpr size_t numMeshlets = 100'000;
     static constexpr size_t numIndices = 10'000'000;
     static constexpr size_t numPrimitives = 7'000'000;
     static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
-    static constexpr size_t numVisibleMeshlets = VISIBLE_MESHLETS_COUNT;
+    static constexpr size_t numMeshlets = 50'000;
     static constexpr size_t numMaterials = 5000;
     static constexpr size_t numMatrices = 3000;
 
@@ -2051,6 +2046,14 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
   // Create MeshInstance
   auto mi = std::make_shared<MeshInstance>();
+  mi->instanceBufferOffset = g_MeshStore.ReserveInstance(sizeof(MeshInstance::data));
+
+  // Assign it to the meshlets of this instance
+  std::vector<MeshletData> instanceMeshlets = mesh->meshlets;
+  for (auto& m : instanceMeshlets) {
+    m.instanceIndex = mi->instanceBufferOffset / sizeof(MeshInstance::data);
+  }
+
   {
     auto it = g_Scene.meshInstanceMap.find(mesh->name);
     if (it == std::end(g_Scene.meshInstanceMap)) {
@@ -2088,7 +2091,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
       // meshlet data
       mi->data.offsets.meshletsBuffer =
-          g_MeshStore.CopyMeshlets(mesh->meshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
+          g_MeshStore.CopyMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
       mi->data.offsets.uniqueIndicesBuffer =
           g_MeshStore.CopyMeshletUniqueIndices(mesh->uniqueVertexIndices.data(), mesh->MeshletIndexBufferSize()) /
           sizeof(UINT);
@@ -2098,6 +2101,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
     } else {
       auto i = it->second[0];
       mi->data.offsets = i->data.offsets;
+      mi->data.offsets.meshletsBuffer =
+          g_MeshStore.CopyMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
 
       if (mesh->Skinned()) {
         // these will be filled by compute shader so we need new ones.
@@ -2122,7 +2127,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
   mi->data.numMeshlets = mesh->meshlets.size();
   mi->mesh = mesh;
-  mi->instanceBufferOffset = g_MeshStore.CopyInstance(&mi->data, sizeof(mi->data));
+  // We update MeshIntance buffer everyframe so don't need to copy data here.
 
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
   g_Scene.numMeshInstances++;
