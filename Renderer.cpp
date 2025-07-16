@@ -53,24 +53,6 @@ enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 
 // ========== Structs
 
-struct VisibleMeshlet {
-  UINT meshletIndex;
-  UINT primitiveIndex;
-};
-
-static constexpr UINT VISIBLE_MESHLETS_SIZE = VISIBLE_MESHLETS_COUNT * sizeof(VisibleMeshlet);
-static constexpr UINT VISIBLE_MESHLETS_COUNTER_OFFSET = AlignForUavCounter(VISIBLE_MESHLETS_SIZE);
-
-struct CullInstanceCommand {
-  struct {
-    UINT instanceIndex;
-  } constants;
-  D3D12_DISPATCH_ARGUMENTS args;
-};
-
-static constexpr UINT CULL_INSTANCE_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(CullInstanceCommand);
-static constexpr UINT CULL_INSTANCE_CMDS_COUNTER_OFFSET = AlignForUavCounter(CULL_INSTANCE_CMDS_SIZE);
-
 struct DrawMeshCommand {
   struct {
     UINT instanceIndex;
@@ -495,7 +477,7 @@ struct MeshStore {
     m_BoneMatrices[frameIndex].Copy(offset, data, size);
   }
 
-  static constexpr size_t NumDescriptorIndices = 9;
+  static constexpr size_t NumDescriptorIndices = 8;
   static constexpr size_t NumSkinningCSDescriptorIndices = 4;
 
   // TODO: struct for these 2? enum?
@@ -508,7 +490,6 @@ struct MeshStore {
         m_VertexUVs.SrvDescriptorIndex(),
 
         m_Meshlets.SrvDescriptorIndex(),
-        m_VisibleMeshlets.SrvDescriptorIndex(),
         m_MeshletUniqueIndices.SrvDescriptorIndex(),
         m_MeshletPrimitives.SrvDescriptorIndex(),
         m_Materials.SrvDescriptorIndex(),
@@ -535,7 +516,6 @@ struct MeshStore {
   GpuBuffer m_VertexBlendWeightsAndIndices;
 
   GpuBuffer m_Meshlets;
-  GpuBuffer m_VisibleMeshlets;  // written by compute shader
   GpuBuffer m_MeshletUniqueIndices;
   GpuBuffer m_MeshletPrimitives;
 
@@ -624,7 +604,6 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
-static GpuBuffer g_CullInstanceCommands;  // written by compute shader
 static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
 
@@ -996,9 +975,6 @@ void Cleanup()
     g_MeshStore.m_Meshlets.Unmap();
     g_MeshStore.m_Meshlets.Reset();
 
-    g_MeshStore.m_VisibleMeshlets.Unmap();
-    g_MeshStore.m_VisibleMeshlets.Reset();
-
     g_MeshStore.m_MeshletUniqueIndices.Unmap();
     g_MeshStore.m_MeshletUniqueIndices.Reset();
 
@@ -1025,7 +1001,6 @@ void Cleanup()
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
-  g_CullInstanceCommands.Reset();
   g_DrawMeshCommands.Reset();
   g_UAVCounterReset.Reset();
 
@@ -1720,41 +1695,6 @@ static void InitFrameResources()
                                          g_MeshStore.m_Meshlets.SrvDescriptorHandle());
     }
 
-    // Visible meshlets buffer
-    {
-      size_t bufSiz = VISIBLE_MESHLETS_COUNTER_OFFSET + sizeof(UINT);  // counter
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-      g_MeshStore.m_VisibleMeshlets.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
-      g_MeshStore.m_VisibleMeshlets.SetName(L"Visible Meshlets Store");
-      g_MeshStore.m_VisibleMeshlets.Map();
-
-      // descriptor
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                              .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numVisibleMeshlets),
-                                                         .StructureByteStride = sizeof(VisibleMeshlet),
-                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
-                                               .Buffer = {.FirstElement = 0,
-                                                          .NumElements = static_cast<UINT>(numVisibleMeshlets),
-                                                          .StructureByteStride = sizeof(VisibleMeshlet),
-                                                          .CounterOffsetInBytes = VISIBLE_MESHLETS_COUNTER_OFFSET,
-                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
-
-      g_MeshStore.m_VisibleMeshlets.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(g_MeshStore.m_VisibleMeshlets.Resource(), &srvDesc,
-                                         g_MeshStore.m_VisibleMeshlets.SrvDescriptorHandle());
-
-      g_MeshStore.m_VisibleMeshlets.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateUnorderedAccessView(g_MeshStore.m_VisibleMeshlets.Resource(),
-                                          g_MeshStore.m_VisibleMeshlets.Resource(), &uavDesc,
-                                          g_MeshStore.m_VisibleMeshlets.UavDescriptorHandle());
-    }
-
     // Meshlet unique vertex indices buffer
     {
       size_t bufSiz = numIndices * sizeof(UINT);
@@ -1869,40 +1809,6 @@ static void InitFrameResources()
       }
     }
 
-    // Cull Instances commands
-    {
-      size_t bufSiz = CULL_INSTANCE_CMDS_COUNTER_OFFSET + sizeof(UINT);  // counter
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-      g_CullInstanceCommands.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
-      g_CullInstanceCommands.SetName(L"Cull Instances command buffer");
-      g_CullInstanceCommands.Map();
-
-      // descriptor
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                              .Buffer = {.FirstElement = 0,
-                                                         .NumElements = static_cast<UINT>(numInstances),
-                                                         .StructureByteStride = sizeof(CullInstanceCommand),
-                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
-      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
-                                               .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
-                                               .Buffer = {.FirstElement = 0,
-                                                          .NumElements = static_cast<UINT>(numInstances),
-                                                          .StructureByteStride = sizeof(CullInstanceCommand),
-                                                          .CounterOffsetInBytes = CULL_INSTANCE_CMDS_COUNTER_OFFSET,
-                                                          .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
-
-      g_CullInstanceCommands.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(g_CullInstanceCommands.Resource(), &srvDesc,
-                                         g_CullInstanceCommands.SrvDescriptorHandle());
-
-      g_CullInstanceCommands.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateUnorderedAccessView(g_CullInstanceCommands.Resource(), g_CullInstanceCommands.Resource(),
-                                          &uavDesc, g_CullInstanceCommands.UavDescriptorHandle());
-    }
-
     // Draw Meshlets commands
     {
       size_t bufSiz = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT);  // counter
@@ -1993,7 +1899,7 @@ static void InitFrameResources()
     textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
     g_GBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);  // clear value ???
-    g_GBuffer.SetName(L"Visibility Buffer");
+    g_GBuffer.SetName(L"G-Buffer Buffer");
 
     // descriptor
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = textureDesc.Format,
