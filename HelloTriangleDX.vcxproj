@@ -101,6 +101,7 @@
     <ClInclude Include="Input.h" />
     <ClInclude Include="Mesh.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="shaders\Shared.h" />
     <ClInclude Include="Win32Application.h" />
     <ClInclude Include="RendererHelper.h" />
     <ClInclude Include="stdafx.h" />
@@ -153,6 +154,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\MeshletCommon.hlsli" />
+    <None Include="shaders\VisibilityBufferCommon.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\FillGBufferCS.hlsl">

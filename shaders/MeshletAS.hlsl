@@ -1,8 +1,18 @@
+#include "Shared.h"
 #include "MeshletCommon.hlsli"
+
+cbuffer PerDrawConstants : register(b0)
+{
+  uint InstanceIndex;
+};
+
+ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
+
+ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
 
 groupshared ASPayload s_Payload;
 
-bool IsConeDegenerate(Meshlet m) { return (m.normalCone >> 24) == 0xff; }
+bool IsConeDegenerate(MeshletData m) { return (m.normalCone >> 24) == 0xff; }
 
 float4 UnpackCone(uint packed)
 {
@@ -18,14 +28,14 @@ float4 UnpackCone(uint packed)
   return v;
 }
 
-bool IsVisible(Meshlet m, float4x4 world, float scale, float3 viewPos)
+bool IsVisible(MeshletData m, float4x4 world, float scale, float3 viewPos)
 {
   // Do a cull test of the bounding sphere against the view frustum planes
   float4 center = mul(float4(m.boundingSphere.xyz, 1), world);
   float radius = m.boundingSphere.w * scale;
 
   for (int i = 0; i < 6; ++i) {
-    if (dot(center, FrustumPlanes[i]) < -radius) {
+    if (dot(center, g_FrameConstants.FrustumPlanes[i]) < -radius) {
       return false;
     }
   }
@@ -56,14 +66,14 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
 {
   bool visible = false;
 
-  StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[InstanceIndex];
+  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.instancesBufferId];
+  MeshInstanceData mi = meshInstances[InstanceIndex];
 
-  StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
-  Meshlet m = meshlets[mi.meshletBufferOffset + dtid];
+  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
+  MeshletData m = meshlets[mi.firstMeshlet + dtid];
 
   if (dtid < mi.numMeshlets) {
-    visible = IsVisible(m, mi.WorldMatrix, mi.scale, CameraWS);
+    visible = IsVisible(m, mi.worldMatrix, mi.scale, g_FrameConstants.CameraWS);
   }
 
   if (visible) {

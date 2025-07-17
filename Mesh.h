@@ -3,8 +3,6 @@
 #include <string>
 #include <vector>
 
-#include "DirectXMesh.h"
-
 typedef WCHAR FILENAME[MAX_PATH];
 
 struct Skin {
@@ -66,20 +64,6 @@ struct AnimationInfo {
 
 struct Subset {
   uint32_t start, count, materialIndex;
-};
-
-struct MeshletData {
-  uint32_t numVerts;
-  uint32_t firstVert;
-  uint32_t numPrim;
-  uint32_t firstPrim;
-
-  uint32_t instanceIndex;
-  uint32_t materialIndex;
-
-  DirectX::BoundingSphere boundingSphere;       // xyz = center, w = radius
-  DirectX::PackedVector::XMUBYTEN4 normalCone;  // xyz = axis, w = -cos(a + 90)
-  float apexOffset;                             // apex = center - axis * offset
 };
 
 struct Mesh3D {

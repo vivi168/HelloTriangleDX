@@ -1,40 +1,42 @@
+#include "Shared.h"
 #include "MeshletCommon.hlsli"
 
-struct Vertex
+cbuffer PerDrawConstants : register(b0)
 {
-  float3 pos;
-  float3 normal;
-  float4 color;
-  float2 texCoord;
+  uint InstanceIndex;
 };
+
+ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
+
+ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
 
 uint3 UnpackPrimitive(uint primitive)
 {
   return uint3(primitive & 0x3FF, (primitive >> 10) & 0x3FF, (primitive >> 20) & 0x3FF);
 }
 
-uint3 GetPrimitive(Meshlet m, uint primOffset)
+uint3 GetPrimitive(MeshletData m, uint primIndex)
 {
-  StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[meshletsPrimitivesBufferId];
+  StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[g_DescIds.meshletsPrimitivesBufferId];
 
-  return UnpackPrimitive(PrimitiveIndices[m.PrimOffset + primOffset]);
+  return UnpackPrimitive(PrimitiveIndices[m.firstPrim + primIndex]);
 }
 
-uint GetVertexIndex(Meshlet m, uint localIndex)
+uint GetVertexIndex(MeshletData m, uint localIndex)
 {
-  localIndex = m.VertOffset + localIndex;
-  StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[meshletUniqueIndicesBufferId];
+  localIndex = m.firstVert + localIndex;
+  StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[g_DescIds.meshletVertIndicesBufferId];
 
   return UniqueVertexIndices[localIndex];
 }
 
-MS_OUTPUT GetVertexAttributes(MeshInstance mi, uint meshletIndex, uint vertexIndex)
+Vertex GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex)
 {
-  StructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
-  float3 position = positions[mi.positionsBufferOffset + vertexIndex];
+  StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
+  float3 position = positions[mi.firstPosition + vertexIndex];
 
-  MS_OUTPUT vout;
-  vout.posCS = mul(float4(position, 1.0f), mi.WorldViewProj);
+  Vertex vout;
+  vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
   vout.meshletIndex = meshletIndex;
 
   return vout;
@@ -60,33 +62,33 @@ void main(
     in payload ASPayload payload,
     out indices uint3 tris[MESHLET_MAX_PRIM],
     out primitives PRIM_OUT prims[MESHLET_MAX_PRIM],
-    out vertices MS_OUTPUT verts[MESHLET_MAX_VERT]
+    out vertices Vertex verts[MESHLET_MAX_VERT]
 )
 {
-  StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[instancesBufferId];
-  MeshInstance mi = meshInstances[InstanceIndex];
+  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.instancesBufferId];
+  MeshInstanceData mi = meshInstances[InstanceIndex];
 
   uint meshletIndex = payload.MeshletIndices[gid];
   if (meshletIndex >= mi.numMeshlets) return;
 
-  StructuredBuffer<Meshlet> meshlets = ResourceDescriptorHeap[meshletsBufferId];
-  Meshlet m = meshlets[mi.meshletBufferOffset + meshletIndex];
+  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
+  MeshletData m = meshlets[mi.firstMeshlet + meshletIndex];
 
-  SetMeshOutputCounts(m.VertCount, m.PrimCount);
+  SetMeshOutputCounts(m.numVerts, m.numPrims);
 
-  if (gtid < m.VertCount)
+  if (gtid < m.numVerts)
   {
-    uint vertexIndex = GetVertexIndex(m, mi.indexBufferOffset + gtid);
-    MS_OUTPUT v = GetVertexAttributes(mi, mi.meshletBufferOffset + meshletIndex, vertexIndex);
+    uint vertexIndex = GetVertexIndex(m, mi.firstVertIndex + gtid);
+    Vertex v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex);
     verts[gtid] = v;
-    s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, ScreenSize), v.posCS.w);
+    s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, g_FrameConstants.ScreenSize), v.posCS.w);
   }
 
   GroupMemoryBarrierWithGroupSync();
 
-  if (gtid < m.PrimCount)
+  if (gtid < m.numPrims)
   {
-    uint3 tri = GetPrimitive(m, mi.primBufferOffset + gtid);
+    uint3 tri = GetPrimitive(m, mi.firstPrimitive + gtid);
     tris[gtid] = tri;
 
     bool culled = false;

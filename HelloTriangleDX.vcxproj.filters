@@ -51,6 +51,9 @@
     <ClInclude Include="imgui_impl_dx12.h">
       <Filter>Header Files\imgui</Filter>
     </ClInclude>
+    <ClInclude Include="shaders\Shared.h">
+      <Filter>Shaders</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -107,6 +110,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\MeshletCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\VisibilityBufferCommon.hlsli">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

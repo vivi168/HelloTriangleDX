@@ -1,6 +1,7 @@
 #include "MeshletCommon.hlsli"
+#include "VisibilityBufferCommon.hlsli"
 
-uint main(MS_OUTPUT input, uint primitiveId : SV_PrimitiveID) : SV_TARGET
+uint main(Vertex vin, uint primitiveIndex : SV_PrimitiveID) : SV_Target
 {
-  return ((input.meshletIndex + 1) << 7) | (primitiveId & 0x7f);
+  return PackVisibility(vin.meshletIndex, primitiveIndex);
 }

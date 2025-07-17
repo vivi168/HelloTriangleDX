@@ -1,12 +1,6 @@
-cbuffer BuffersDescriptorIndices : register(b1)
-{
-  uint vertexPositionsBufferId;
-  uint vertexNormalsBufferId;
-  uint vertexBlendWeightsAndIndicesBufferId;
-  uint boneMatricesBufferId;
-};
+#include "Shared.h"
 
-cbuffer BuffersOffsets : register(b0)
+cbuffer PerDispatch : register(b0)
 {
   uint basePositionsBufferOffset;
   uint positionsBufferOffset;
@@ -16,6 +10,8 @@ cbuffer BuffersOffsets : register(b0)
   uint boneMatricesBufferOffset;
   uint numVertices;
 };
+
+ConstantBuffer<SkinningBuffersDescriptorIndices> g_DescIds : register(b1);
 
 float4 UnpackBoneWeights(uint bw)
 {
@@ -37,7 +33,7 @@ uint4 UnpackBoneIndices(uint bi)
   return uint4(b1, b2, b3, b4);
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(COMPUTE_GROUP_SIZE, 1, 1)]
 void main(uint dtid : SV_DispatchThreadID)
 {
   if (dtid >= numVertices) return;
@@ -46,9 +42,9 @@ void main(uint dtid : SV_DispatchThreadID)
   uint outPositionIdx = dtid + positionsBufferOffset;
   uint bwiIdx = dtid + blendWeightsAndIndicesBufferOffset;
 
-  RWStructuredBuffer<float3> positions = ResourceDescriptorHeap[vertexPositionsBufferId];
-  StructuredBuffer<uint2> bwis = ResourceDescriptorHeap[vertexBlendWeightsAndIndicesBufferId];
-  StructuredBuffer<float4x4> BoneMatrices = ResourceDescriptorHeap[boneMatricesBufferId];
+  RWStructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
+  StructuredBuffer<uint2> bwis = ResourceDescriptorHeap[g_DescIds.vertexBlendWeightsAndIndicesBufferId];
+  StructuredBuffer<float4x4> BoneMatrices = ResourceDescriptorHeap[g_DescIds.boneMatricesBufferId];
 
   float3 inPos = positions[basePositionIdx];
   uint2 bwi = bwis[bwiIdx];
@@ -61,6 +57,7 @@ void main(uint dtid : SV_DispatchThreadID)
                       mul(pos, BoneMatrices[boneIndices.z]) * boneWeights.z +
                       mul(pos, BoneMatrices[boneIndices.w]) * boneWeights.w;
 
+  // TODO: need to also transform normals
 
   positions[outPositionIdx] = skinnedPos.xyz;
 }

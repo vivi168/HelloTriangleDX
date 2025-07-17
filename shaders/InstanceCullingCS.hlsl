@@ -1,41 +1,13 @@
-// TODO: DRY everything!!!
-cbuffer PushConstants : register(b0)
+#include "Shared.h"
+
+cbuffer PerDispatch : register(b0)
 {
   uint NumInstances;
 };
 
-cbuffer FrameConstants : register(b1)
-{
-  float Time;
-  float3 CameraWS;
-  float4 FrustumPlanes[6];
-  float2 ScreenSize;
-};
+ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
 
-cbuffer BuffersDescriptorIndices : register(b2)
-{
-  uint InstancesBufferId;
-  uint DrawMeshCommandsBufferId;
-};
-
-struct MeshInstance {
-  float4x4 WorldViewProj;
-  float4x4 WorldMatrix;
-  float4x4 NormalMatrix;
-  float4 BoundingSphere;
-  float scale;
-
-  uint positionsBufferOffset;
-  uint normalsBufferOffset;
-  // TODO: tangents
-  uint uvsBufferOffset;
-
-  uint meshletBufferOffset;
-  uint indexBufferOffset;
-  uint primBufferOffset;
-
-  uint numMeshlets;
-};
+ConstantBuffer<CullingBuffersDescriptorIndices> g_DescIds : register(b2);
 
 struct DrawMeshCommand {
   uint instanceIndex;
@@ -45,21 +17,21 @@ struct DrawMeshCommand {
   uint threadGroupCountZ;
 };
 
-[numthreads(64, 1, 1)]
+[NumThreads(COMPUTE_GROUP_SIZE, 1, 1)]
 void main(uint dtid : SV_DispatchThreadID)
 {
   if (dtid >= NumInstances) return;
 
-  AppendStructuredBuffer<DrawMeshCommand> instances = ResourceDescriptorHeap[DrawMeshCommandsBufferId];
+  AppendStructuredBuffer<DrawMeshCommand> instances = ResourceDescriptorHeap[g_DescIds.DrawMeshCommandsBufferId];
 
-  StructuredBuffer<MeshInstance> meshInstances = ResourceDescriptorHeap[InstancesBufferId];
-  MeshInstance mi = meshInstances[dtid];
+  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.InstancesBufferId];
+  MeshInstanceData mi = meshInstances[dtid];
 
-  float4 center = mul(float4(mi.BoundingSphere.xyz, 1), mi.WorldMatrix);
-  float radius = mi.BoundingSphere.w * mi.scale;
+  float4 center = mul(float4(mi.boundingSphere.xyz, 1), mi.worldMatrix);
+  float radius = mi.boundingSphere.w * mi.scale;
 
   for (int i = 0; i < 6; ++i) {
-    if (dot(center, FrustumPlanes[i]) < -radius) {
+    if (dot(center, g_FrameConstants.FrustumPlanes[i]) < -radius) {
       return;
     }
   }

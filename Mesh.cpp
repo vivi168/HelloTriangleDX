@@ -275,8 +275,8 @@ void Mesh3D::ComputeAdditionalData()
 
     std::vector<MeshletSubset> meshletSubsets(header.numSubsets);
 
-    constexpr size_t maxPrims = 124;
-    constexpr size_t maxVerts = 64;
+    constexpr size_t maxPrims = MESHLET_MAX_PRIM;
+    constexpr size_t maxVerts = MESHLET_MAX_VERT;
     CHECK_HR(ComputeMeshlets(indices.data(), indices.size() / 3, positions.data(), positions.size(), meshSubsets.data(),
                              meshSubsets.size(), nullptr, dxMeshlets, uniqueVertexIndices, primitiveIndices,
                              meshletSubsets.data(), maxVerts, maxPrims));
@@ -287,7 +287,7 @@ void Mesh3D::ComputeAdditionalData()
     for (size_t i = 0; i < dxMeshlets.size(); i++) {
       meshlets[i].numVerts = dxMeshlets[i].VertCount;
       meshlets[i].firstVert = dxMeshlets[i].VertOffset;
-      meshlets[i].numPrim = dxMeshlets[i].PrimCount;
+      meshlets[i].numPrims = dxMeshlets[i].PrimCount;
       meshlets[i].firstPrim = dxMeshlets[i].PrimOffset;
     }
 
