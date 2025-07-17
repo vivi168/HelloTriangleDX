@@ -1,4 +1,3 @@
-#include "Shared.h"
 #include "MeshletCommon.hlsli"
 
 cbuffer PerDrawConstants : register(b0)

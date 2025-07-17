@@ -1,8 +1,10 @@
-#define WAVE_GROUP_SIZE 32
+#include "Shared.h"
+
+#define AS_GROUP_SIZE WAVE_GROUP_SIZE
 
 struct ASPayload
 {
-    uint MeshletIndices[WAVE_GROUP_SIZE];
+    uint MeshletIndices[AS_GROUP_SIZE];
 };
 
 struct Vertex

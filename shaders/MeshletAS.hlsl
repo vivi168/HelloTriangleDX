@@ -1,4 +1,3 @@
-#include "Shared.h"
 #include "MeshletCommon.hlsli"
 
 cbuffer PerDrawConstants : register(b0)
@@ -61,7 +60,7 @@ bool IsVisible(MeshletData m, float4x4 world, float scale, float3 viewPos)
   return true;
 }
 
-[NumThreads(WAVE_GROUP_SIZE, 1, 1)]
+[NumThreads(AS_GROUP_SIZE, 1, 1)]
 void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gid : SV_GroupID)
 {
   bool visible = false;
