@@ -64,7 +64,7 @@ static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_ME
 struct SkinnedMeshInstance;
 
 struct MeshInstance {
-  struct {
+  struct MeshInstanceData {
     // TODO: keep this separate to minimize data transfer?
     struct {
       XMFLOAT4X4 WorldViewProj;
@@ -140,6 +140,7 @@ struct Scene {
   std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
   UINT numMeshInstances = 0;
   std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances;
+  UINT numBoneMatrices = 0;
 
   Camera* camera;
 };
@@ -454,7 +455,7 @@ struct MeshStore {
     return offset;
   }
 
-  void UpdateInstance(const void* data, size_t size, UINT offset, UINT frameIndex)
+  void UpdateInstances(const void* data, size_t size, UINT offset, UINT frameIndex)
   {
     m_Instances[frameIndex].Copy(offset, data, size);
   }
@@ -665,6 +666,9 @@ void Update(float time, float dt)
 
   // Per object constant buffer
   {
+    std::vector<MeshInstance::MeshInstanceData> tmpInstances(g_Scene.numMeshInstances);
+    std::vector<XMFLOAT4X4> tmpBoneMatrices(g_Scene.numBoneMatrices);
+
     const XMMATRIX projection = XMMatrixPerspectiveFovRH(45.f * (XM_PI / 180.f), g_AspectRatio, 0.1f, 1000.f);
 
     XMMATRIX view = g_Scene.camera->LookAt();
@@ -695,10 +699,8 @@ void Update(float time, float dt)
 
           for (auto &smi : node.skinnedMeshInstances) {
             // TODO: should reuse bone matrice buffer for meshes of same model which share skin
-            // TODO: should buffer these updates and do only one memcpy...
-            g_MeshStore.UpdateBoneMatrices(matrices.data(), sizeof(XMFLOAT4X4) * matrices.size(),
-                                           smi->offsets.boneMatricesBuffer * sizeof(XMFLOAT4X4), g_FrameIndex);
             // TODO: should also update the collision data...
+            std::copy(matrices.begin(), matrices.end(), tmpBoneMatrices.begin() + smi->offsets.boneMatricesBuffer);
           }
         }
       }  // else identity matrices ?
@@ -728,10 +730,15 @@ void Update(float time, float dt)
         XMMatrixDecompose(&scale, &rot, &pos, world);
         mi->data.matrices.scale = XMVectorGetX(scale);
 
-        // TODO: should buffer these updates and do only one memcpy...
-        g_MeshStore.UpdateInstance(&mi->data, sizeof(mi->data), mi->instanceBufferOffset, g_FrameIndex);
+        tmpInstances[mi->instanceBufferOffset / sizeof(MeshInstance::data)] = mi->data;
       }
     }
+
+    if (g_Scene.numBoneMatrices > 0) {
+      g_MeshStore.UpdateBoneMatrices(tmpBoneMatrices.data(), g_Scene.numBoneMatrices * sizeof(XMFLOAT4X4), 0,
+                                     g_FrameIndex);
+    }
+    g_MeshStore.UpdateInstances(tmpInstances.data(), g_Scene.numMeshInstances * sizeof(MeshInstance::data), 0, g_FrameIndex);
   }
 
   // ImGui
@@ -2081,6 +2088,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         mi->skinnedMeshInstance = smi;
 
         g_Scene.skinnedMeshInstances.push_back(smi);
+        g_Scene.numBoneMatrices += smi->numBoneMatrices;
       } else {
         mi->data.offsets.positionsBuffer =
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
@@ -2121,6 +2129,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         mi->skinnedMeshInstance = smi;
 
         g_Scene.skinnedMeshInstances.push_back(smi);
+        g_Scene.numBoneMatrices += smi->numBoneMatrices;
       }
     }
   }
