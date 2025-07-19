@@ -63,6 +63,13 @@ static constexpr size_t SkinningBuffersDescriptorIndicesNumValues = sizeof(Skinn
 static constexpr size_t CullingBuffersDescriptorIndicesNumValues = sizeof(CullingBuffersDescriptorIndices) / sizeof(hlsl_uint);
 #endif
 
+struct MaterialData {
+  hlsl_uint baseColorId;
+  hlsl_uint metallicRoughnessId;
+  hlsl_uint normalMapId;
+  hlsl_uint pad;
+};
+
 struct MeshletData {
   hlsl_uint numVerts;
   hlsl_uint firstVert;

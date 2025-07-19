@@ -9,32 +9,12 @@ ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
 
 ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
 
-uint3 UnpackPrimitive(uint primitive)
-{
-  return uint3(primitive & 0x3FF, (primitive >> 10) & 0x3FF, (primitive >> 20) & 0x3FF);
-}
-
-uint3 GetPrimitive(MeshletData m, uint primIndex)
-{
-  StructuredBuffer<uint> PrimitiveIndices = ResourceDescriptorHeap[g_DescIds.meshletsPrimitivesBufferId];
-
-  return UnpackPrimitive(PrimitiveIndices[m.firstPrim + primIndex]);
-}
-
-uint GetVertexIndex(MeshletData m, uint localIndex)
-{
-  localIndex = m.firstVert + localIndex;
-  StructuredBuffer<uint> UniqueVertexIndices = ResourceDescriptorHeap[g_DescIds.meshletVertIndicesBufferId];
-
-  return UniqueVertexIndices[localIndex];
-}
-
-Vertex GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex)
+VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex)
 {
   StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
   float3 position = positions[mi.firstPosition + vertexIndex];
 
-  Vertex vout;
+  VertexOut vout;
   vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
   vout.meshletIndex = meshletIndex;
 
@@ -61,7 +41,7 @@ void main(
     in payload ASPayload payload,
     out indices uint3 tris[MESHLET_MAX_PRIM],
     out primitives PRIM_OUT prims[MESHLET_MAX_PRIM],
-    out vertices Vertex verts[MESHLET_MAX_VERT]
+    out vertices VertexOut verts[MESHLET_MAX_VERT]
 )
 {
   StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.instancesBufferId];
@@ -77,8 +57,8 @@ void main(
 
   if (gtid < m.numVerts)
   {
-    uint vertexIndex = GetVertexIndex(m, mi.firstVertIndex + gtid);
-    Vertex v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex);
+    uint vertexIndex = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + gtid);
+    VertexOut v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex);
     verts[gtid] = v;
     s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, g_FrameConstants.ScreenSize), v.posCS.w);
   }
@@ -87,7 +67,7 @@ void main(
 
   if (gtid < m.numPrims)
   {
-    uint3 tri = GetPrimitive(m, mi.firstPrimitive + gtid);
+    uint3 tri = GetPrimitive(g_DescIds, mi.firstPrimitive + m.firstPrim + gtid);
     tris[gtid] = tri;
 
     bool culled = false;

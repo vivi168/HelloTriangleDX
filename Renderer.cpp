@@ -290,12 +290,7 @@ private:
 };
 
 struct Material {
-  struct {
-    UINT baseColorId;
-    UINT metallicRoughnessId;
-    UINT normalMapId;
-    UINT pad;
-  } m_GpuData;
+  MaterialData m_GpuData;
 
   UINT m_MaterialBufferOffset;
 
@@ -1534,7 +1529,7 @@ static void InitFrameResources()
     static constexpr size_t numIndices = 10'000'000;
     static constexpr size_t numPrimitives = 7'000'000;
     static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
-    static constexpr size_t numMeshlets = 50'000;
+    static constexpr size_t numMeshlets = 100'000;
     static constexpr size_t numMaterials = 5000;
     static constexpr size_t numMatrices = 3000;
 
@@ -2155,7 +2150,6 @@ static UINT CreateTexture(std::filesystem::path filename)
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
   tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
-  tex->SetName(L"Texture: " + filename.wstring());
   tex->MapOpaque();
 
   const Image* img = image.GetImage(0, 0, 0);
@@ -2176,6 +2170,7 @@ static UINT CreateTexture(std::filesystem::path filename)
   srvDesc.Texture2D.MipLevels = textureDesc.MipLevels;
 
   tex->AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+  tex->SetName(L"Texture: " + filename.wstring() + L" " + std::to_wstring(tex->SrvDescriptorIndex()));
   g_Device->CreateShaderResourceView(tex->Resource(), &srvDesc, tex->SrvDescriptorHandle());
 
   g_Textures[filename] = tex;
