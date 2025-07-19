@@ -6,6 +6,7 @@ cbuffer PerDispatch : register(b0)
   uint positionsBufferOffset;
   uint baseNormalsBufferOffset;
   uint normalsBufferOffset;
+  // TODO: tangent
   uint blendWeightsAndIndicesBufferOffset;
   uint boneMatricesBufferOffset;
   uint numVertices;

@@ -34,7 +34,7 @@ struct FrameConstants {
 struct BuffersDescriptorIndices {
   hlsl_uint vertexPositionsBufferId;
   hlsl_uint vertexNormalsBufferId;
-  // TODO: tangents
+  hlsl_uint vertexTangentsBufferId;
   hlsl_uint vertexUVsBufferId;
 
   hlsl_uint meshletsBufferId;
@@ -48,6 +48,7 @@ struct BuffersDescriptorIndices {
 struct SkinningBuffersDescriptorIndices {
   hlsl_uint vertexPositionsBufferId;
   hlsl_uint vertexNormalsBufferId;
+  hlsl_uint vertexTangentsBufferId;
   hlsl_uint vertexBlendWeightsAndIndicesBufferId;
   hlsl_uint boneMatricesBufferId;
 };
@@ -97,7 +98,7 @@ struct MeshInstanceData {
   // we could also do LODing. uint geometryId[MAX_LOD];
   hlsl_uint firstPosition;
   hlsl_uint firstNormal;
-  // TODO: tangents
+  hlsl_uint firstTangent;
   hlsl_uint firstUV;
 
   hlsl_uint firstMeshlet;
@@ -105,6 +106,7 @@ struct MeshInstanceData {
   hlsl_uint firstPrimitive;
 
   hlsl_uint numMeshlets;
+  hlsl_uint _pad[3];
 };
 
 #ifdef __cplusplus

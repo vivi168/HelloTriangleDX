@@ -76,9 +76,10 @@ struct Mesh3D {
   std::vector<uint32_t> indices;
   std::vector<Subset> subsets;
 
+  // TODO: upload packed data to GPU to save bandwidth
   std::vector<DirectX::XMFLOAT3> positions;
   std::vector<DirectX::XMFLOAT3> normals;
-  std::vector<DirectX::XMFLOAT4> tangents;
+  std::vector<DirectX::XMFLOAT4> tangents;  // W = bitangent sign
   std::vector<DirectX::XMFLOAT2> uvs;
   std::vector<DirectX::XMUINT2> blendWeightsAndIndices;
 
@@ -104,6 +105,8 @@ struct Mesh3D {
   size_t PositionsBufferSize() const { return sizeof(positions[0]) * header.numVerts; }
 
   size_t NormalsBufferSize() const { return sizeof(normals[0]) * header.numVerts; }
+
+  size_t TangentsBufferSize() const { return sizeof(tangents[0]) * header.numVerts; }
 
   size_t UvsBufferSize() const { return sizeof(uvs[0]) * header.numVerts; }
 

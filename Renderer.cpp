@@ -76,6 +76,7 @@ struct SkinnedMeshInstance {
   struct {
     UINT basePositionsBuffer;
     UINT baseNormalsBuffer;
+    UINT baseTangentsBuffer;
     UINT blendWeightsAndIndicesBuffer;
     UINT boneMatricesBuffer;
   } offsets;
@@ -88,6 +89,7 @@ struct SkinnedMeshInstance {
 
   static constexpr size_t NumOffsets = 7;
 
+  // TODO: share struct with HLSL cbuffer PerDispatch : register(b0)
   std::array<UINT, NumOffsets> BuffersOffsets() const
   {
     assert(meshInstance);
@@ -96,6 +98,7 @@ struct SkinnedMeshInstance {
         meshInstance->data.firstPosition,
         offsets.baseNormalsBuffer,
         meshInstance->data.firstNormal,
+        // TODO: baseTangent + firstTangent
         offsets.blendWeightsAndIndicesBuffer,
         offsets.boneMatricesBuffer,
         numVertices,
@@ -356,7 +359,22 @@ struct MeshStore {
     return offset;
   }
 
-  // TODO: Tangents
+  UINT CopyTangents(const void* data, size_t size)
+  {
+    UINT offset = m_CurrentOffsets.tangentsBuffer;
+    m_VertexTangents.Copy(offset, data, size);
+    m_CurrentOffsets.tangentsBuffer += size;
+
+    return offset;
+  }
+
+  UINT ReserveTangents(size_t size)
+  {
+    UINT offset = m_CurrentOffsets.tangentsBuffer;
+    m_CurrentOffsets.tangentsBuffer += size;
+
+    return offset;
+  }
 
   UINT CopyUVs(const void* data, size_t size)
   {
@@ -447,7 +465,7 @@ struct MeshStore {
     return {
         .vertexPositionsBufferId = m_VertexPositions.SrvDescriptorIndex(),
         .vertexNormalsBufferId = m_VertexNormals.SrvDescriptorIndex(),
-        // TODO: tangents
+        .vertexTangentsBufferId = m_VertexTangents.SrvDescriptorIndex(),
         .vertexUVsBufferId = m_VertexUVs.SrvDescriptorIndex(),
 
         .meshletsBufferId = m_Meshlets.SrvDescriptorIndex(),
@@ -464,6 +482,7 @@ struct MeshStore {
     return {
         .vertexPositionsBufferId = m_VertexPositions.UavDescriptorIndex(),
         .vertexNormalsBufferId = m_VertexNormals.UavDescriptorIndex(),
+        .vertexTangentsBufferId = m_VertexTangents.UavDescriptorIndex(),
         .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices.SrvDescriptorIndex(),
         .boneMatricesBufferId = m_BoneMatrices[frameIndex].SrvDescriptorIndex(),
     };
@@ -473,7 +492,7 @@ struct MeshStore {
 
   GpuBuffer m_VertexPositions;
   GpuBuffer m_VertexNormals;
-  // TODO: GpuBuffer m_VertexTangents;
+  GpuBuffer m_VertexTangents;
   GpuBuffer m_VertexUVs;
   GpuBuffer m_VertexBlendWeightsAndIndices;
 
@@ -490,7 +509,7 @@ struct MeshStore {
     // vertex data
     UINT positionsBuffer = 0;
     UINT normalsBuffer = 0;
-    // TODO: UINT tangentsBuffer = 0;
+    UINT tangentsBuffer = 0;
     UINT uvsBuffer = 0;
     UINT bwiBuffer = 0;
 
@@ -932,7 +951,8 @@ void Cleanup()
     g_MeshStore.m_VertexNormals.Unmap();
     g_MeshStore.m_VertexNormals.Reset();
 
-    // TODO: tangents
+    g_MeshStore.m_VertexTangents.Unmap();
+    g_MeshStore.m_VertexTangents.Reset();
 
     g_MeshStore.m_VertexUVs.Unmap();
     g_MeshStore.m_VertexUVs.Reset();
@@ -1588,12 +1608,30 @@ static void InitFrameResources()
       g_MeshStore.m_VertexNormals.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(g_MeshStore.m_VertexNormals.Resource(), &srvDesc,
                                          g_MeshStore.m_VertexNormals.SrvDescriptorHandle());
-
+      // TODO: we also need a UAV because we need to transform normals during skinning
     }
 
     // Tangents buffer
     {
-      // TODO...
+      size_t bufSiz = numVertices * sizeof(XMFLOAT4);
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+
+      g_MeshStore.m_VertexTangents.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+      g_MeshStore.m_VertexTangents.SetName(L"Tangents Store");
+      g_MeshStore.m_VertexTangents.Map();
+
+      // descriptor
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                              .Buffer = {.FirstElement = 0,
+                                                         .NumElements = static_cast<UINT>(numVertices),
+                                                         .StructureByteStride = sizeof(XMFLOAT4),
+                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      g_MeshStore.m_VertexTangents.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_MeshStore.m_VertexTangents.Resource(), &srvDesc,
+                                         g_MeshStore.m_VertexTangents.SrvDescriptorHandle());
+      // TODO: we also need a UAV because we need to transform tangents during skinning
     }
 
     // UVs buffer
@@ -2047,12 +2085,15 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         // in case of skinned mesh, these will be filled by a compute shader
         mi->data.firstPosition = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+        mi->data.firstTangent = g_MeshStore.ReserveTangents(mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
 
         auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets.basePositionsBuffer =
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         smi->offsets.baseNormalsBuffer =
             g_MeshStore.CopyNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+        smi->offsets.baseTangentsBuffer =
+            g_MeshStore.CopyTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
         smi->offsets.blendWeightsAndIndicesBuffer =
             g_MeshStore.CopyBWI(mesh->blendWeightsAndIndices.data(), mesh->BlendWeightsAndIndicesBufferSize()) /
             sizeof(XMUINT2);
@@ -2073,6 +2114,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal =
             g_MeshStore.CopyNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+        mi->data.firstTangent =
+            g_MeshStore.CopyTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
       }
 
       mi->data.firstUV = g_MeshStore.CopyUVs(mesh->uvs.data(), mesh->UvsBufferSize()) / sizeof(XMFLOAT2);
@@ -2090,7 +2133,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
       auto i = it->second[0];
       mi->data.firstPosition = i->data.firstPosition;
       mi->data.firstNormal = i->data.firstNormal;
-      // TODO: tangents
+      mi->data.firstTangent = i->data.firstTangent;
       mi->data.firstUV = i->data.firstUV;
 
       mi->data.firstMeshlet =
@@ -2102,6 +2145,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         // these will be filled by compute shader so we need new ones.
         mi->data.firstPosition = g_MeshStore.ReservePositions(mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal = g_MeshStore.ReserveNormals(mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+        mi->data.firstTangent = g_MeshStore.ReserveTangents(mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
 
         auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets = i->skinnedMeshInstance->offsets;
