@@ -1,16 +1,6 @@
 #include "Shared.h"
 
-cbuffer PerDispatch : register(b0)
-{
-  uint basePositionsBufferOffset;
-  uint positionsBufferOffset;
-  uint baseNormalsBufferOffset;
-  uint normalsBufferOffset;
-  // TODO: tangent
-  uint blendWeightsAndIndicesBufferOffset;
-  uint boneMatricesBufferOffset;
-  uint numVertices;
-};
+ConstantBuffer<SkinningPerDispatchContants> g_Constants : register(b0);
 
 ConstantBuffer<SkinningBuffersDescriptorIndices> g_DescIds : register(b1);
 
@@ -37,11 +27,11 @@ uint4 UnpackBoneIndices(uint bi)
 [numthreads(COMPUTE_GROUP_SIZE, 1, 1)]
 void main(uint dtid : SV_DispatchThreadID)
 {
-  if (dtid >= numVertices) return;
+  if (dtid >= g_Constants.numVertices) return;
 
-  uint basePositionIdx = dtid + basePositionsBufferOffset;
-  uint outPositionIdx = dtid + positionsBufferOffset;
-  uint bwiIdx = dtid + blendWeightsAndIndicesBufferOffset;
+  uint basePositionIdx = dtid + g_Constants.firstPosition;
+  uint outPositionIdx = dtid + g_Constants.firstSkinnedPosition;
+  uint bwiIdx = dtid + g_Constants.firstBWI;
 
   RWStructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
   StructuredBuffer<uint2> bwis = ResourceDescriptorHeap[g_DescIds.vertexBlendWeightsAndIndicesBufferId];
@@ -50,7 +40,7 @@ void main(uint dtid : SV_DispatchThreadID)
   float3 inPos = positions[basePositionIdx];
   uint2 bwi = bwis[bwiIdx];
   float4 boneWeights = UnpackBoneWeights(bwi.x);
-  uint4 boneIndices = UnpackBoneIndices(bwi.y) + boneMatricesBufferOffset;
+  uint4 boneIndices = UnpackBoneIndices(bwi.y) + g_Constants.firstBoneMatrix;
 
   float4 pos = float4(inPos, 1.0f);
   float4 skinnedPos = mul(pos, BoneMatrices[boneIndices.x]) * boneWeights.x +

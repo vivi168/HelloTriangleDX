@@ -87,21 +87,19 @@ struct SkinnedMeshInstance {
 
   size_t BoneMatricesBufferSize() const { return sizeof(XMFLOAT4X4) * numBoneMatrices; }
 
-  static constexpr size_t NumOffsets = 7;
-
-  // TODO: share struct with HLSL cbuffer PerDispatch : register(b0)
-  std::array<UINT, NumOffsets> BuffersOffsets() const
+  SkinningPerDispatchContants BuffersOffsets() const
   {
     assert(meshInstance);
     return {
-        offsets.basePositionsBuffer,
-        meshInstance->data.firstPosition,
-        offsets.baseNormalsBuffer,
-        meshInstance->data.firstNormal,
-        // TODO: baseTangent + firstTangent
-        offsets.blendWeightsAndIndicesBuffer,
-        offsets.boneMatricesBuffer,
-        numVertices,
+        .firstPosition = offsets.basePositionsBuffer,
+        .firstSkinnedPosition = meshInstance->data.firstPosition,
+        .firstNormal = offsets.baseNormalsBuffer,
+        .firstSkinnedNormal = meshInstance->data.firstNormal,
+        .firstTangent = meshInstance->data.firstTangent,
+        .firstSkinnedTangent = offsets.baseTangentsBuffer,
+        .firstBWI = offsets.blendWeightsAndIndicesBuffer,
+        .firstBoneMatrix = offsets.boneMatricesBuffer,
+        .numVertices = numVertices,
     };
   }
 };
@@ -812,7 +810,7 @@ void Render()
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
       g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
-                                                  SkinnedMeshInstance::NumOffsets, o.data(), 0);
+                                                  SkinningPerDispatchContantsNumValues, &o, 0);
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
@@ -1410,7 +1408,7 @@ static void InitFrameResources()
   {
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
-    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinnedMeshInstance::NumOffsets, 0);  // b0
+    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinningPerDispatchContantsNumValues, 0);  // b0
     rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
         SkinningBuffersDescriptorIndicesNumValues, 1);  // b1
 
