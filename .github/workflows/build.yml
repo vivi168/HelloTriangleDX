@@ -12,10 +12,8 @@ jobs:
       with:
         submodules: true
 
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v2
-      with:
-        msbuild-architecture: x64
+    - name: Configure Release
+      run: cmake -S . -B Release -G Ninja
 
     - name: Build Release
-      run: msbuild HelloTriangleDX.sln /p:Configuration=Release /p:Platform=x64
+      run: ninja -C Release

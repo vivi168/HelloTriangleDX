@@ -156,7 +156,7 @@ class Texture:
 
         # TODO: don't run conversion command here!! buffer the filenames for each format, and run in batch!!
         # TODO2: -pow2 option?
-        subprocess.run([texconv, in_img, "-y", "-f", self.ddsformat, "-m", "1", "-o", out_folder])
+        subprocess.run([texconv, in_img, "-y", "-f", self.ddsformat, "-o", out_folder])
         if out_dds_tmp is not None:
             os.replace(out_dds_tmp, out_dds)
 

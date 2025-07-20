@@ -11,6 +11,7 @@ ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
 ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
 
 SamplerState s0 : register(s0);
+SamplerState s1 : register(s1);
 
 struct Vertex {
   float4 posCS;
@@ -130,7 +131,7 @@ float4 main(float4 position : SV_Position) : SV_Target
   MaterialData material = materials[m.materialIndex];
 
   Texture2D baseColor = ResourceDescriptorHeap[NonUniformResourceIndex(material.baseColorId)];
-  float4 color = baseColor.SampleGrad(s0, uv, uv_ddx, uv_ddy);
+  float4 color = baseColor.SampleGrad(s1, uv, uv_ddx, uv_ddy);
 
   return color;
 }

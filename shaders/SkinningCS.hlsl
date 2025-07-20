@@ -1,6 +1,6 @@
 #include "Shared.h"
 
-ConstantBuffer<SkinningPerDispatchContants> g_Constants : register(b0);
+ConstantBuffer<SkinningPerDispatchConstants> g_Constants : register(b0);
 
 ConstantBuffer<SkinningBuffersDescriptorIndices> g_DescIds : register(b1);
 

@@ -87,7 +87,7 @@ struct SkinnedMeshInstance {
 
   size_t BoneMatricesBufferSize() const { return sizeof(XMFLOAT4X4) * numBoneMatrices; }
 
-  SkinningPerDispatchContants BuffersOffsets() const
+  SkinningPerDispatchConstants BuffersOffsets() const
   {
     assert(meshInstance);
     return {
@@ -251,6 +251,13 @@ struct GpuBuffer {
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT DstSubresource = 0)
   {
     resource->WriteToSubresource(DstSubresource, nullptr, data->pData, data->RowPitch, data->SlicePitch);
+  }
+
+  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0)
+  {
+    for (UINT i = 0; i < numSubresources; ++i) {
+      resource->WriteToSubresource(firstSubresource + i, nullptr, data[i].pData, data[i].RowPitch, data[i].SlicePitch);
+    }
   }
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
@@ -587,7 +594,7 @@ static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
 
 static GpuBuffer g_VisibilityBuffer;
-static GpuBuffer g_GBuffer;
+static GpuBuffer g_GBuffer; // we need multiple GpuBuffer for the G-Buffer.
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
@@ -810,7 +817,7 @@ void Render()
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
       g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
-                                                  SkinningPerDispatchContantsNumValues, &o, 0);
+                                                  SkinningPerDispatchConstantsNumValues, &o, 0);
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
@@ -1363,13 +1370,14 @@ static void InitFrameResources()
     rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(BuffersDescriptorIndicesNumValues, 2);  // b2
 
     // Static sampler
-    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[1] = {};
+    std::array<CD3DX12_STATIC_SAMPLER_DESC, 2> staticSamplers{};
     staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
+    staticSamplers[1].Init(1, D3D12_FILTER_ANISOTROPIC);
 
     // Root Signature
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-        RootParameter::Count, rootParameters, 1, staticSamplers, flags);
+        RootParameter::Count, rootParameters, staticSamplers.size(), staticSamplers.data(), flags);
 
     ID3DBlob* signatureBlobPtr;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
@@ -1408,7 +1416,7 @@ static void InitFrameResources()
   {
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
-    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinningPerDispatchContantsNumValues, 0);  // b0
+    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinningPerDispatchConstantsNumValues, 0);  // b0
     rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
         SkinningBuffersDescriptorIndicesNumValues, 1);  // b1
 
@@ -2194,14 +2202,11 @@ static UINT CreateTexture(std::filesystem::path filename)
   tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
   tex->MapOpaque();
 
-  const Image* img = image.GetImage(0, 0, 0);
+  std::vector<D3D12_SUBRESOURCE_DATA> subresources;
+  HRESULT hr = PrepareUpload(g_Device.Get(), image.GetImages(), image.GetImageCount(),
+                                      metadata, subresources);
 
-  D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
-  textureSubresourceData.pData = img->pixels;
-  textureSubresourceData.RowPitch = img->rowPitch;
-  textureSubresourceData.SlicePitch = img->slicePitch;
-
-  tex->Copy(&textureSubresourceData);
+  tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()), 0);
 
   tex->Unmap();
 

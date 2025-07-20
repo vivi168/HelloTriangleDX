@@ -53,7 +53,7 @@ struct SkinningBuffersDescriptorIndices {
   hlsl_uint boneMatricesBufferId;
 };
 
-struct SkinningPerDispatchContants {
+struct SkinningPerDispatchConstants {
   hlsl_uint firstPosition;
   hlsl_uint firstSkinnedPosition;
   hlsl_uint firstNormal;
@@ -74,7 +74,7 @@ struct CullingBuffersDescriptorIndices {
 static constexpr size_t BuffersDescriptorIndicesNumValues = sizeof(BuffersDescriptorIndices) / sizeof(hlsl_uint);
 static constexpr size_t SkinningBuffersDescriptorIndicesNumValues = sizeof(SkinningBuffersDescriptorIndices) / sizeof(hlsl_uint);
 static constexpr size_t CullingBuffersDescriptorIndicesNumValues = sizeof(CullingBuffersDescriptorIndices) / sizeof(hlsl_uint);
-static constexpr size_t SkinningPerDispatchContantsNumValues = sizeof(SkinningPerDispatchContants) / sizeof(hlsl_uint);
+static constexpr size_t SkinningPerDispatchConstantsNumValues = sizeof(SkinningPerDispatchConstants) / sizeof(hlsl_uint);
 #endif
 
 struct MaterialData {
