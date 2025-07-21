@@ -12,8 +12,6 @@
       "binaryDir": "${sourceDir}/Release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_C_COMPILER": "cl.exe",
-        "CMAKE_CXX_COMPILER": "cl.exe",
         "BC_USE_OPENMP": "OFF",
         "BUILD_DX11": "OFF",
         "BUILD_SAMPLE": "OFF",
@@ -27,8 +25,6 @@
       "binaryDir": "${sourceDir}/Debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_COMPILER": "cl.exe",
-        "CMAKE_CXX_COMPILER": "cl.exe",
         "BC_USE_OPENMP": "OFF",
         "BUILD_DX11": "OFF",
         "BUILD_SAMPLE": "OFF",
