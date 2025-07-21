@@ -111,7 +111,6 @@ foreach(HLSL ${HLSL_SOURCES})
       /nologo /E main /T ${SHADER_PROFILE}
       /Fo ${CSO}
       /Zi /Qembed_debug ${HLSL}
-    COMMENT "dxc"
     DEPENDS ${HLSL} ${HLSL_HEADERS})
   list(APPEND SHADER_BINARY_FILES ${CSO})
 endforeach()
