@@ -13,5 +13,5 @@ jobs:
     - uses: ilammy/msvc-dev-cmd@v1
 
     - run: |
-        cmake -S . -B Release -G Ninja -DCMAKE_BUILD_TYPE=Release
+        cmake -S . -B Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBC_USE_OPENMP=OFF -DBUILD_DX11=OFF -DBUILD_SAMPLE=OFF -DBUILD_TOOLS=OFF
         ninja -C Release
