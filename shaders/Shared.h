@@ -5,8 +5,11 @@
 #define COMPUTE_GROUP_SIZE 64
 #define MESHLET_MAX_PRIM 124
 #define MESHLET_MAX_VERT 64
+#define FILL_GBUFFER_GROUP_SIZE_X 16
+#define FILL_GBUFFER_GROUP_SIZE_Y 16
 
 #ifdef __cplusplus
+using hlsl_float3x3 = DirectX::XMFLOAT3X3;
 using hlsl_float4x4 = DirectX::XMFLOAT4X4;
 using hlsl_float4 = DirectX::XMFLOAT4;
 using hlsl_float3 = DirectX::XMFLOAT3;
@@ -16,6 +19,7 @@ using hlsl_bounding_sphere = DirectX::BoundingSphere;
 using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
 #else
 #define hlsl_float4x4 float4x4
+#define hlsl_float3x3 float3x3
 #define hlsl_float4 float4
 #define hlsl_float3 float3
 #define hlsl_float2 float2
@@ -70,6 +74,13 @@ struct CullingBuffersDescriptorIndices {
   hlsl_uint DrawMeshCommandsBufferId;
 };
 
+struct FillGBufferPerDispatchConstants {
+  hlsl_uint VisibilityBufferId;
+  hlsl_uint WorldPositionId;
+  hlsl_uint WorldNormalId;
+  hlsl_uint BaseColorId;
+};
+
 #ifdef __cplusplus
 static constexpr size_t BuffersDescriptorIndicesNumValues = sizeof(BuffersDescriptorIndices) / sizeof(hlsl_uint);
 static constexpr size_t SkinningBuffersDescriptorIndicesNumValues = sizeof(SkinningBuffersDescriptorIndices) / sizeof(hlsl_uint);
@@ -81,6 +92,8 @@ struct MaterialData {
   hlsl_uint baseColorId;
   hlsl_uint metallicRoughnessId;
   hlsl_uint normalMapId;
+
+  // TODO: Add double sided true/false?
   hlsl_uint pad;
 };
 
@@ -102,7 +115,7 @@ struct MeshInstanceData {
   // TODO: keep this separate to minimize data transfer?
   hlsl_float4x4 worldViewProj;
   hlsl_float4x4 worldMatrix;
-  hlsl_float4x4 normalMatrix;
+  hlsl_float3x3 normalMatrix;
   hlsl_float4 boundingSphere;
   float scale;
 
@@ -119,7 +132,9 @@ struct MeshInstanceData {
   hlsl_uint firstPrimitive;
 
   hlsl_uint numMeshlets;
-  hlsl_uint _pad[3];
+
+  // TODO: add skinned true/false?
+  hlsl_uint _pad[2];
 };
 
 #ifdef __cplusplus
