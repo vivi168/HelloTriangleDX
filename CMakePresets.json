@@ -1,0 +1,45 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20
+  },
+  "configurePresets": [
+    {
+      "name": "Release",
+      "displayName": "Release (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BC_USE_OPENMP": "OFF",
+        "BUILD_DX11": "OFF",
+        "BUILD_SAMPLE": "OFF",
+        "BUILD_TOOLS": "OFF"
+      }
+    },
+    {
+      "name": "Debug",
+      "displayName": "Debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BC_USE_OPENMP": "OFF",
+        "BUILD_DX11": "OFF",
+        "BUILD_SAMPLE": "OFF",
+        "BUILD_TOOLS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-release",
+      "configurePreset": "Release"
+    },
+    {
+      "name": "build-debug",
+      "configurePreset": "Debug"
+    }
+  ]
+}
