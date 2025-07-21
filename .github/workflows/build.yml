@@ -13,7 +13,7 @@ jobs:
         submodules: true
 
     - name: Configure Release
-      run: cmake -S . -B Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+      run: cmake -S . -B Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe
 
     - name: Build Release
       run: ninja -C Release
