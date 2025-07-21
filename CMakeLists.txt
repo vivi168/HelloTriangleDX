@@ -102,17 +102,17 @@ endfunction()
 
 set(SHADERS_OUTPUT_DIR ${PROJECT_BINARY_DIR})
 foreach(HLSL ${HLSL_SOURCES})
-  get_filename_component(STEM ${HLSL} NAME_WLE)
-  get_shader_profile(${STEM} SHADER_PROFILE)
-  set(CSO "${SHADERS_OUTPUT_DIR}/${STEM}.cso")
-  add_custom_command(
-    OUTPUT ${CSO}
-    COMMAND ${DXC_EXECUTABLE}
-      /nologo /E main /T ${SHADER_PROFILE}
-      /Fo ${CSO}
-      /Zi /Qembed_debug ${HLSL}
-    DEPENDS ${HLSL} ${HLSL_HEADERS})
-  list(APPEND SHADER_BINARY_FILES ${CSO})
+    get_filename_component(STEM ${HLSL} NAME_WLE)
+    get_shader_profile(${STEM} SHADER_PROFILE)
+    set(CSO "${SHADERS_OUTPUT_DIR}/${STEM}.cso")
+    add_custom_command(
+        OUTPUT ${CSO}
+        COMMAND ${DXC_EXECUTABLE}
+            /nologo /E main /T ${SHADER_PROFILE}
+            /Fo ${CSO}
+            /Zi /Qembed_debug ${HLSL}
+        DEPENDS ${HLSL} ${HLSL_HEADERS})
+    list(APPEND SHADER_BINARY_FILES ${CSO})
 endforeach()
 
 add_custom_target(compile_shaders DEPENDS ${SHADER_BINARY_FILES})
