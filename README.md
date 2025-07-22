@@ -4,6 +4,6 @@ For learning purpose.
 
 ```
 git submodule update --init --recursive
-cmake -B Release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --preset Release
 ninja -C Release
 ```
