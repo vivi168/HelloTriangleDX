@@ -42,7 +42,7 @@ Vertex GetVertexAttributes(MeshInstanceData mi, uint vertexIndex)
   vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
   vout.posWS = mul(float4(position, 1.0f), mi.worldMatrix);
   float3 normalWS = mul(normal, mi.normalMatrix);
-  float3 tangentWS = mul(tangent.xyz, mi.normalMatrix);
+  float3 tangentWS = mul(tangent.xyz, (float3x3)mi.worldMatrix);  // TODO: pass 3x3 matrix as constant?
   vout.normalWS = normalize(normalWS);
   vout.tangentWS = normalize(tangentWS);
   vout.bitangentSign = tangent.w;
@@ -141,6 +141,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
   // Compute Barycentrics
 
   float2 pixelCenter = position + 0.5;
+  // TODO: pass 1/ScreenSize as constant?
   float2 pixelNdc = float2((pixelCenter.x / g_FrameConstants.ScreenSize.x) * 2.0f - 1.0f, 1.0f - (pixelCenter.y / g_FrameConstants.ScreenSize.y) * 2.0f);
   BarycentricDeriv barycentrics = CalcFullBary(v0.posCS, v1.posCS, v2.posCS, pixelNdc, g_FrameConstants.ScreenSize);
 
