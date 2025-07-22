@@ -88,3 +88,5 @@ inline constexpr UINT AlignForUavCounter(UINT bufferSize)
   const UINT alignment = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
   return (bufferSize + (alignment - 1)) & ~(alignment - 1);
 }
+
+#define SizeOfInUint(x) ((sizeof(x) - 1) / sizeof(UINT) + 1)

@@ -355,7 +355,7 @@ struct FrameContext {
   SkinningBuffersDescriptorIndices skinningBuffersDescriptorsIndices;
   CullingBuffersDescriptorIndices cullingBuffersDescriptorsIndices;
 
-  static constexpr size_t frameConstantsSize = sizeof(frameConstants) / sizeof(UINT32);
+  static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
   GpuBuffer renderTarget;
 
@@ -877,7 +877,7 @@ void Render()
     g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
     g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
-                                                SkinningBuffersDescriptorIndicesNumValues,
+                                                SizeOfInUint(SkinningBuffersDescriptorIndices),
                                                 &ctx->skinningBuffersDescriptorsIndices, 0);
     auto b0 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -886,7 +886,7 @@ void Render()
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
       g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
-                                                  SkinningPerDispatchConstantsNumValues, &o, 0);
+                                                  SizeOfInUint(SkinningPerDispatchConstants), &o, 0);
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
@@ -905,7 +905,7 @@ void Render()
                                                  &ctx->frameConstants, 0);
 
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                CullingBuffersDescriptorIndicesNumValues,
+                                                SizeOfInUint(CullingBuffersDescriptorIndices),
                                                 &ctx->cullingBuffersDescriptorsIndices, 0);
 
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.numMeshInstances, 0);
@@ -935,7 +935,7 @@ void Render()
     g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
                                                  &ctx->frameConstants, 0);
     g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                 BuffersDescriptorIndicesNumValues,
+                                                 SizeOfInUint(BuffersDescriptorIndices),
                                                  &ctx->buffersDescriptorsIndices,
                                                  0);
 
@@ -971,11 +971,11 @@ void Render()
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer.SrvDescriptorIndex());
-    auto n = sizeof(c) / sizeof(UINT);
+    auto n = SizeOfInUint(c);
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::PerDrawConstants, n, &c, 0);
 
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                BuffersDescriptorIndicesNumValues, &ctx->buffersDescriptorsIndices, 0);
+                                                SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
 
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
 
@@ -1490,7 +1490,7 @@ static void InitFrameResources()
     rootParameters[RootParameter::PerDrawConstants].InitAsConstants(4, 0);  // b0, fill g-buffer use 4 constants
     // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
     rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
-    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(BuffersDescriptorIndicesNumValues, 2);  // b2
+    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(SizeOfInUint(BuffersDescriptorIndices), 2);  // b2
 
     // Static sampler
     std::array<CD3DX12_STATIC_SAMPLER_DESC, 2> staticSamplers{};
@@ -1520,7 +1520,7 @@ static void InitFrameResources()
     argDesc[0].Constant = {
         .RootParameterIndex = RootParameter::PerDrawConstants,
         .DestOffsetIn32BitValues = 0,
-        .Num32BitValuesToSet = sizeof(DrawMeshCommand::constants) / sizeof(UINT),
+        .Num32BitValuesToSet = SizeOfInUint(DrawMeshCommand::constants),
     };
     argDesc[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
 
@@ -1539,9 +1539,9 @@ static void InitFrameResources()
   {
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
-    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SkinningPerDispatchConstantsNumValues, 0);  // b0
+    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SizeOfInUint(SkinningPerDispatchConstants), 0);  // b0
     rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
-        SkinningBuffersDescriptorIndicesNumValues, 1);  // b1
+        SizeOfInUint(SkinningBuffersDescriptorIndices), 1);  // b1
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(SkinningCSRootParameter::Count, rootParameters, 0, nullptr, flags);
 

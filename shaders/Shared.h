@@ -81,13 +81,6 @@ struct FillGBufferPerDispatchConstants {
   hlsl_uint BaseColorId;
 };
 
-#ifdef __cplusplus
-static constexpr size_t BuffersDescriptorIndicesNumValues = sizeof(BuffersDescriptorIndices) / sizeof(hlsl_uint);
-static constexpr size_t SkinningBuffersDescriptorIndicesNumValues = sizeof(SkinningBuffersDescriptorIndices) / sizeof(hlsl_uint);
-static constexpr size_t CullingBuffersDescriptorIndicesNumValues = sizeof(CullingBuffersDescriptorIndices) / sizeof(hlsl_uint);
-static constexpr size_t SkinningPerDispatchConstantsNumValues = sizeof(SkinningPerDispatchConstants) / sizeof(hlsl_uint);
-#endif
-
 struct MaterialData {
   hlsl_uint baseColorId;
   hlsl_uint metallicRoughnessId;
