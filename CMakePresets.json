@@ -30,16 +30,21 @@
         "BUILD_SAMPLE": "OFF",
         "BUILD_TOOLS": "OFF"
       }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "build-release",
-      "configurePreset": "Release"
     },
     {
-      "name": "build-debug",
-      "configurePreset": "Debug"
+      "name": "Visual Studio",
+      "displayName": "Visual Studio",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build",
+      "architecture": "x64",
+      "cacheVariables": {
+        "BC_USE_OPENMP": "OFF",
+        "BUILD_DX11": "OFF",
+        "BUILD_SAMPLE": "OFF",
+        "BUILD_TOOLS": "OFF",
+        "CMAKE_CONFIGURATION_TYPES": "Debug;Release",
+        "CMAKE_VS_DEBUGGER_WORKING_DIRECTORY": "${sourceDir}"
+      }
     }
   ]
 }

@@ -1,9 +1,24 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.30)
 project(HelloTriangleDX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
+if(IS_MULTI_CONFIG)
+    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "")
+endif()
+
+if(MSVC)
+    add_compile_options(/W4 /MP)
+
+    if(IS_MULTI_CONFIG)
+        add_compile_options("$<$<CONFIG:RELEASE>:/Zi>")
+        add_link_options("$<$<CONFIG:RELEASE>:/DEBUG>")
+    endif()
+endif()
 
 add_subdirectory(third_party/DirectXMesh)
 add_subdirectory(third_party/DirectXTex)
@@ -100,7 +115,12 @@ function(get_shader_profile BASENAME OUTPUT_PROFILE)
     set(${OUTPUT_PROFILE} "${SM_TYPE}_6_6" PARENT_SCOPE)
 endfunction()
 
-set(SHADERS_OUTPUT_DIR ${PROJECT_BINARY_DIR})
+if (IS_MULTI_CONFIG)
+    set(SHADERS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/$<CONFIG>")
+else()
+    set(SHADERS_OUTPUT_DIR ${CMAKE_BINARY_DIR})
+endif()
+
 foreach(HLSL ${HLSL_SOURCES})
     get_filename_component(STEM ${HLSL} NAME_WLE)
     get_shader_profile(${STEM} SHADER_PROFILE)
