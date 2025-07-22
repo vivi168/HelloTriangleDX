@@ -243,7 +243,14 @@ struct GpuBuffer {
 
   void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { srvDescriptor.Alloc(allocator); }
 
-  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { uavDescriptor.AllocWithGpuHandle(allocator); }
+  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { uavDescriptor.Alloc(allocator); }
+
+  void AllocUavDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator) { uavDescriptor.AllocWithGpuHandle(allocator); }
+
+  void AllocUavReadWriteDescriptor(DescriptorHeapListAllocator& allocator)
+  {
+    uavReadWriteDescriptor.Alloc(allocator);
+  }
 
   void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { rtvDescriptor.Alloc(allocator); }
 
@@ -254,6 +261,8 @@ struct GpuBuffer {
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return srvDescriptor.CpuHandle(); }
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.CpuHandle(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE UavReadWriteDescriptorHandle() const { return uavReadWriteDescriptor.CpuHandle(); }
 
   D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return uavDescriptor.GpuHandle(); }
 
@@ -323,6 +332,7 @@ private:
   ComPtr<ID3D12Resource> resource;
   HeapDescriptor srvDescriptor;
   HeapDescriptor uavDescriptor;
+  HeapDescriptor uavReadWriteDescriptor;
   HeapDescriptor rtvDescriptor;
   D3D12MA::Allocation* allocation = nullptr;
   void* address = nullptr;
@@ -609,7 +619,9 @@ static HANDLE g_FenceEvent;
 
 // Resources
 static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
+static ComPtr<ID3D12DescriptorHeap> g_UavReadWriteDescriptorHeap;
 static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
+static DescriptorHeapListAllocator g_UavReadWriteDescHeapAlloc;
 
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
 static DescriptorHeapListAllocator g_RtvDescHeapAlloc;
@@ -841,19 +853,6 @@ void Render()
   static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
   g_CommandList->ClearRenderTargetView(g_VisibilityBuffer.RtvDescriptorHandle(), visBufferClearColor, 0, nullptr);
 
-  static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
-  static constexpr UINT clearUint[] = {0, 0, 0, 0};
-
-  g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
-                                               g_GBuffer.worldPosition.UavDescriptorHandle(),
-                                               g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
-  g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.worldNormal.UavDescriptorGpuHandle(),
-                                              g_GBuffer.worldNormal.UavDescriptorHandle(),
-                                              g_GBuffer.worldNormal.Resource(), clearUint, 0, nullptr);
-  g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.baseColor.UavDescriptorGpuHandle(),
-                                              g_GBuffer.baseColor.UavDescriptorHandle(), g_GBuffer.baseColor.Resource(),
-                                              clearUint, 0, nullptr);
-
   // Clear the render target by using the ClearRenderTargetView command
   if (g_Raster) {
     const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
@@ -955,6 +954,19 @@ void Render()
     before[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     before[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(before.size(), before.data());
+
+    static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    static constexpr UINT clearUint[] = {0, 0, 0, 0};
+
+    g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
+                                                 g_GBuffer.worldPosition.UavReadWriteDescriptorHandle(),
+                                                 g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
+    g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.worldNormal.UavDescriptorGpuHandle(),
+                                                g_GBuffer.worldNormal.UavReadWriteDescriptorHandle(),
+                                                g_GBuffer.worldNormal.Resource(), clearUint, 0, nullptr);
+    g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.baseColor.UavDescriptorGpuHandle(),
+                                                g_GBuffer.baseColor.UavReadWriteDescriptorHandle(),
+                                                g_GBuffer.baseColor.Resource(), clearUint, 0, nullptr);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
@@ -1423,14 +1435,29 @@ static void InitFrameResources()
   }
 
   // CBV_SRV_UAV descriptor heap
-  D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-  heapDesc.NumDescriptors = NUM_DESCRIPTORS_PER_HEAP;
-  heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-  heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-  CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc,
-                                          IID_PPV_ARGS(&g_SrvUavDescriptorHeap)));
+  {
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{
+        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        .NumDescriptors = NUM_DESCRIPTORS_PER_HEAP,
+        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+    };
+    CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_SrvUavDescriptorHeap)));
 
-  g_SrvUavDescHeapAlloc.Create(g_Device.Get(), g_SrvUavDescriptorHeap.Get());
+    g_SrvUavDescHeapAlloc.Create(g_Device.Get(), g_SrvUavDescriptorHeap.Get());
+  }
+
+  // NON SHADER VISIBLE (for use with ClearUnorderedAccessView)
+  {
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{
+        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        .NumDescriptors = NUM_DESCRIPTORS_PER_HEAP,
+        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+    };
+
+    CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_UavReadWriteDescriptorHeap)));
+
+    g_UavReadWriteDescHeapAlloc.Create(g_Device.Get(), g_UavReadWriteDescriptorHeap.Get());
+  }
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
@@ -2022,8 +2049,11 @@ static void InitFrameResources()
       buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(buffer.Resource(), &srvDesc, buffer.SrvDescriptorHandle());
 
-      buffer.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
+      buffer.AllocUavDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
       g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavDescriptorHandle());
+
+      buffer.AllocUavReadWriteDescriptor(g_UavReadWriteDescHeapAlloc);
+      g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavReadWriteDescriptorHandle());
     };
 
     InitGBuffer(g_GBuffer.worldPosition, GBUFFER_WORLD_POSITION_FORMAT, L"G-Buffer world position");
