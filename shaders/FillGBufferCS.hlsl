@@ -188,6 +188,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
   tangentSpaceNormal.z = sqrt(1.0 - saturate(dot(tangentSpaceNormal.xy, tangentSpaceNormal.xy)));
   float3 finalWorldNormal = normalize(mul(tangentSpaceNormal, tbn));
 
-  RWTexture2D<float4> worldNorm = ResourceDescriptorHeap[g_PerDispatchConstants.WorldNormalId];
-  worldNorm[position] = float4(finalWorldNormal, 1.0f);
+  RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_PerDispatchConstants.WorldNormalId];
+  gBufferWorldNorm[position] = float4(finalWorldNormal, 1.0f);
 }

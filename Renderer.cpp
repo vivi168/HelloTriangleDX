@@ -850,7 +850,7 @@ void Render()
       g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
       D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
-  static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
+  static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
   g_CommandList->ClearRenderTargetView(g_VisibilityBuffer.RtvDescriptorHandle(), visBufferClearColor, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
@@ -957,13 +957,12 @@ void Render()
 
     static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
     static constexpr UINT clearUint[] = {0, 0, 0, 0};
-
-    g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
-                                                 g_GBuffer.worldPosition.UavReadWriteDescriptorHandle(),
-                                                 g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
-    g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.worldNormal.UavDescriptorGpuHandle(),
-                                                g_GBuffer.worldNormal.UavReadWriteDescriptorHandle(),
-                                                g_GBuffer.worldNormal.Resource(), clearUint, 0, nullptr);
+    // g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
+    //                                              g_GBuffer.worldPosition.UavReadWriteDescriptorHandle(),
+    //                                              g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
+    // g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.worldNormal.UavDescriptorGpuHandle(),
+    //                                             g_GBuffer.worldNormal.UavReadWriteDescriptorHandle(),
+    //                                             g_GBuffer.worldNormal.Resource(), clearUint, 0, nullptr);
     g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.baseColor.UavDescriptorGpuHandle(),
                                                 g_GBuffer.baseColor.UavReadWriteDescriptorHandle(),
                                                 g_GBuffer.baseColor.Resource(), clearUint, 0, nullptr);
@@ -1999,9 +1998,8 @@ static void InitFrameResources()
     textureDesc.MipLevels = 1;
     textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    D3D12_CLEAR_VALUE clear{.Format = textureDesc.Format, .Color = {0.0f, 0.0f, 0.0f, 1.0f}};
-    g_VisibilityBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc,
-                                      D3D12_RESOURCE_STATE_COMMON, &clear);
+    D3D12_CLEAR_VALUE clear{.Format = textureDesc.Format, .Color = {0.0f, 0.0f, 0.0f, 0.0f}};
+    g_VisibilityBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, &clear);
     g_VisibilityBuffer.SetName(L"Visibility Buffer");
 
     // descriptor
@@ -2034,7 +2032,6 @@ static void InitFrameResources()
       textureDesc.MipLevels = 1;
       textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-      D3D12_CLEAR_VALUE clearValue{.Format = format, .Color = {0.0f, 0.0f, 0.0f, 1.0f}};
       buffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
       buffer.SetName(name);
 
