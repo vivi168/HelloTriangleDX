@@ -34,6 +34,7 @@ static constexpr DXGI_FORMAT VISIBILITY_BUFFER_FORMAT = DXGI_FORMAT_R32_UINT;
 static constexpr DXGI_FORMAT GBUFFER_WORLD_POSITION_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
 static constexpr DXGI_FORMAT GBUFFER_WORLD_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;
 static constexpr DXGI_FORMAT GBUFFER_BASE_COLOR_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+static constexpr DXGI_FORMAT GBUFFER_METALLIC_ROUGHNESS_FORMAT = DXGI_FORMAT_R8G8_UNORM;
 static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
 static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
@@ -50,6 +51,23 @@ enum Slots : size_t { PerDrawConstants = 0, FrameConstants, BuffersDescriptorInd
 namespace SkinningCSRootParameter
 {
 enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
+}
+
+namespace Timestamp
+{
+enum Timestamps {
+  SkinBegin = 0,
+  SkinEnd,
+  CullBegin,
+  CullEnd,
+  DrawBegin,
+  DrawEnd,
+  ClearGBufferBegin,
+  ClearGBufferEnd,
+  FillGBufferBegin,
+  FillGBufferEnd,
+  Count
+};
 }
 
 // ========== Structs
@@ -243,6 +261,8 @@ struct GpuBuffer {
 
   void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { srvDescriptor.Alloc(allocator); }
 
+  void AllocSrvDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator) { srvDescriptor.AllocWithGpuHandle(allocator); }
+
   void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { uavDescriptor.Alloc(allocator); }
 
   void AllocUavDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator) { uavDescriptor.AllocWithGpuHandle(allocator); }
@@ -259,6 +279,8 @@ struct GpuBuffer {
   UINT UavDescriptorIndex() const { return uavDescriptor.Index(); }
 
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return srvDescriptor.CpuHandle(); }
+
+  D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return srvDescriptor.GpuHandle(); }
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.CpuHandle(); }
 
@@ -281,6 +303,8 @@ struct GpuBuffer {
   }
 
   void Map() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, &address)); }
+
+  void Map(D3D12_RANGE *pReadRange, void** ppData) { CHECK_HR(resource->Map(0, pReadRange, ppData)); }
 
   void MapOpaque() { CHECK_HR(resource->Map(0, &EMPTY_RANGE, nullptr)); }
 
@@ -358,6 +382,7 @@ struct FrameContext {
   static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
   GpuBuffer renderTarget;
+  GpuBuffer timestampReadBackBuffer;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
   ComPtr<ID3D12Fence> fence;
@@ -365,6 +390,7 @@ struct FrameContext {
 
   void Reset() {
     renderTarget.Reset();
+    timestampReadBackBuffer.Reset();
     commandAllocator.Reset();
     fence.Reset();
   }
@@ -629,6 +655,8 @@ static DescriptorHeapListAllocator g_RtvDescHeapAlloc;
 static GpuBuffer g_DepthStencilBuffer;
 static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
 
+static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
+
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
 static ComPtr<ID3D12RootSignature> g_RootSignature;
@@ -812,6 +840,60 @@ void Update(float time, float dt)
     ImGui::Checkbox("Raster", &g_Raster);
     ImGui::End();
   }
+
+  {
+    ImGui::Begin("Timestamps");
+
+    UINT64* timestamps = nullptr;
+    ctx->timestampReadBackBuffer.Map(nullptr, (void**)&timestamps);
+
+    UINT64 frequency;
+    g_CommandQueue->GetTimestampFrequency(&frequency);
+
+    auto issou = [&frequency](UINT64 begin, UINT64 end) {
+      UINT64 delta = end - begin;
+
+      return static_cast<double>(delta) / frequency * 1000.0;
+    };
+
+    ImGui::Text("Skinning: %lf", issou(timestamps[Timestamp::SkinBegin], timestamps[Timestamp::SkinEnd]));
+    ImGui::Text("Culling: %lf", issou(timestamps[Timestamp::CullBegin], timestamps[Timestamp::CullEnd]));
+    ImGui::Text("Raster: %lf", issou(timestamps[Timestamp::DrawBegin], timestamps[Timestamp::DrawEnd]));
+    ImGui::Text("Clear G-Buffer: %lf", issou(timestamps[Timestamp::ClearGBufferBegin], timestamps[Timestamp::ClearGBufferEnd]));
+    ImGui::Text("Fill G-Buffer: %lf", issou(timestamps[Timestamp::FillGBufferBegin], timestamps[Timestamp::FillGBufferEnd]));
+
+    ctx->timestampReadBackBuffer.Unmap();
+
+    ImGui::End();
+  }
+
+  {
+    float scale = 0.25;
+    auto imgSize = ImVec2((float)g_Width * scale, (float)g_Height * scale);
+
+    ImGui::Begin("GBuffer viewer");
+
+    if (ImGui::BeginTabBar("GBufferTabs")) {
+      if (ImGui::BeginTabItem("Normal")) {
+        ImGui::Image((ImTextureID)g_GBuffer.worldNormal.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Position")) {
+        ImGui::Image((ImTextureID)g_GBuffer.worldPosition.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Base Color")) {
+        ImGui::Image((ImTextureID)g_GBuffer.baseColor.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::EndTabItem();
+      }
+
+      ImGui::EndTabBar();
+    }
+
+    ImGui::End();
+  }
 }
 
 void Render()
@@ -883,6 +965,7 @@ void Render()
                                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &b0);
 
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
       g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
@@ -890,6 +973,8 @@ void Render()
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
+
     auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &b1);
@@ -916,7 +1001,9 @@ void Render()
     auto before = g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &before);
 
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
     g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
 
     auto after =
         g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
@@ -939,8 +1026,10 @@ void Render()
                                                  &ctx->buffersDescriptorsIndices,
                                                  0);
 
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
                                    0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
 
     auto after =
         g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -957,6 +1046,8 @@ void Render()
 
     static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
     static constexpr UINT clearUint[] = {0, 0, 0, 0};
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ClearGBufferBegin);
     // g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
     //                                              g_GBuffer.worldPosition.UavReadWriteDescriptorHandle(),
     //                                              g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
@@ -966,6 +1057,7 @@ void Render()
     g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.baseColor.UavDescriptorGpuHandle(),
                                                 g_GBuffer.baseColor.UavReadWriteDescriptorHandle(),
                                                 g_GBuffer.baseColor.Resource(), clearUint, 0, nullptr);
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ClearGBufferEnd);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
@@ -976,7 +1068,9 @@ void Render()
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
                                                 SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
 
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
 
     std::array<D3D12_RESOURCE_BARRIER, 3> after;
     after[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -1013,6 +1107,9 @@ void Render()
       g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
   g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
+
+  g_CommandList->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
+                                  ctx->timestampReadBackBuffer.Resource(), 0);
 
   CHECK_HR(g_CommandList->Close());
 
@@ -1456,6 +1553,15 @@ static void InitFrameResources()
     CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_UavReadWriteDescriptorHeap)));
 
     g_UavReadWriteDescHeapAlloc.Create(g_Device.Get(), g_UavReadWriteDescriptorHeap.Get());
+  }
+
+  // Query heap
+  {
+    D3D12_QUERY_HEAP_DESC queryHeapDesc{
+        .Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
+        .Count = Timestamp::Count,
+    };
+    g_Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&g_TimestampQueryHeap));
   }
 
   // Setup Platform/Renderer backends
@@ -2043,7 +2149,7 @@ static void InitFrameResources()
       D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
           .Format = format, .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D, .Texture2D = {}};
 
-      buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      buffer.AllocSrvDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(buffer.Resource(), &srvDesc, buffer.SrvDescriptorHandle());
 
       buffer.AllocUavDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
@@ -2067,6 +2173,19 @@ static void InitFrameResources()
         .InstancesBufferId = g_MeshStore.InstancesBufferId(i),
         .DrawMeshCommandsBufferId = g_DrawMeshCommands.UavDescriptorIndex(),
     };
+  }
+
+  // timestamp readback buffer
+  {
+    size_t bufSize = sizeof(UINT64) * Timestamp::Count;
+
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_READBACK};
+    D3D12_RESOURCE_DESC readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize);
+
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      g_FrameContext[i].timestampReadBackBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &readbackDesc);
+      g_FrameContext[i].timestampReadBackBuffer.SetName(std::format(L"Timestamp Readback Buffer {}", i));
+    }
   }
 }
 
