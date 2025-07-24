@@ -15,5 +15,7 @@ float4 main(float4 position : SV_Position) : SV_Target
   Texture2D<float4> tex = ResourceDescriptorHeap[GBufferBaseColorId];
   float4 color = tex.Load(int3(position.xy, 0));
 
+  if (all(color == 0)) discard;
+
   return color;
 }

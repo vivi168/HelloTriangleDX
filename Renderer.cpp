@@ -62,10 +62,10 @@ enum Timestamps : size_t {
   CullEnd,
   DrawBegin,
   DrawEnd,
-  ClearGBufferBegin,
-  ClearGBufferEnd,
   FillGBufferBegin,
   FillGBufferEnd,
+  TotalBegin,
+  TotalEnd,
   Count
 };
 }
@@ -861,8 +861,8 @@ void Update(float time, float dt)
     ImGui::Text("Skinning: %.4f ms", GetTime(Timestamp::SkinBegin));
     ImGui::Text("Culling: %.4f ms", GetTime(Timestamp::CullBegin));
     ImGui::Text("Raster: %.4f ms", GetTime(Timestamp::DrawBegin));
-    ImGui::Text("Clear G-Buffer: %.4f ms", GetTime(Timestamp::ClearGBufferBegin));
     ImGui::Text("Fill G-Buffer: %.4f ms", GetTime(Timestamp::FillGBufferBegin));
+    ImGui::Text("Total: %.4f ms", GetTime(Timestamp::TotalBegin));
 
     ctx->timestampReadBackBuffer.Unmap();
 
@@ -916,6 +916,7 @@ void Render()
 
   // here we start recording commands into the g_CommandList (which all the
   // commands will be stored in the g_CommandAllocators)
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
 
   // transition the "g_FrameIndex" render target from the present state to the
   // render target state so the command list draws to it starting from here
@@ -1049,18 +1050,6 @@ void Render()
     static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
     static constexpr UINT clearUint[] = {0, 0, 0, 0};
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ClearGBufferBegin);
-    // g_CommandList->ClearUnorderedAccessViewFloat(g_GBuffer.worldPosition.UavDescriptorGpuHandle(),
-    //                                              g_GBuffer.worldPosition.UavReadWriteDescriptorHandle(),
-    //                                              g_GBuffer.worldPosition.Resource(), clearFloat, 0, nullptr);
-    // g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.worldNormal.UavDescriptorGpuHandle(),
-    //                                             g_GBuffer.worldNormal.UavReadWriteDescriptorHandle(),
-    //                                             g_GBuffer.worldNormal.Resource(), clearUint, 0, nullptr);
-    g_CommandList->ClearUnorderedAccessViewUint(g_GBuffer.baseColor.UavDescriptorGpuHandle(),
-                                                g_GBuffer.baseColor.UavReadWriteDescriptorHandle(),
-                                                g_GBuffer.baseColor.Resource(), clearUint, 0, nullptr);
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ClearGBufferEnd);
-
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer.SrvDescriptorIndex());
@@ -1109,6 +1098,8 @@ void Render()
       g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
   g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
+
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
 
   g_CommandList->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
                                   ctx->timestampReadBackBuffer.Resource(), 0);

@@ -120,7 +120,18 @@ void main(uint3 dtid : SV_DispatchThreadID)
   Texture2D<uint> tex = ResourceDescriptorHeap[g_PerDispatchConstants.VisibilityBufferId];
   uint value = tex.Load(int3(position, 0));
 
-  if (value == 0) return;
+  if (value == 0) {
+    RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_PerDispatchConstants.BaseColorId];
+    gBufferBaseColor[position] = float4(0, 0, 0, 0);
+
+    RWTexture2D<float4> gBufferWorldPos = ResourceDescriptorHeap[g_PerDispatchConstants.WorldPositionId];
+    gBufferWorldPos[position] = float4(0, 0, 0, 0);
+
+    RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_PerDispatchConstants.WorldNormalId];
+    gBufferWorldNorm[position] = float4(0, 0, 0, 0);
+
+    return;
+  }
 
   Visibility vis = UnpackVisibility(value);
 
