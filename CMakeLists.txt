@@ -12,9 +12,9 @@ if(IS_MULTI_CONFIG)
 endif()
 
 if(MSVC)
-    add_compile_options(/W4 /MP)
+    add_compile_options(/W4 /MP /permissive-)
 
-    if(IS_MULTI_CONFIG)
+    if(CMAKE_GENERATOR MATCHES "Visual Studio")
         add_compile_options("$<$<CONFIG:RELEASE>:/Zi>")
         add_link_options("$<$<CONFIG:RELEASE>:/DEBUG>")
     endif()
@@ -61,13 +61,25 @@ set(SOURCES
     Main.cpp
     Mesh.cpp
     Renderer.cpp
-    stdafx.cpp
     Win32Application.cpp
     ${THIRD_PARTY_SOURCE})
 
-add_executable(${PROJECT_NAME} ${SOURCES})
+set(HEADERS
+    Camera.h
+    Collider.h
+    Game.h
+    Input.h
+    Mesh.h
+    Renderer.h
+    RendererHelper.h
+    Win32Application.h
+    ${SHADERS_DIR}/Shared.h)
 
-target_precompile_headers(${PROJECT_NAME} PRIVATE ${PCH_HEADER})
+set(STDAFX_HEADER stdafx.h)
+
+add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${STDAFX_HEADER})
+
+target_precompile_headers(${PROJECT_NAME} PRIVATE ${STDAFX_HEADER})
 set_source_files_properties(${THIRD_PARTY_SOURCE} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_include_directories(HelloTriangleDX PRIVATE
