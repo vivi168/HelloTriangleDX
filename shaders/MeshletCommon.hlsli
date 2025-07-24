@@ -5,12 +5,15 @@
 struct ASPayload
 {
     uint MeshletIndices[AS_GROUP_SIZE];
+    uint TextureIndices[AS_GROUP_SIZE];
 };
 
 struct VertexOut
 {
   float4 posCS : SV_POSITION;
+  float2 uv : TEXCOORD0;
   uint meshletIndex : COLOR0;
+  uint textureIndex : COLOR1;
 };
 
 uint3 UnpackPrimitive(uint primitive)

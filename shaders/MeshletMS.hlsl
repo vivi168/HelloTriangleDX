@@ -9,14 +9,19 @@ ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
 
 ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
 
-VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex)
+VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex, uint textureIndex)
 {
   StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
   float3 position = positions[mi.firstPosition + vertexIndex];
 
+  StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_DescIds.vertexUVsBufferId];
+  float2 uv = uvs[mi.firstUV + vertexIndex];
+
   VertexOut vout;
   vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
   vout.meshletIndex = meshletIndex;
+  vout.textureIndex = textureIndex;
+  vout.uv = uv;
 
   return vout;
 }
@@ -48,6 +53,8 @@ void main(
   MeshInstanceData mi = meshInstances[InstanceIndex];
 
   uint meshletIndex = payload.MeshletIndices[gid];
+  uint textureIndex = payload.TextureIndices[gid];
+
   if (meshletIndex >= mi.numMeshlets) return;
 
   StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
@@ -58,7 +65,7 @@ void main(
   if (gtid < m.numVerts)
   {
     uint vertexIndex = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + gtid);
-    VertexOut v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex);
+    VertexOut v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex, textureIndex);
     verts[gtid] = v;
     s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, g_FrameConstants.ScreenSize), v.posCS.w);
   }

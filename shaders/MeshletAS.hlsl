@@ -71,6 +71,9 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
   StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
   MeshletData m = meshlets[mi.firstMeshlet + dtid];
 
+  StructuredBuffer<MaterialData> materials = ResourceDescriptorHeap[g_DescIds.materialsBufferId];
+  MaterialData material = materials[m.materialIndex];
+
   if (dtid < mi.numMeshlets) {
     visible = IsVisible(m, mi.worldMatrix, mi.scale, g_FrameConstants.CameraWS);
   }
@@ -78,6 +81,7 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
   if (visible) {
     uint index = WavePrefixCountBits(visible);
     s_Payload.MeshletIndices[index] = dtid;
+    s_Payload.TextureIndices[index] = material.baseColorId;
   }
 
   uint visibleCount = WaveActiveCountBits(visible);
