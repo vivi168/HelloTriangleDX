@@ -55,7 +55,7 @@ enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 
 namespace Timestamp
 {
-enum Timestamps {
+enum Timestamps : size_t {
   SkinBegin = 0,
   SkinEnd,
   CullBegin,
@@ -850,17 +850,19 @@ void Update(float time, float dt)
     UINT64 frequency;
     g_CommandQueue->GetTimestampFrequency(&frequency);
 
-    auto issou = [&frequency](UINT64 begin, UINT64 end) {
+    auto GetTime = [&frequency, &timestamps](size_t i) {
+      UINT64 begin = timestamps[i];
+      UINT64 end = timestamps[i+1];
       UINT64 delta = end - begin;
 
       return static_cast<double>(delta) / frequency * 1000.0;
     };
 
-    ImGui::Text("Skinning: %lf", issou(timestamps[Timestamp::SkinBegin], timestamps[Timestamp::SkinEnd]));
-    ImGui::Text("Culling: %lf", issou(timestamps[Timestamp::CullBegin], timestamps[Timestamp::CullEnd]));
-    ImGui::Text("Raster: %lf", issou(timestamps[Timestamp::DrawBegin], timestamps[Timestamp::DrawEnd]));
-    ImGui::Text("Clear G-Buffer: %lf", issou(timestamps[Timestamp::ClearGBufferBegin], timestamps[Timestamp::ClearGBufferEnd]));
-    ImGui::Text("Fill G-Buffer: %lf", issou(timestamps[Timestamp::FillGBufferBegin], timestamps[Timestamp::FillGBufferEnd]));
+    ImGui::Text("Skinning: %.4f ms", GetTime(Timestamp::SkinBegin));
+    ImGui::Text("Culling: %.4f ms", GetTime(Timestamp::CullBegin));
+    ImGui::Text("Raster: %.4f ms", GetTime(Timestamp::DrawBegin));
+    ImGui::Text("Clear G-Buffer: %.4f ms", GetTime(Timestamp::ClearGBufferBegin));
+    ImGui::Text("Fill G-Buffer: %.4f ms", GetTime(Timestamp::FillGBufferBegin));
 
     ctx->timestampReadBackBuffer.Unmap();
 
