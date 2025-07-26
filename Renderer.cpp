@@ -267,11 +267,6 @@ struct GpuBuffer {
 
   void AllocUavDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator) { uavDescriptor.AllocWithGpuHandle(allocator); }
 
-  void AllocUavReadWriteDescriptor(DescriptorHeapListAllocator& allocator)
-  {
-    uavReadWriteDescriptor.Alloc(allocator);
-  }
-
   void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { rtvDescriptor.Alloc(allocator); }
 
   UINT SrvDescriptorIndex() const { return srvDescriptor.Index(); }
@@ -283,8 +278,6 @@ struct GpuBuffer {
   D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return srvDescriptor.GpuHandle(); }
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return uavDescriptor.CpuHandle(); }
-
-  D3D12_CPU_DESCRIPTOR_HANDLE UavReadWriteDescriptorHandle() const { return uavReadWriteDescriptor.CpuHandle(); }
 
   D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return uavDescriptor.GpuHandle(); }
 
@@ -356,7 +349,6 @@ private:
   ComPtr<ID3D12Resource> resource;
   HeapDescriptor srvDescriptor;
   HeapDescriptor uavDescriptor;
-  HeapDescriptor uavReadWriteDescriptor;
   HeapDescriptor rtvDescriptor;
   D3D12MA::Allocation* allocation = nullptr;
   void* address = nullptr;
@@ -645,9 +637,7 @@ static HANDLE g_FenceEvent;
 
 // Resources
 static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
-static ComPtr<ID3D12DescriptorHeap> g_UavReadWriteDescriptorHeap;
 static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
-static DescriptorHeapListAllocator g_UavReadWriteDescHeapAlloc;
 
 static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
 static DescriptorHeapListAllocator g_RtvDescHeapAlloc;
@@ -1535,19 +1525,6 @@ static void InitFrameResources()
     g_SrvUavDescHeapAlloc.Create(g_Device.Get(), g_SrvUavDescriptorHeap.Get());
   }
 
-  // NON SHADER VISIBLE (for use with ClearUnorderedAccessView)
-  {
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{
-        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        .NumDescriptors = NUM_DESCRIPTORS_PER_HEAP,
-        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-    };
-
-    CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_UavReadWriteDescriptorHeap)));
-
-    g_UavReadWriteDescHeapAlloc.Create(g_Device.Get(), g_UavReadWriteDescriptorHeap.Get());
-  }
-
   // Query heap
   {
     D3D12_QUERY_HEAP_DESC queryHeapDesc{
@@ -2147,9 +2124,6 @@ static void InitFrameResources()
 
       buffer.AllocUavDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
       g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavDescriptorHandle());
-
-      buffer.AllocUavReadWriteDescriptor(g_UavReadWriteDescHeapAlloc);
-      g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavReadWriteDescriptorHandle());
     };
 
     InitGBuffer(g_GBuffer.worldPosition, GBUFFER_WORLD_POSITION_FORMAT, L"G-Buffer world position");
