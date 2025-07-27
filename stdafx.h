@@ -13,13 +13,14 @@
 #include <dxgi1_6.h>
 #include <initguid.h>
 
-#include <DirectXMath.h>
-#include "DirectXMesh.h"
-
 #include "d3dx12_barriers.h"
 #include "d3dx12_pipeline_state_stream.h"
 #include "d3dx12_resource_helpers.h"
 #include "d3dx12_root_signature.h"
+
+#include <DirectXMath.h>
+#include <DirectXMesh.h>
+#include <DirectXTex.h>
 
 #include "D3D12MemAlloc.h"
 
@@ -34,11 +35,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <list>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <stack>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -56,8 +59,6 @@
 static_assert(sizeof(WORD) == 2);
 static_assert(sizeof(DWORD) == 4);
 static_assert(sizeof(UINT) == 4);
-
-#include "shaders/Shared.h"
 
 #define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x

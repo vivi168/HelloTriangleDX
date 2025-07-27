@@ -1,7 +1,6 @@
 #pragma once
 
-#include <string>
-#include <vector>
+#include "shaders/Shared.h"
 
 typedef WCHAR FILENAME[MAX_PATH];
 

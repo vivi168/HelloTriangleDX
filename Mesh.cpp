@@ -3,8 +3,6 @@
 #include "Mesh.h"
 #include "Renderer.h"
 
-#include <stack>
-
 using namespace DirectX;
 
 static XMVECTOR zero = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);

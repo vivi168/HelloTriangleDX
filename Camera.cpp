@@ -2,8 +2,6 @@
 #include "Camera.h"
 #include "Input.h"
 
-#include <limits>
-
 using namespace DirectX;
 
 static constexpr float epsilon = std::numeric_limits<float>::epsilon();

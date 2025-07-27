@@ -64,8 +64,6 @@ inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
   return blob;
 }
 
-static const D3D12_RANGE EMPTY_RANGE = {0, 0};
-
 const uint32_t VENDOR_ID_AMD = 0x1002;
 const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
 const uint32_t VENDOR_ID_INTEL = 0x8086;

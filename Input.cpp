@@ -1,8 +1,6 @@
 #include "stdafx.h"
 #include "Input.h"
 
-#include <unordered_map>
-
 namespace Input
 {
 struct KeyState {
