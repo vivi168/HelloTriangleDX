@@ -85,12 +85,46 @@ struct DrawMeshCommand {
 static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommand);
 static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
+struct AccelerationStructure {
+  GpuBuffer resultData;
+  GpuBuffer scratch;
+
+  void CreateResource(D3D12MA::Allocator* allocator, size_t resultDataSize, size_t scratchSize)
+  {
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
+
+    {
+      size_t bufSize = resultDataSize;
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+      scratch.CreateResource(allocator, &allocDesc, &bufferDesc);
+      scratch.SetName(L"Acceleration structure Scratch Resource");
+    }
+
+    {
+      size_t bufSize = resultDataSize;
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+      resultData.CreateResource(allocator, &allocDesc, &bufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+      resultData.SetName(L"Acceleration structure Resource");
+    }
+  }
+
+  void Reset()
+  {
+    resultData.Reset();
+    scratch.Reset();
+  }
+};
+
 struct SkinnedMeshInstance;
 
 struct MeshInstance {
   MeshInstanceData data;
 
   UINT instanceBufferOffset;
+  UINT indexBufferOffset;
+  UINT rtInstanceOffset;
+  D3D12_GPU_VIRTUAL_ADDRESS blasBufferAddress = 0;
+
   std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
   std::shared_ptr<Mesh3D> mesh = nullptr;
 };
@@ -137,10 +171,23 @@ struct Scene {
 
   std::vector<SceneNode> nodes;
 
+  // TODO: should we move these to mesh store
+  // (as well as raytracing specifics below)
+  // and instead of g_MeshStore, have scene.meshStore ?
   std::unordered_map<std::wstring, std::vector<std::shared_ptr<MeshInstance>>> meshInstanceMap;
   UINT numMeshInstances = 0;
   std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances;
   UINT numBoneMatrices = 0;
+
+  // RayTracing specific
+  // the following contains only first mesh instance of each mesh
+  // (unless skinned, in which case all corresponding mesh instances are added)
+  std::vector<std::shared_ptr<MeshInstance>> uniqueMeshInstances;
+
+  std::vector<AccelerationStructure> blasBuffers;
+  AccelerationStructure tlasBuffer;
+  std::vector<D3D12_RAYTRACING_INSTANCE_DESC> rtInstanceDescriptors;
+  GpuBuffer rtInstanceDescBuffer;
 
   Camera* camera;
 };
@@ -249,6 +296,15 @@ struct MeshStore {
     return offset;
   }
 
+  UINT CopyIndices(const void* data, size_t size)
+  {
+    UINT offset = m_CurrentOffsets.indexBuffer;
+    m_VertexIndices.Copy(offset, data, size);
+    m_CurrentOffsets.indexBuffer += size;
+
+    return offset;
+  }
+
   // Meshlet data
 
   UINT CopyMeshlets(const void* data, size_t size)
@@ -351,6 +407,8 @@ struct MeshStore {
   GpuBuffer m_VertexUVs;
   GpuBuffer m_VertexBlendWeightsAndIndices;
 
+  GpuBuffer m_VertexIndices; // needed for BLAS
+
   GpuBuffer m_Meshlets;
   GpuBuffer m_MeshletUniqueIndices;
   GpuBuffer m_MeshletPrimitives;
@@ -367,6 +425,8 @@ struct MeshStore {
     UINT tangentsBuffer = 0;
     UINT uvsBuffer = 0;
     UINT bwiBuffer = 0;
+
+    UINT indexBuffer = 0;
 
     // meshlet data
     UINT meshletsBuffer = 0;
@@ -517,6 +577,148 @@ void LoadAssets()
       }
     }
   }
+
+  // RayTracing acceleration structures setup
+  // BLAS creation
+  {
+    const size_t numMeshes = g_Scene.uniqueMeshInstances.size();
+
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries(numMeshes);
+    std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> bottomLevelInputs(numMeshes);
+
+    g_Scene.blasBuffers.resize(numMeshes);
+
+    for (size_t i = 0; i < numMeshes; i++) {
+      auto& mi = g_Scene.uniqueMeshInstances[i];
+      auto& mesh = mi->mesh;
+
+      geometries[i] = {
+          .Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES,
+          .Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE,
+          .Triangles = {
+              .Transform3x4 = 0,
+              .IndexFormat = DXGI_FORMAT_R32_UINT,
+              .VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT,
+              .IndexCount = mesh->header.numIndices,
+              .VertexCount = mesh->header.numVerts,
+              .IndexBuffer = g_MeshStore.m_VertexIndices.GpuAddress(mi->indexBufferOffset),
+              .VertexBuffer = {
+                  .StartAddress = g_MeshStore.m_VertexPositions.GpuAddress(mi->data.firstPosition * sizeof(XMFLOAT3)),
+                  .StrideInBytes = sizeof(XMFLOAT3),
+              }}};
+
+      bottomLevelInputs[i] = {.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
+                              .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
+                              .NumDescs = 1,
+                              .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+                              .pGeometryDescs = &geometries[i]};
+
+      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
+      g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
+      assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
+
+      g_Scene.blasBuffers[i].CreateResource(g_Allocator.Get(), AlignUp(sizeInfo.ResultDataMaxSizeInBytes, 256),
+                                            AlignUp(sizeInfo.ScratchDataSizeInBytes, 256));
+
+      mi->blasBufferAddress = g_Scene.blasBuffers[i].resultData.GpuAddress();
+    }
+
+    auto ctx = &g_FrameContext[g_FrameIndex];
+    CHECK_HR(ctx->commandAllocator->Reset());
+    CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+
+    for (size_t i = 0; i < numMeshes; i++) {
+
+      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
+          .DestAccelerationStructureData = g_Scene.blasBuffers[i].resultData.GpuAddress(),
+          .Inputs = bottomLevelInputs[i],
+          .ScratchAccelerationStructureData = g_Scene.blasBuffers[i].scratch.GpuAddress(),
+      };
+
+      g_CommandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+    }
+
+    g_CommandList->Close();
+    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
+    g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
+    WaitGPUIdle();
+  }
+
+  // Fill rtInstanceBuffer
+  {
+    g_Scene.rtInstanceDescriptors.reserve(g_Scene.numMeshInstances);
+
+    for (auto& node : g_Scene.nodes) {
+      auto model = node.model;
+      XMMATRIX modelMat = model->WorldMatrix();
+
+      for (auto& mi : node.meshInstances) {
+        if (mi->mesh->Skinned()) continue;
+
+        XMMATRIX world = mi->mesh->LocalTransformMatrix() * modelMat;
+
+        D3D12_RAYTRACING_INSTANCE_DESC desc{};
+        XMStoreFloat3x4(reinterpret_cast<XMFLOAT3X4*>(desc.Transform), world);
+        // desc.InstanceID;
+        desc.InstanceMask = 0xff;
+        // desc.InstanceContributionToHitGroupIndex;
+        // desc.Flags;
+        desc.AccelerationStructure = mi->blasBufferAddress;
+        assert(desc.AccelerationStructure != 0);
+
+        g_Scene.rtInstanceDescriptors.push_back(desc);
+      }
+    }
+  }
+
+  // RT instance descriptors buffer
+  {
+    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
+    size_t bufSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size();
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize);
+
+    g_Scene.rtInstanceDescBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+    g_Scene.rtInstanceDescBuffer.SetName(L"RT Instance Desc Buffer");
+    g_Scene.rtInstanceDescBuffer.Map();
+
+    g_Scene.rtInstanceDescBuffer.Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
+  }
+
+  // TLAS creation
+  {
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelInputs = {
+        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
+        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
+        .NumDescs = static_cast<UINT>(g_Scene.rtInstanceDescriptors.size()),
+        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+        .InstanceDescs = g_Scene.rtInstanceDescBuffer.GpuAddress(),
+    };
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
+    g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &sizeInfo);
+    assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
+
+    // Allocate buffer for scene tlas
+    g_Scene.tlasBuffer.CreateResource(g_Allocator.Get(), AlignUp(sizeInfo.ResultDataMaxSizeInBytes, 256),
+                                      AlignUp(sizeInfo.ScratchDataSizeInBytes, 256));
+
+    auto ctx = &g_FrameContext[g_FrameIndex];
+    CHECK_HR(ctx->commandAllocator->Reset());
+    CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
+        .DestAccelerationStructureData = g_Scene.tlasBuffer.resultData.GpuAddress(),
+        .Inputs = topLevelInputs,
+        .ScratchAccelerationStructureData = g_Scene.tlasBuffer.scratch.GpuAddress(),
+    };
+
+    g_CommandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+
+    g_CommandList->Close();
+    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
+    g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
+    WaitGPUIdle();
+  }
 }
 
 void Update(float time, float dt)
@@ -574,12 +776,14 @@ void Update(float time, float dt)
       XMMATRIX modelMat = model->WorldMatrix();
 
       for (auto mi : node.meshInstances) {
-        XMMATRIX world = mi->mesh->LocalTransformMatrix() * modelMat;
+        XMMATRIX world;
 
         if (model->HasCurrentAnimation() && mi->mesh->parentBone > -1) {
           auto boneMatrix = model->currentAnimation.globalTransforms[mi->mesh->parentBone];
 
           world = mi->mesh->LocalTransformMatrix() * boneMatrix * modelMat;
+        } else {
+          world = mi->mesh->LocalTransformMatrix() * modelMat;
         }
 
         XMMATRIX worldViewProjection = world * viewProjection;
@@ -941,6 +1145,9 @@ void Cleanup()
     g_MeshStore.m_VertexBlendWeightsAndIndices.Unmap();
     g_MeshStore.m_VertexBlendWeightsAndIndices.Reset();
 
+    g_MeshStore.m_VertexIndices.Unmap();
+    g_MeshStore.m_VertexIndices.Reset();
+
     g_MeshStore.m_Meshlets.Unmap();
     g_MeshStore.m_Meshlets.Reset();
 
@@ -972,6 +1179,12 @@ void Cleanup()
 
   g_DrawMeshCommands.Reset();
   g_UAVCounterReset.Reset();
+
+  g_Scene.rtInstanceDescBuffer.Reset();
+  for (auto &as : g_Scene.blasBuffers) {
+    as.Reset();
+  }
+  g_Scene.tlasBuffer.Reset();
 
   g_VisibilityBuffer.Reset();
   g_GBuffer.Reset();
@@ -1672,6 +1885,28 @@ static void InitFrameResources()
                                          g_MeshStore.m_VertexBlendWeightsAndIndices.SrvDescriptorHandle());
     }
 
+    // Vertex indices
+    {
+      size_t bufSiz = numIndices * sizeof(UINT);
+      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSiz);
+
+      g_MeshStore.m_VertexIndices.CreateResource(g_Allocator.Get(), &allocDesc, &bufferDesc);
+      g_MeshStore.m_VertexIndices.SetName(L"Vertex indices Store");
+      g_MeshStore.m_VertexIndices.Map();
+
+      // descriptor
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
+                                              .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                              .Buffer = {.FirstElement = 0,
+                                                         .NumElements = static_cast<UINT>(numIndices),
+                                                         .StructureByteStride = sizeof(UINT),
+                                                         .Flags = D3D12_BUFFER_SRV_FLAG_NONE}};
+      g_MeshStore.m_VertexIndices.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
+      g_Device->CreateShaderResourceView(g_MeshStore.m_VertexIndices.Resource(), &srvDesc,
+                                         g_MeshStore.m_VertexIndices.SrvDescriptorHandle());
+    }
+
     // Meshlets buffer
     {
       size_t bufSiz = numMeshlets * sizeof(MeshletData);
@@ -1982,11 +2217,12 @@ static void WaitGPUIdle()
 {
   auto ctx = &g_FrameContext[g_FrameIndex];
 
+  ctx->fenceValue++;
+
   CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
 
   CHECK_HR(ctx->fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
   WaitForSingleObject(g_FenceEvent, INFINITE);
-  ctx->fenceValue++;
 }
 
 // Helper function for resolving the full path of assets.
@@ -2083,16 +2319,18 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
   // Create MeshInstance
   auto mi = std::make_shared<MeshInstance>();
   mi->instanceBufferOffset = g_MeshStore.ReserveInstance(sizeof(MeshInstance::data));
+  mi->mesh = mesh;
 
   // Assign it to the meshlets of this instance
   std::vector<MeshletData> instanceMeshlets = mesh->meshlets;
+  mi->data.numMeshlets = mesh->meshlets.size();
   for (auto& m : instanceMeshlets) {
     m.instanceIndex = mi->instanceBufferOffset / sizeof(MeshInstance::data);
   }
 
   {
     auto it = g_Scene.meshInstanceMap.find(mesh->name);
-    if (it == std::end(g_Scene.meshInstanceMap)) {
+    if (it == std::end(g_Scene.meshInstanceMap)) { // first time seeing this mesh
       // CreateGeometry
       // vertex data
       if (mesh->Skinned()) {
@@ -2123,7 +2361,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
         g_Scene.skinnedMeshInstances.push_back(smi);
         g_Scene.numBoneMatrices += smi->numBoneMatrices;
-      } else {
+      } else { // if not skinned
         mi->data.firstPosition =
             g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal =
@@ -2133,6 +2371,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
       }
 
       mi->data.firstUV = g_MeshStore.CopyUVs(mesh->uvs.data(), mesh->UvsBufferSize()) / sizeof(XMFLOAT2);
+      mi->indexBufferOffset = g_MeshStore.CopyIndices(mesh->indices.data(), mesh->IndicesBufferSize());
 
       // meshlet data
       mi->data.firstMeshlet =
@@ -2143,7 +2382,9 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
       mi->data.firstPrimitive =
           g_MeshStore.CopyMeshletPrimitives(mesh->primitiveIndices.data(), mesh->MeshletPrimitiveBufferSize()) /
           sizeof(UINT);
-    } else {
+
+      if (!mesh->Skinned()) g_Scene.uniqueMeshInstances.push_back(mi); // TODO: only non skinned mesh for now
+    } else { // an instance for this mesh already exists
       auto i = it->second[0];
       mi->data.firstPosition = i->data.firstPosition;
       mi->data.firstNormal = i->data.firstNormal;
@@ -2154,6 +2395,8 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
           g_MeshStore.CopyMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
       mi->data.firstVertIndex = i->data.firstVertIndex;
       mi->data.firstPrimitive = i->data.firstPrimitive;
+
+      mi->indexBufferOffset = i->indexBufferOffset;
 
       if (mesh->Skinned()) {
         // these will be filled by compute shader so we need new ones.
@@ -2175,13 +2418,12 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
         g_Scene.skinnedMeshInstances.push_back(smi);
         g_Scene.numBoneMatrices += smi->numBoneMatrices;
+
+        // a skinned mesh instance counts as unique mesh instance even if mesh already seen
+        // g_Scene.uniqueMeshInstances.push_back(mi); // skip for now
       }
     }
   }
-
-  mi->data.numMeshlets = mesh->meshlets.size();
-  mi->mesh = mesh;
-  // We update MeshIntance buffer everyframe so don't need to copy data here.
 
   g_Scene.meshInstanceMap[mesh->name].push_back(mi);
   g_Scene.numMeshInstances++;

@@ -101,6 +101,8 @@ struct Mesh3D {
 
   bool Skinned() const { return skin != nullptr; }
 
+  size_t IndicesBufferSize() const { return sizeof(indices[0]) * header.numIndices; }
+
   size_t PositionsBufferSize() const { return sizeof(positions[0]) * header.numVerts; }
 
   size_t NormalsBufferSize() const { return sizeof(normals[0]) * header.numVerts; }
