@@ -68,7 +68,7 @@ const uint32_t VENDOR_ID_AMD = 0x1002;
 const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
 const uint32_t VENDOR_ID_INTEL = 0x8086;
 
-static const wchar_t* VendorIDToStr(uint32_t vendorID)
+inline const wchar_t* VendorIDToStr(uint32_t vendorID)
 {
   switch (vendorID) {
     case 0x10001:
@@ -99,7 +99,7 @@ static const wchar_t* VendorIDToStr(uint32_t vendorID)
   return L"";
 }
 
-static std::wstring SizeToStr(size_t size)
+inline std::wstring SizeToStr(size_t size)
 {
   if (size == 0) return L"0";
 
