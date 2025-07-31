@@ -18,21 +18,9 @@ struct GpuBuffer {
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return m_Resource->GetGPUVirtualAddress() + offset; }
 
-  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { m_SrvDescriptor.Alloc(allocator); }
+  virtual void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { m_SrvDescriptor.Alloc(allocator); }
 
-  void AllocSrvDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator)
-  {
-    m_SrvDescriptor.AllocWithGpuHandle(allocator);
-  }
-
-  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { m_UavDescriptor.Alloc(allocator); }
-
-  void AllocUavDescriptorWithGpuHandle(DescriptorHeapListAllocator& allocator)
-  {
-    m_UavDescriptor.AllocWithGpuHandle(allocator);
-  }
-
-  void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { m_RtvDescriptor.Alloc(allocator); }
+  virtual void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { m_UavDescriptor.Alloc(allocator); }
 
   UINT SrvDescriptorIndex() const { return m_SrvDescriptor.Index(); }
 
@@ -40,15 +28,7 @@ struct GpuBuffer {
 
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.CpuHandle(); }
 
-  D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return m_SrvDescriptor.GpuHandle(); }
-
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.CpuHandle(); }
-
-  D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return m_UavDescriptor.GpuHandle(); }
-
-  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_RtvDescriptor.CpuHandle(); }
-
-  void Attach(ID3D12Resource* other) { m_Resource.Attach(other); }
 
   void CreateResource(D3D12MA::Allocator* allocator,
                       const D3D12MA::ALLOCATION_DESC* allocDesc,
@@ -61,7 +41,7 @@ struct GpuBuffer {
                                        &m_Allocation, IID_PPV_ARGS(&m_Resource)));
   }
 
-  void Map()
+  virtual void Map()
   {
     assert(!m_Mapped);
 
@@ -74,14 +54,6 @@ struct GpuBuffer {
     assert(!m_Mapped);
 
     CHECK_HR(m_Resource->Map(0, pReadRange, ppData));
-    m_Mapped = true;
-  }
-
-  void MapOpaque()
-  {
-    assert(!m_Mapped);
-
-    CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, nullptr));
     m_Mapped = true;
   }
 
@@ -105,24 +77,6 @@ struct GpuBuffer {
     assert(m_Mapped);
 
     memcpy((BYTE*)m_Address + offset, data, size);
-  }
-
-  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT DstSubresource = 0)
-  {
-    assert(m_Mapped);
-
-    m_Resource->WriteToSubresource(DstSubresource, nullptr, data->pData, static_cast<UINT>(data->RowPitch),
-                                   static_cast<UINT>(data->SlicePitch));
-  }
-
-  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0)
-  {
-    assert(m_Mapped);
-
-    for (UINT i = 0; i < numSubresources; ++i) {
-      m_Resource->WriteToSubresource(firstSubresource + i, nullptr, data[i].pData, static_cast<UINT>(data[i].RowPitch),
-                                     static_cast<UINT>(data[i].SlicePitch));
-    }
   }
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
@@ -153,7 +107,7 @@ struct GpuBuffer {
     }
   }
 
-private:
+protected:
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   HeapDescriptor m_SrvDescriptor;
   HeapDescriptor m_UavDescriptor;
@@ -165,13 +119,57 @@ private:
   bool m_Mapped = false;
 };
 
+struct Texture : GpuBuffer {
+  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) override
+  {
+    m_SrvDescriptor.AllocWithGpuHandle(allocator);
+  }
+
+  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) override
+  {
+    m_UavDescriptor.AllocWithGpuHandle(allocator);
+  }
+
+  void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { m_RtvDescriptor.Alloc(allocator); }
+
+  D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return m_SrvDescriptor.GpuHandle(); }
+
+  D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return m_UavDescriptor.GpuHandle(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_RtvDescriptor.CpuHandle(); }
+
+  void Attach(ID3D12Resource* other) { m_Resource.Attach(other); }
+
+  void Map() override
+  {
+    assert(!m_Mapped);
+
+    CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, nullptr));
+    m_Mapped = true;
+  }
+
+  void Map(D3D12_RANGE* pReadRange, void** ppData) = delete;
+  void Clear(size_t size) = delete;
+  void Copy(size_t offset, const void* data, size_t size) = delete;
+
+  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0)
+  {
+    assert(m_Mapped);
+
+    for (UINT i = 0; i < numSubresources; ++i) {
+      m_Resource->WriteToSubresource(firstSubresource + i, nullptr, data[i].pData, static_cast<UINT>(data[i].RowPitch),
+                                     static_cast<UINT>(data[i].SlicePitch));
+    }
+  }
+};
+
 inline void AllocBuffer(GpuBuffer& buffer,
-                 size_t bufSize,
-                 std::wstring name,
-                 D3D12MA::Allocator* allocator,
-                 MemoryUsage memUsage = MemoryUsage::GpuOnly,
-                 bool allowUnorderedAccess = false,
-                 D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON)
+                        size_t bufSize,
+                        std::wstring name,
+                        D3D12MA::Allocator* allocator,
+                        MemoryUsage memUsage = MemoryUsage::GpuOnly,
+                        bool allowUnorderedAccess = false,
+                        D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON)
 {
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
 
@@ -200,11 +198,15 @@ inline void AllocBuffer(GpuBuffer& buffer,
   }
 }
 
+inline void AllocTexture() { /* TODO */ }
+
+inline void CreateTexture() { /* TODO */ }
+
 inline void CreateSrv(GpuBuffer& buffer,
-               UINT numElements,
-               UINT structureByteStride,
-               ID3D12Device* device,
-               DescriptorHeapListAllocator& allocator)
+                      UINT numElements,
+                      UINT structureByteStride,
+                      ID3D12Device* device,
+                      DescriptorHeapListAllocator& allocator)
 {
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                           .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
@@ -221,12 +223,12 @@ inline void CreateSrv(GpuBuffer& buffer,
 }
 
 inline void CreateUav(GpuBuffer& buffer,
-               size_t numElements,
-               size_t structureByteStride,
-               ID3D12Device* device,
-               DescriptorHeapListAllocator& allocator,
-               ID3D12Resource *pCounterResource = nullptr,
-               UINT counterOffsetInBytes = 0)
+                      size_t numElements,
+                      size_t structureByteStride,
+                      ID3D12Device* device,
+                      DescriptorHeapListAllocator& allocator,
+                      ID3D12Resource* pCounterResource = nullptr,
+                      UINT counterOffsetInBytes = 0)
 {
   D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                            .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,

@@ -198,7 +198,7 @@ struct FrameContext {
 
   static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
-  GpuBuffer renderTarget;
+  Texture renderTarget;
   GpuBuffer timestampReadBackBuffer;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
@@ -494,12 +494,12 @@ static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
 
-static GpuBuffer g_VisibilityBuffer;
+static Texture g_VisibilityBuffer;
 
 struct GBuffer {
-  GpuBuffer worldPosition;
-  GpuBuffer worldNormal;
-  GpuBuffer baseColor;
+  Texture worldPosition;
+  Texture worldNormal;
+  Texture baseColor;
 
   FillGBufferPerDispatchConstants PerDispatchConstants(UINT visBufferDescId)
   {
@@ -523,7 +523,7 @@ static GBuffer g_GBuffer;
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
-static std::unordered_map<std::wstring, std::shared_ptr<GpuBuffer>> g_Textures;
+static std::unordered_map<std::wstring, std::shared_ptr<Texture>> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -1897,10 +1897,10 @@ static void InitFrameResources()
       D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
           .Format = format, .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D, .Texture2D = {}};
 
-      buffer.AllocSrvDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
+      buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateShaderResourceView(buffer.Resource(), &srvDesc, buffer.SrvDescriptorHandle());
 
-      buffer.AllocUavDescriptorWithGpuHandle(g_SrvUavDescHeapAlloc);
+      buffer.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
       g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavDescriptorHandle());
     };
 
@@ -2183,7 +2183,7 @@ static UINT CreateTexture(std::filesystem::path filename)
   auto it = g_Textures.find(filename);
   if (it != g_Textures.end()) return it->second->SrvDescriptorIndex();
 
-  auto tex = std::make_shared<GpuBuffer>(); // unique_ptr?
+  auto tex = std::make_shared<Texture>(); // unique_ptr?
 
   TexMetadata metadata;
   ScratchImage image;
@@ -2198,12 +2198,12 @@ static UINT CreateTexture(std::filesystem::path filename)
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
   tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
-  tex->MapOpaque();
+  tex->Map();
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
   CHECK_HR(PrepareUpload(g_Device.Get(), image.GetImages(), image.GetImageCount(), metadata, subresources));
 
-  tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()), 0);
+  tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()));
 
   tex->Unmap();
 
