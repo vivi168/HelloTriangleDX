@@ -96,12 +96,12 @@ struct MeshletData {
   hlsl_uint numPrims;
   hlsl_uint firstPrim;
 
-  hlsl_uint instanceIndex;
-  hlsl_uint materialIndex;
-
   hlsl_bounding_sphere boundingSphere;  // xyz = center, w = radius
   hlsl_byte4 normalCone;                // xyz = axis, w = -cos(a + 90)
   float apexOffset;                     // apex = center - axis * offset
+
+  hlsl_uint instanceIndex;
+  hlsl_uint materialIndex;
 };
 
 struct MeshInstanceData {
@@ -127,7 +127,7 @@ struct MeshInstanceData {
   hlsl_uint numMeshlets;
 
   // TODO: add skinned true/false?
-  hlsl_uint _pad[2];
+  hlsl_float2 _pad;
 };
 
 #ifdef __cplusplus
