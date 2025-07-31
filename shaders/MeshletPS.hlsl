@@ -12,7 +12,7 @@ uint main(VertexOut v, uint primitiveIndex : SV_PrimitiveID) : SV_Target
   Texture2D baseColorTex = ResourceDescriptorHeap[NonUniformResourceIndex(v.textureIndex)];
   float4 baseColor = baseColorTex.Sample(s1, v.uv);
 
-  if (baseColor.w < 0.1) discard;
+  if (baseColor.w < 0.5) discard;
 #endif
   return PackVisibility(v.meshletIndex, primitiveIndex);
 }
