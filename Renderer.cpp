@@ -220,7 +220,7 @@ struct MeshStore {
     // TODO: should ensure it is mapped
     UINT offset = m_CurrentOffsets.positionsBuffer;
     m_VertexPositions.Copy(offset, data, size);
-    m_CurrentOffsets.positionsBuffer += size;
+    m_CurrentOffsets.positionsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -228,7 +228,7 @@ struct MeshStore {
   UINT ReservePositions(size_t size)
   {
     UINT offset = m_CurrentOffsets.positionsBuffer;
-    m_CurrentOffsets.positionsBuffer += size;
+    m_CurrentOffsets.positionsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -237,7 +237,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.normalsBuffer;
     m_VertexNormals.Copy(offset, data, size);
-    m_CurrentOffsets.normalsBuffer += size;
+    m_CurrentOffsets.normalsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -245,7 +245,7 @@ struct MeshStore {
   UINT ReserveNormals(size_t size)
   {
     UINT offset = m_CurrentOffsets.normalsBuffer;
-    m_CurrentOffsets.normalsBuffer += size;
+    m_CurrentOffsets.normalsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -254,7 +254,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.tangentsBuffer;
     m_VertexTangents.Copy(offset, data, size);
-    m_CurrentOffsets.tangentsBuffer += size;
+    m_CurrentOffsets.tangentsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -262,7 +262,7 @@ struct MeshStore {
   UINT ReserveTangents(size_t size)
   {
     UINT offset = m_CurrentOffsets.tangentsBuffer;
-    m_CurrentOffsets.tangentsBuffer += size;
+    m_CurrentOffsets.tangentsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -271,7 +271,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.uvsBuffer;
     m_VertexUVs.Copy(offset, data, size);
-    m_CurrentOffsets.uvsBuffer += size;
+    m_CurrentOffsets.uvsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -280,7 +280,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.bwiBuffer;
     m_VertexBlendWeightsAndIndices.Copy(offset, data, size);
-    m_CurrentOffsets.bwiBuffer += size;
+    m_CurrentOffsets.bwiBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -289,7 +289,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.indexBuffer;
     m_VertexIndices.Copy(offset, data, size);
-    m_CurrentOffsets.indexBuffer += size;
+    m_CurrentOffsets.indexBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -300,7 +300,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.meshletsBuffer;
     m_Meshlets.Copy(offset, data, size);
-    m_CurrentOffsets.meshletsBuffer += size;
+    m_CurrentOffsets.meshletsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -309,7 +309,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.uniqueIndicesBuffer;
     m_MeshletUniqueIndices.Copy(offset, data, size);
-    m_CurrentOffsets.uniqueIndicesBuffer += size;
+    m_CurrentOffsets.uniqueIndicesBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -318,7 +318,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.primitivesBuffer;
     m_MeshletPrimitives.Copy(offset, data, size);
-    m_CurrentOffsets.primitivesBuffer += size;
+    m_CurrentOffsets.primitivesBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -329,7 +329,7 @@ struct MeshStore {
   {
     UINT offset = m_CurrentOffsets.materialsBuffer;
     m_Materials.Copy(offset, data, size);
-    m_CurrentOffsets.materialsBuffer += size;
+    m_CurrentOffsets.materialsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -337,7 +337,7 @@ struct MeshStore {
   UINT ReserveInstance(size_t size)
   {
     UINT offset = m_CurrentOffsets.instancesBuffer;
-    m_CurrentOffsets.instancesBuffer += size;
+    m_CurrentOffsets.instancesBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -350,7 +350,7 @@ struct MeshStore {
   UINT ReserveBoneMatrices(size_t size)
   {
     UINT offset = m_CurrentOffsets.boneMatricesBuffer;
-    m_CurrentOffsets.boneMatricesBuffer += size;
+    m_CurrentOffsets.boneMatricesBuffer += static_cast<UINT>(size);
 
     return offset;
   }
@@ -535,6 +535,7 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_Width = width;
   g_Height = height;
   g_AspectRatio = static_cast<float>(width) / static_cast<float>(height);
+  g_Title = name;
 }
 
 void InitAdapter(IDXGIFactory4* factory, IDXGIAdapter1* adapter)
@@ -629,7 +630,7 @@ void LoadAssets()
 
     g_CommandList->Close();
     std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
-    g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
+    g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
     WaitGPUIdle();
   }
 
@@ -701,7 +702,7 @@ void LoadAssets()
 
     g_CommandList->Close();
     std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
-    g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
+    g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
     WaitGPUIdle();
   }
 }
@@ -746,7 +747,6 @@ void Update(float time, float dt)
       auto model = node.model;
 
       if (model->HasCurrentAnimation()) {
-        size_t i = 0;
         for (auto &[k, skin] : model->skins) {
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(dt, skin.get());
 
@@ -892,7 +892,7 @@ void Render()
   preRenderBarriers[0] = ctx->renderTarget.Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   preRenderBarriers[1] =
       g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  g_CommandList->ResourceBarrier(preRenderBarriers.size(), preRenderBarriers.data());
+  g_CommandList->ResourceBarrier(static_cast<UINT>(preRenderBarriers.size()), preRenderBarriers.data());
 
   // here we again get the handle to our current render target view so we can
   // set it as the render target in the output merger stage of the pipeline
@@ -916,12 +916,12 @@ void Render()
   }
 
   std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
-  g_CommandList->SetDescriptorHeaps(descriptorHeaps.size(), descriptorHeaps.data());
+  g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
   g_CommandList->RSSetViewports(1, &viewport);
 
-  D3D12_RECT scissorRect{0, 0, g_Width, g_Height};
+  D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
   // record skinning compute commands if needed
@@ -1013,7 +1013,7 @@ void Render()
     before[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     before[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     before[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_CommandList->ResourceBarrier(before.size(), before.data());
+    g_CommandList->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
 
     static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
     static constexpr UINT clearUint[] = {0, 0, 0, 0};
@@ -1021,7 +1021,7 @@ void Render()
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer.SrvDescriptorIndex());
-    auto n = SizeOfInUint(c);
+    UINT n = SizeOfInUint(c);
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::PerDrawConstants, n, &c, 0);
 
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
@@ -1035,7 +1035,7 @@ void Render()
     after[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     after[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     after[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(after.size(), after.data());
+    g_CommandList->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
   }
 
   // Record Full screen triangle pass - Compose final image commands
@@ -1065,7 +1065,7 @@ void Render()
   postRenderBarriers[1] =
       g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
-  g_CommandList->ResourceBarrier(postRenderBarriers.size(), postRenderBarriers.data());
+  g_CommandList->ResourceBarrier(static_cast<UINT>(postRenderBarriers.size()), postRenderBarriers.data());
 
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
 
@@ -1078,7 +1078,7 @@ void Render()
 
   // execute command list
   std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
-  g_CommandQueue->ExecuteCommandLists(ppCommandLists.size(), ppCommandLists.data());
+  g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
 
   // present the current backbuffer
   CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
@@ -1294,7 +1294,6 @@ static void InitD3D()
     assert(options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1);
 
     // GPU Upload Heap Supported
-    bool GPUUploadHeapSupported = false;
     D3D12_FEATURE_DATA_D3D12_OPTIONS16 options16 = {};
     CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &options16, sizeof(options16)));
     assert(options16.GPUUploadHeapSupported);
@@ -1540,7 +1539,7 @@ static void InitFrameResources()
     // Root Signature
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-        RootParameter::Count, rootParameters, staticSamplers.size(), staticSamplers.data(), flags);
+        RootParameter::Count, rootParameters, static_cast<UINT>(staticSamplers.size()), staticSamplers.data(), flags);
 
     ID3DBlob* signatureBlobPtr;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
@@ -1566,7 +1565,7 @@ static void InitFrameResources()
 
     D3D12_COMMAND_SIGNATURE_DESC signatureDesc = {
         .ByteStride = sizeof(DrawMeshCommand),
-        .NumArgumentDescs = argDesc.size(),
+        .NumArgumentDescs = static_cast<UINT>(argDesc.size()),
         .pArgumentDescs = argDesc.data(),
     };
 
@@ -2193,16 +2192,16 @@ static UINT CreateTexture(std::filesystem::path filename)
 
   // TODO: handle multiple mips level + handle 3d textures
   // ref: DirectXTex\DirectXTexD3D12.cpp#PrepareUpload
-  D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(metadata.format, metadata.width, metadata.height,
-                                                                 metadata.arraySize, metadata.mipLevels);
+  D3D12_RESOURCE_DESC textureDesc =
+      CD3DX12_RESOURCE_DESC::Tex2D(metadata.format, metadata.width, static_cast<UINT>(metadata.height),
+                                   static_cast<WORD>(metadata.arraySize), static_cast<WORD>(metadata.mipLevels));
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
   tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
   tex->MapOpaque();
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
-  HRESULT hr = PrepareUpload(g_Device.Get(), image.GetImages(), image.GetImageCount(),
-                                      metadata, subresources);
+  CHECK_HR(PrepareUpload(g_Device.Get(), image.GetImages(), image.GetImageCount(), metadata, subresources));
 
   tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()), 0);
 

@@ -6,8 +6,8 @@
 
 using namespace DirectX;
 
-static const wchar_t* const CLASS_NAME = L"D3D12MemAllocSample";
-static const wchar_t* const WINDOW_TITLE = L"D3D12 Memory Allocator Sample";
+static const wchar_t* const CLASS_NAME = L"HelloTriangleDX";
+static const wchar_t* const WINDOW_TITLE = L"HelloTriangleDX";
 
 static HWND g_Hwnd = nullptr;
 static LARGE_INTEGER g_Frequency;
