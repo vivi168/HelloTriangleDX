@@ -89,23 +89,12 @@ struct AccelerationStructure {
   GpuBuffer resultData;
   GpuBuffer scratch;
 
-  void CreateResource(D3D12MA::Allocator* allocator, size_t resultDataSize, size_t scratchSize)
+  void AllocBuffers(size_t resultDataSize, size_t scratchSize, D3D12MA::Allocator* allocator)
   {
-    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-
-    {
-      size_t bufSize = resultDataSize;
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-      scratch.CreateResource(allocator, &allocDesc, &bufferDesc);
-      scratch.SetName(L"Acceleration structure Scratch Resource");
-    }
-
-    {
-      size_t bufSize = resultDataSize;
-      auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-      resultData.CreateResource(allocator, &allocDesc, &bufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
-      resultData.SetName(L"Acceleration structure Resource");
-    }
+    AllocBuffer(scratch, scratchSize, L"Acceleration structure Scratch Resource", allocator, MemoryUsage::GpuOnly,
+                true);
+    AllocBuffer(resultData, resultDataSize, L"Acceleration structure Result Resource", allocator, MemoryUsage::GpuOnly,
+                true, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
   }
 
   void Reset()
@@ -618,8 +607,8 @@ void LoadAssets()
       g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
       assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
-      g_Scene.blasBuffers[i].CreateResource(g_Allocator.Get(), AlignUp(sizeInfo.ResultDataMaxSizeInBytes, 256),
-                                            AlignUp(sizeInfo.ScratchDataSizeInBytes, 256));
+      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
+                                          g_Allocator.Get());
 
       mi->blasBufferAddress = g_Scene.blasBuffers[i].resultData.GpuAddress();
     }
@@ -695,8 +684,8 @@ void LoadAssets()
     assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
     // Allocate buffer for scene tlas
-    g_Scene.tlasBuffer.CreateResource(g_Allocator.Get(), AlignUp(sizeInfo.ResultDataMaxSizeInBytes, 256),
-                                      AlignUp(sizeInfo.ScratchDataSizeInBytes, 256));
+    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
+                                    g_Allocator.Get());
 
     auto ctx = &g_FrameContext[g_FrameIndex];
     CHECK_HR(ctx->commandAllocator->Reset());
