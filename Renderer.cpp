@@ -91,10 +91,9 @@ struct AccelerationStructure {
 
   void AllocBuffers(size_t resultDataSize, size_t scratchSize, D3D12MA::Allocator* allocator)
   {
-    AllocBuffer(scratch, scratchSize, L"Acceleration structure Scratch Resource", allocator, MemoryUsage::GpuOnly,
-                true);
-    AllocBuffer(resultData, resultDataSize, L"Acceleration structure Result Resource", allocator, MemoryUsage::GpuOnly,
-                true, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+    scratch.Alloc(scratchSize, L"Acceleration structure Scratch Resource", allocator, MemoryUsage::Default, true);
+    resultData.Alloc(resultDataSize, L"Acceleration structure Result Resource", allocator, MemoryUsage::Default, true,
+                     D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
   }
 
   void Reset()
@@ -665,9 +664,8 @@ void LoadAssets()
   {
     size_t bufSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size();
 
-    AllocBuffer(g_Scene.rtInstanceDescBuffer, bufSize, L"RT Instance Desc Buffer", g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-    g_Scene.rtInstanceDescBuffer.Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
+    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator.Get(), MemoryUsage::Upload)
+        .Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
   }
 
   // TLAS creation
@@ -1723,124 +1721,112 @@ static void InitFrameResources()
 
     // Positions buffer
     {
-      AllocBuffer(g_MeshStore.m_VertexPositions, numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu, true);
-
-      CreateSrv(g_MeshStore.m_VertexPositions, numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
-      CreateUav(g_MeshStore.m_VertexPositions, numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexPositions
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc)
+          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Normals buffer
     {
-      AllocBuffer(g_MeshStore.m_VertexNormals, numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu, true);
-
-      CreateSrv(g_MeshStore.m_VertexNormals, numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexNormals
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform normals during skinning
     }
 
     // Tangents buffer
     {
-      AllocBuffer(g_MeshStore.m_VertexTangents, numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu, true);
-
-      CreateSrv(g_MeshStore.m_VertexTangents, numVertices, sizeof(XMFLOAT4), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexTangents
+          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform tangents during skinning
     }
 
     // UVs buffer
     {
-      AllocBuffer(g_MeshStore.m_VertexUVs, numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_VertexUVs, numVertices, sizeof(XMFLOAT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexUVs
+          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Blend weights/indices buffer
     {
-      AllocBuffer(g_MeshStore.m_VertexBlendWeightsAndIndices, numVertices * sizeof(XMUINT2),
-                  L"Blend weights/indices Store", g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_VertexBlendWeightsAndIndices, numVertices, sizeof(XMUINT2), g_Device.Get(),
-                g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexBlendWeightsAndIndices
+          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator.Get(),
+                 MemoryUsage::Upload)
+          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Vertex indices
     {
-      AllocBuffer(g_MeshStore.m_VertexIndices, numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_VertexIndices, numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_VertexIndices
+          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlets buffer
     {
-      AllocBuffer(g_MeshStore.m_Meshlets, numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator.Get(),
-                  MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_Meshlets, numMeshlets, sizeof(MeshletData), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_Meshlets
+          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet unique vertex indices buffer
     {
-      AllocBuffer(g_MeshStore.m_MeshletUniqueIndices, numIndices * sizeof(UINT), L"Unique vertex indices Store",
-                  g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_MeshletUniqueIndices, numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_MeshletUniqueIndices
+          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
-      AllocBuffer(g_MeshStore.m_MeshletPrimitives, numPrimitives * sizeof(MeshletTriangle), L"Primitives Store",
-                  g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_MeshletPrimitives, numPrimitives, sizeof(MeshletTriangle), g_Device.Get(),
-                g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_MeshletPrimitives
+          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Materials buffer
     {
-      AllocBuffer(g_MeshStore.m_Materials, numMaterials * sizeof(Material::m_GpuData), L"Materials Store",
-                  g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_Materials, numMaterials, sizeof(Material::m_GpuData), g_Device.Get(),
-                g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_Materials
+          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator.Get(),
+                 MemoryUsage::Upload)
+          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Instances buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      AllocBuffer(g_MeshStore.m_Instances[i], numInstances * sizeof(MeshInstance::data),
-                  std::format(L"Instances Store {}", i), g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_Instances[i], numInstances, sizeof(MeshInstance::data), g_Device.Get(),
-                g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_Instances[i]
+          .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator.Get(),
+                 MemoryUsage::Upload)
+          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Bone Matrices buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      AllocBuffer(g_MeshStore.m_BoneMatrices[i], numMatrices * sizeof(XMFLOAT4X4),
-                  std::format(L"Bone Matrices Store {}", i), g_Allocator.Get(), MemoryUsage::CpuToGpu);
-
-      CreateSrv(g_MeshStore.m_BoneMatrices[i], numMatrices, sizeof(XMFLOAT4X4), g_Device.Get(), g_SrvUavDescHeapAlloc);
+      g_MeshStore.m_BoneMatrices[i]
+          .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator.Get(),
+                 MemoryUsage::Upload)
+          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Draw Meshlets commands
     {
-      AllocBuffer(g_DrawMeshCommands, DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
-                  L"Draw Meshlets command buffer", g_Allocator.Get(), MemoryUsage::GpuOnly, true);
-
-      CreateSrv(g_DrawMeshCommands, numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc);
-      CreateUav(g_DrawMeshCommands, numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc,
-                g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+      g_DrawMeshCommands
+          .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
+                 L"Draw Meshlets command buffer", g_Allocator.Get(), MemoryUsage::Default, true)
+          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc)
+          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc,
+                     g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
     }
 
     // Buffer containg just a UINT (0) used to reset UAV counter.
     {
       size_t bufSiz = sizeof(UINT);
 
-      AllocBuffer(g_UAVCounterReset, bufSiz, L"UAV Reset counter", g_Allocator.Get(), MemoryUsage::CpuToGpu);
-      g_UAVCounterReset.Clear(bufSiz);
-      g_UAVCounterReset.Unmap();
+      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator.Get(), MemoryUsage::Upload)
+          .Clear(bufSiz)
+          .Unmap();
     }
   }
 
@@ -1922,8 +1908,9 @@ static void InitFrameResources()
 
   // timestamp readback buffer
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    AllocBuffer(g_FrameContext[i].timestampReadBackBuffer, sizeof(UINT64) * Timestamp::Count,
-                std::format(L"Timestamp Readback Buffer {}", i), g_Allocator.Get(), MemoryUsage::GpuToCpu);
+    g_FrameContext[i].timestampReadBackBuffer.Alloc(sizeof(UINT64) * Timestamp::Count,
+                                                    std::format(L"Timestamp Readback Buffer {}", i), g_Allocator.Get(),
+                                                    MemoryUsage::Readback);
   }
 }
 
