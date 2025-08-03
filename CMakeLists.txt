@@ -46,7 +46,8 @@ set(HLSL_SOURCES
     ${SHADERS_DIR}/MeshletAS.hlsl
     ${SHADERS_DIR}/MeshletMS.hlsl
     ${SHADERS_DIR}/MeshletPS.hlsl
-    ${SHADERS_DIR}/SkinningCS.hlsl)
+    ${SHADERS_DIR}/SkinningCS.hlsl
+    ${SHADERS_DIR}/RayTracingRT.hlsl)
 
 set(HLSL_HEADERS
     ${SHADERS_DIR}/MeshletCommon.hlsli
@@ -123,6 +124,8 @@ function(get_shader_profile BASENAME OUTPUT_PROFILE)
         set(SM_TYPE ms)
     elseif(SHADER_TYPE STREQUAL "AS")
         set(SM_TYPE as)
+    elseif(SHADER_TYPE STREQUAL "RT")
+        set(SM_TYPE lib)
     else()
         message(FATAL_ERROR "${SHADER_TYPE} is not a recognized shader type")
     endif()
@@ -143,7 +146,7 @@ foreach(HLSL ${HLSL_SOURCES})
     add_custom_command(
         OUTPUT ${CSO}
         COMMAND ${DXC_EXECUTABLE}
-            /nologo /E main /T ${SHADER_PROFILE}
+            /nologo /T ${SHADER_PROFILE} # assume /E main
             /Fo ${CSO}
             /Zi /Qembed_debug ${HLSL}
         DEPENDS ${HLSL} ${HLSL_HEADERS})

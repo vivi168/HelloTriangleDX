@@ -34,6 +34,7 @@ static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
 static constexpr DXGI_FORMAT VISIBILITY_BUFFER_FORMAT = DXGI_FORMAT_R32_UINT;
+static constexpr DXGI_FORMAT SHADOW_BUFFER_FORMAT = DXGI_FORMAT_R8_UNORM;
 static constexpr DXGI_FORMAT GBUFFER_WORLD_POSITION_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
 static constexpr DXGI_FORMAT GBUFFER_WORLD_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;
 static constexpr DXGI_FORMAT GBUFFER_BASE_COLOR_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -67,6 +68,8 @@ enum Timestamps : size_t {
   DrawEnd,
   FillGBufferBegin,
   FillGBufferEnd,
+  ShadowsBegin,
+  ShadowsEnd,
   TotalBegin,
   TotalEnd,
   Count
@@ -91,8 +94,8 @@ struct AccelerationStructure {
 
   void AllocBuffers(size_t resultDataSize, size_t scratchSize, D3D12MA::Allocator* allocator)
   {
-    scratch.Alloc(scratchSize, L"Acceleration structure Scratch Resource", allocator, MemoryUsage::Default, true);
-    resultData.Alloc(resultDataSize, L"Acceleration structure Result Resource", allocator, MemoryUsage::Default, true,
+    scratch.Alloc(scratchSize, L"Acceleration structure Scratch Resource", allocator, HeapType::Default, true);
+    resultData.Alloc(resultDataSize, L"Acceleration structure Result Resource", allocator, HeapType::Default, true,
                      D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
   }
 
@@ -447,7 +450,8 @@ static UINT CreateTexture(std::filesystem::path filename);
 static UINT g_Width;
 static UINT g_Height;
 static float g_AspectRatio;
-static bool g_Raster = true;
+static bool g_EnableRTShadows = true;
+static float g_SunTime = 0.5f;
 
 static std::wstring g_Title;
 static std::wstring g_AssetsPath;
@@ -490,10 +494,16 @@ static ComPtr<ID3D12RootSignature> g_RootSignature;
 static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
+static ComPtr<ID3D12StateObject> g_DxrStateObject;
+static GpuBuffer g_RayGenShaderTable;
+static GpuBuffer g_MissShaderTable;
+static GpuBuffer g_HitGroupShaderTable;
+
 static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
 
 static Texture g_VisibilityBuffer;
+static Texture g_ShadowBuffer;
 
 struct GBuffer {
   Texture worldPosition;
@@ -584,7 +594,7 @@ void LoadAssets()
       // TODO: loop subsets
       geometries[i] = {
           .Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES,
-          .Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE,
+          .Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE,  // TODO: flag none for anyhit?
           .Triangles = {
               .Transform3x4 = 0,
               .IndexFormat = DXGI_FORMAT_R32_UINT,
@@ -664,7 +674,7 @@ void LoadAssets()
   {
     size_t bufSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size();
 
-    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator.Get(), MemoryUsage::Upload)
+    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator.Get(), HeapType::Upload)
         .Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
   }
 
@@ -685,6 +695,8 @@ void LoadAssets()
     // Allocate buffer for scene tlas
     g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
                                     g_Allocator.Get());
+
+    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device.Get(), g_SrvUavDescHeapAlloc);
 
     auto ctx = &g_FrameContext[g_FrameIndex];
     CHECK_HR(ctx->commandAllocator->Reset());
@@ -714,6 +726,7 @@ void Update(float time, float dt)
     ctx->frameConstants.Time = time;
     ctx->frameConstants.CameraWS = g_Scene.camera->WorldPos();
     ctx->frameConstants.ScreenSize = {static_cast<float>(g_Width), static_cast<float>(g_Height)};
+    ctx->frameConstants.TwoOverScreenSize = {2.0f / static_cast<float>(g_Width), 2.0f / static_cast<float>(g_Height)};
   }
 
   // Per object constant buffer
@@ -803,7 +816,24 @@ void Update(float time, float dt)
 
   {
     ImGui::Begin("Ray tracing");
-    ImGui::Checkbox("Raster", &g_Raster);
+    ImGui::Checkbox("Enable RT shadows", &g_EnableRTShadows);
+
+    ImGui::SliderFloat("Sun Time", &g_SunTime, 0.0f, 1.0f);
+
+    float angle = g_SunTime * XM_PI;
+
+    float x = -XMScalarCos(angle);
+    float y = -0.4f - XMScalarSin(angle) * 0.6f;
+    float z = 0.0f;
+
+    XMVECTOR vec = XMVectorSet(x, y, z, 0.0f);
+    vec = XMVector3Normalize(vec);
+
+    XMStoreFloat3(&ctx->frameConstants.SunDirection, vec);
+
+    ImGui::Text("Sun Direction: %f %f %f", ctx->frameConstants.SunDirection.x, ctx->frameConstants.SunDirection.y,
+                ctx->frameConstants.SunDirection.z);
+
     ImGui::End();
   }
 
@@ -828,6 +858,7 @@ void Update(float time, float dt)
     ImGui::Text("Culling: %.4f ms", GetTime(Timestamp::CullBegin));
     ImGui::Text("Raster: %.4f ms", GetTime(Timestamp::DrawBegin));
     ImGui::Text("Fill G-Buffer: %.4f ms", GetTime(Timestamp::FillGBufferBegin));
+    ImGui::Text("Shadows RT: %.4f ms", GetTime(Timestamp::ShadowsBegin));
     ImGui::Text("Total: %.4f ms", GetTime(Timestamp::TotalBegin));
 
     ctx->timestampReadBackBuffer.Unmap();
@@ -854,6 +885,11 @@ void Update(float time, float dt)
 
       if (ImGui::BeginTabItem("Base Color")) {
         ImGui::Image((ImTextureID)g_GBuffer.baseColor.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem("Shadow")) {
+        ImGui::Image((ImTextureID)g_ShadowBuffer.SrvDescriptorGpuHandle().ptr, imgSize);
         ImGui::EndTabItem();
       }
 
@@ -905,13 +941,8 @@ void Render()
   g_CommandList->ClearRenderTargetView(g_VisibilityBuffer.RtvDescriptorHandle(), visBufferClearColor, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
-  if (g_Raster) {
-    const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
-  } else {
-    const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
-    g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
-  }
+  const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
+  g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
 
   std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
@@ -1013,9 +1044,6 @@ void Render()
     before[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
 
-    static constexpr float clearFloat[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    static constexpr UINT clearUint[] = {0, 0, 0, 0};
-
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer.SrvDescriptorIndex());
@@ -1036,6 +1064,47 @@ void Render()
     g_CommandList->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
   }
 
+  // Ray trace shadows
+  if (g_EnableRTShadows) {
+    auto before = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    g_CommandList->ResourceBarrier(1, &before);
+
+    g_CommandList->SetPipelineState1(g_DxrStateObject.Get());
+
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
+                                               g_GBuffer.worldPosition.SrvDescriptorIndex(), 0);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
+                                               g_GBuffer.worldNormal.SrvDescriptorIndex(), 1);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.UavDescriptorIndex(), 2);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 3);
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
+    {
+      D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
+      // Since each shader table has only one shader record, the stride is same as the size.
+      dispatchDesc.HitGroupTable.StartAddress = g_HitGroupShaderTable.GpuAddress();
+      dispatchDesc.HitGroupTable.SizeInBytes = g_HitGroupShaderTable.Size();
+      dispatchDesc.HitGroupTable.StrideInBytes = g_HitGroupShaderTable.Size();
+
+      dispatchDesc.MissShaderTable.StartAddress = g_MissShaderTable.GpuAddress();
+      dispatchDesc.MissShaderTable.SizeInBytes = g_MissShaderTable.Size();
+      dispatchDesc.MissShaderTable.StrideInBytes = g_MissShaderTable.Size();
+
+      dispatchDesc.RayGenerationShaderRecord.StartAddress = g_RayGenShaderTable.GpuAddress();
+      dispatchDesc.RayGenerationShaderRecord.SizeInBytes = g_RayGenShaderTable.Size();
+
+      dispatchDesc.Width = g_Width;
+      dispatchDesc.Height = g_Height;
+      dispatchDesc.Depth = 1;
+
+      g_CommandList->DispatchRays(&dispatchDesc);
+    }
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
+
+    auto after = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    g_CommandList->ResourceBarrier(1, &after);
+  }
+
   // Record Full screen triangle pass - Compose final image commands
   {
     auto rtvHandle = ctx->renderTarget.RtvDescriptorHandle();
@@ -1045,6 +1114,8 @@ void Render()
 
     g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants,
                                                 g_GBuffer.baseColor.SrvDescriptorIndex(), 0);
+    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.SrvDescriptorIndex(),
+                                                1);
 
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g_CommandList->DrawInstanced(3, 1, 0, 0);
@@ -1147,8 +1218,16 @@ void Cleanup()
   }
   g_Scene.tlasBuffer.Reset();
 
+  g_DxrStateObject.Reset();
+
+  g_RayGenShaderTable.Reset();
+  g_MissShaderTable.Reset();
+  g_HitGroupShaderTable.Reset();
+
   g_VisibilityBuffer.Reset();
   g_GBuffer.Reset();
+
+  g_ShadowBuffer.Reset();
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
@@ -1417,7 +1496,7 @@ static void InitFrameResources()
   // RTV
   {
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                                           .NumDescriptors = FRAME_BUFFER_COUNT + 2,  // g_VisibilityBuffer + g_GBuffer
+                                           .NumDescriptors = FRAME_BUFFER_COUNT + 1,  // g_VisibilityBuffer
                                            .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE};
     ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
     CHECK_HR(g_Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap)));
@@ -1707,6 +1786,77 @@ static void InitFrameResources()
     g_PipelineStateObjects[PSO::FinalComposeVS].Attach(pipelineStateObject);
   }
 
+  // Ray traced shadow pipeline
+  {
+    const wchar_t* HitGroupName = L"MyHitGroup";
+    const wchar_t* RaygenShaderName = L"ShadowRayGen";
+    const wchar_t* AnyHitShaderName = L"ShadowAnyHit";
+    const wchar_t* MissShaderName = L"ShadowMiss";
+
+    auto libBlob = ReadData(GetAssetFullPath(L"RayTracingRT.cso").c_str());
+    D3D12_SHADER_BYTECODE libShader = {libBlob.data(), libBlob.size()};
+
+    CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};
+    auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+    lib->SetDXILLibrary(&libShader);
+    lib->DefineExport(RaygenShaderName);
+    lib->DefineExport(AnyHitShaderName);
+    lib->DefineExport(MissShaderName);
+
+    auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+    hitGroup->SetAnyHitShaderImport(AnyHitShaderName);
+    hitGroup->SetHitGroupExport(HitGroupName);
+    hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+
+    auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+    UINT payloadSize = 1 * sizeof(float);    // struct ShadowPayload { float visibility; };
+    UINT attributeSize = 2 * sizeof(float);  // struct BuiltInTriangleIntersectionAttributes { float2 barycentrics; };
+    shaderConfig->Config(payloadSize, attributeSize);
+
+    auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+    globalRootSignature->SetRootSignature(g_RootSignature.Get());
+
+    auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+    UINT maxRecursionDepth = 1;
+    pipelineConfig->Config(maxRecursionDepth);
+
+#ifdef _DEBUG
+    PrintStateObjectDesc(raytracingPipeline);
+#endif
+
+    CHECK_HR(g_Device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&g_DxrStateObject)));
+
+    // Shader Table
+    ComPtr<ID3D12StateObjectProperties> stateObjectProperties;
+    CHECK_HR(g_DxrStateObject.As(&stateObjectProperties));
+
+    UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+
+    {
+      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(RaygenShaderName);
+      UINT numShaderRecords = 1;
+      g_RayGenShaderTable
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"RayGen Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+    }
+
+    {
+      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(MissShaderName);
+      UINT numShaderRecords = 1;
+      g_MissShaderTable
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"Miss Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+    }
+
+    {
+      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(HitGroupName);
+      UINT numShaderRecords = 1;
+      g_HitGroupShaderTable
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"HitGroup Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+    }
+  }
+
   // MeshStore: TODO: make an instance method / DRY
   {
     // TODO: compute worst case scenario from the scene.
@@ -1722,7 +1872,7 @@ static void InitFrameResources()
     // Positions buffer
     {
       g_MeshStore.m_VertexPositions
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator.Get(), HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc)
           .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
@@ -1730,7 +1880,7 @@ static void InitFrameResources()
     // Normals buffer
     {
       g_MeshStore.m_VertexNormals
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator.Get(), HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform normals during skinning
     }
@@ -1738,7 +1888,7 @@ static void InitFrameResources()
     // Tangents buffer
     {
       g_MeshStore.m_VertexTangents
-          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator.Get(), MemoryUsage::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator.Get(), HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform tangents during skinning
     }
@@ -1746,51 +1896,49 @@ static void InitFrameResources()
     // UVs buffer
     {
       g_MeshStore.m_VertexUVs
-          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Blend weights/indices buffer
     {
       g_MeshStore.m_VertexBlendWeightsAndIndices
-          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator.Get(),
-                 MemoryUsage::Upload)
+          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numVertices, sizeof(XMUINT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Vertex indices
     {
       g_MeshStore.m_VertexIndices
-          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlets buffer
     {
       g_MeshStore.m_Meshlets
-          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet unique vertex indices buffer
     {
       g_MeshStore.m_MeshletUniqueIndices
-          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
       g_MeshStore.m_MeshletPrimitives
-          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator.Get(), MemoryUsage::Upload)
+          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Materials buffer
     {
       g_MeshStore.m_Materials
-          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator.Get(),
-                 MemoryUsage::Upload)
+          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator.Get(), HeapType::Upload)
           .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
@@ -1798,7 +1946,7 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       g_MeshStore.m_Instances[i]
           .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator.Get(),
-                 MemoryUsage::Upload)
+                 HeapType::Upload)
           .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
@@ -1806,7 +1954,7 @@ static void InitFrameResources()
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       g_MeshStore.m_BoneMatrices[i]
           .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator.Get(),
-                 MemoryUsage::Upload)
+                 HeapType::Upload)
           .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
@@ -1814,7 +1962,7 @@ static void InitFrameResources()
     {
       g_DrawMeshCommands
           .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
-                 L"Draw Meshlets command buffer", g_Allocator.Get(), MemoryUsage::Default, true)
+                 L"Draw Meshlets command buffer", g_Allocator.Get(), HeapType::Default, true)
           .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc)
           .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc,
                      g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
@@ -1824,7 +1972,7 @@ static void InitFrameResources()
     {
       size_t bufSiz = sizeof(UINT);
 
-      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator.Get(), MemoryUsage::Upload)
+      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator.Get(), HeapType::Upload)
           .Clear(bufSiz)
           .Unmap();
     }
@@ -1860,7 +2008,6 @@ static void InitFrameResources()
     };
     g_VisibilityBuffer.AllocRtvDescriptor(g_RtvDescHeapAlloc);
     g_Device->CreateRenderTargetView(g_VisibilityBuffer.Resource(), nullptr, g_VisibilityBuffer.RtvDescriptorHandle());
-
   }
 
   // G-Buffer output
@@ -1893,6 +2040,9 @@ static void InitFrameResources()
     InitGBuffer(g_GBuffer.worldPosition, GBUFFER_WORLD_POSITION_FORMAT, L"G-Buffer world position");
     InitGBuffer(g_GBuffer.worldNormal, GBUFFER_WORLD_NORMAL_FORMAT, L"G-Buffer world normal");
     InitGBuffer(g_GBuffer.baseColor, GBUFFER_BASE_COLOR_FORMAT, L"G-Buffer base color");
+
+    // Shadow buffer output
+    InitGBuffer(g_ShadowBuffer, SHADOW_BUFFER_FORMAT, L"Shadow buffer");
   }
 
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
@@ -1910,7 +2060,7 @@ static void InitFrameResources()
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     g_FrameContext[i].timestampReadBackBuffer.Alloc(sizeof(UINT64) * Timestamp::Count,
                                                     std::format(L"Timestamp Readback Buffer {}", i), g_Allocator.Get(),
-                                                    MemoryUsage::Readback);
+                                                    HeapType::Readback);
   }
 }
 

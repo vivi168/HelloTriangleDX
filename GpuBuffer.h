@@ -7,7 +7,7 @@ namespace Renderer
 {
 inline constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
 
-enum class MemoryUsage {
+enum class HeapType {
   Default = 0,
   Upload,
   Readback,
@@ -36,6 +36,10 @@ struct GpuResource {
     m_CurrentState = stateAfter;
     return CD3DX12_RESOURCE_BARRIER::Transition(m_Resource.Get(), stateBefore, stateAfter);
   }
+
+  virtual void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { m_SrvDescriptor.Alloc(allocator); }
+
+  virtual void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { m_UavDescriptor.Alloc(allocator); }
 
   UINT SrvDescriptorIndex() const { return m_SrvDescriptor.Index(); }
 
@@ -74,10 +78,6 @@ struct GpuResource {
   }
 
 protected:
-  virtual void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) = 0;
-
-  virtual void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) = 0;
-
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   HeapDescriptor m_SrvDescriptor;
   HeapDescriptor m_UavDescriptor;
@@ -91,20 +91,20 @@ struct GpuBuffer : GpuResource {
   GpuBuffer& Alloc(size_t bufSize,
                    std::wstring name,
                    D3D12MA::Allocator* allocator,
-                   MemoryUsage memUsage = MemoryUsage::Default,
+                   HeapType memUsage = HeapType::Default,
                    bool allowUnorderedAccess = false,
                    D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON)
   {
     D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
 
     switch (memUsage) {
-      case MemoryUsage::Default:
+      case HeapType::Default:
         allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
         break;
-      case MemoryUsage::Upload:
+      case HeapType::Upload:
         allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
         break;
-      case MemoryUsage::Readback:
+      case HeapType::Readback:
         allocDesc.HeapType = D3D12_HEAP_TYPE_READBACK;
         break;
     }
@@ -116,9 +116,11 @@ struct GpuBuffer : GpuResource {
 
     CreateResource(allocator, &allocDesc, &bufferDesc, InitialResourceState).SetName(name);
 
-    if (memUsage == MemoryUsage::Upload) {
+    if (memUsage == HeapType::Upload) {
       Map();
     }
+
+    m_Size = bufSize;
 
     return *this;
   }
@@ -140,6 +142,18 @@ struct GpuBuffer : GpuResource {
 
     AllocSrvDescriptor(allocator);
     device->CreateShaderResourceView(Resource(), &srvDesc, SrvDescriptorHandle());
+
+    return *this;
+  }
+
+  GpuBuffer& CreateAccelStructSrv(ID3D12Device* device, DescriptorHeapListAllocator& allocator)
+  {
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
+                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                            .RaytracingAccelerationStructure = {.Location = GpuAddress()}};
+
+    AllocSrvDescriptor(allocator);
+    device->CreateShaderResourceView(nullptr, &srvDesc, SrvDescriptorHandle());
 
     return *this;
   }
@@ -205,16 +219,27 @@ struct GpuBuffer : GpuResource {
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress(size_t offset = 0) const { return m_Resource->GetGPUVirtualAddress() + offset; }
 
+  size_t Size() const { return m_Size; }
+
 private:
-  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) override { m_SrvDescriptor.Alloc(allocator); }
-
-  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) override { m_UavDescriptor.Alloc(allocator); }
-
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.CpuHandle(); }
 
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.CpuHandle(); }
 
   void* m_Address = nullptr;
+  size_t m_Size;
+};
+
+// TODO: use this to create textures
+struct TextureDesc {
+  UINT width;
+  UINT height;
+  DXGI_FORMAT format;
+  UINT mipLevels;
+  UINT arraySize;
+  bool allowUnorderedAccess;
+  bool allowRenderTarget;
+  bool allowDepthStencil;
 };
 
 struct Texture : GpuResource {

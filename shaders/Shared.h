@@ -33,6 +33,8 @@ struct FrameConstants {
   hlsl_float3 CameraWS;
   hlsl_float4 FrustumPlanes[6];
   hlsl_float2 ScreenSize;
+  hlsl_float2 TwoOverScreenSize;
+  hlsl_float3 SunDirection;
 };
 
 struct BuffersDescriptorIndices {

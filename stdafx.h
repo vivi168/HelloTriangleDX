@@ -17,6 +17,7 @@
 #include "d3dx12_pipeline_state_stream.h"
 #include "d3dx12_resource_helpers.h"
 #include "d3dx12_root_signature.h"
+#include "d3dx12_state_object.h"
 
 #include <DirectXMath.h>
 #include <DirectXMesh.h>
