@@ -1073,10 +1073,8 @@ void Render()
 
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
                                                g_GBuffer.worldPosition.SrvDescriptorIndex(), 0);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
-                                               g_GBuffer.worldNormal.SrvDescriptorIndex(), 1);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.UavDescriptorIndex(), 2);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 3);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.UavDescriptorIndex(), 1);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 2);
 
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
     {
