@@ -60,7 +60,9 @@ enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
 namespace Timestamp
 {
 enum Timestamps : size_t {
-  SkinBegin = 0,
+  TotalBegin = 0,
+  TotalEnd,
+  SkinBegin,
   SkinEnd,
   CullBegin,
   CullEnd,
@@ -70,8 +72,8 @@ enum Timestamps : size_t {
   FillGBufferEnd,
   ShadowsBegin,
   ShadowsEnd,
-  TotalBegin,
-  TotalEnd,
+  FinalComposeBegin,
+  FinalComposeEnd,
   Count
 };
 }
@@ -856,9 +858,10 @@ void Update(float time, float dt)
 
     ImGui::Text("Skinning: %.4f ms", GetTime(Timestamp::SkinBegin));
     ImGui::Text("Culling: %.4f ms", GetTime(Timestamp::CullBegin));
-    ImGui::Text("Raster: %.4f ms", GetTime(Timestamp::DrawBegin));
+    ImGui::Text("Raster VisBuffer: %.4f ms", GetTime(Timestamp::DrawBegin));
     ImGui::Text("Fill G-Buffer: %.4f ms", GetTime(Timestamp::FillGBufferBegin));
     ImGui::Text("Shadows RT: %.4f ms", GetTime(Timestamp::ShadowsBegin));
+    ImGui::Text("Final Compose: %.4f ms", GetTime(Timestamp::FinalComposeBegin));
     ImGui::Text("Total: %.4f ms", GetTime(Timestamp::TotalBegin));
 
     ctx->timestampReadBackBuffer.Unmap();
@@ -955,6 +958,7 @@ void Render()
 
   // record skinning compute commands if needed
   // TODO: we should also update culling data. And move to Indirect?
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
@@ -965,7 +969,6 @@ void Render()
                                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &b0);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
       g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
@@ -973,15 +976,17 @@ void Render()
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
     auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &b1);
   }
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
   // record culling commands
   {
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
+
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
 
     g_CommandList->SetComputeRootSignature(g_RootSignature.Get());
@@ -1001,17 +1006,19 @@ void Render()
     auto before = g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &before);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
     g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
 
     auto after =
         g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
     g_CommandList->ResourceBarrier(1, &after);
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
   }
 
   // Record drawing commands
   {
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
+
     auto rtvHandle = g_VisibilityBuffer.RtvDescriptorHandle();
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
@@ -1026,18 +1033,20 @@ void Render()
                                                  &ctx->buffersDescriptorsIndices,
                                                  0);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
                                    0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
 
     auto after =
         g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &after);
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
   }
 
   // Record Fill G-Buffer from Visibility-Buffer commands
   {
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
+
     std::array<D3D12_RESOURCE_BARRIER, 3> before;
     before[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     before[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1053,18 +1062,19 @@ void Render()
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
                                                 SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
 
     std::array<D3D12_RESOURCE_BARRIER, 3> after;
     after[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     after[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     after[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
   }
 
   // Ray trace shadows
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
     auto before = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &before);
@@ -1076,7 +1086,6 @@ void Render()
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.UavDescriptorIndex(), 1);
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 2);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
     {
       D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
       // Since each shader table has only one shader record, the stride is same as the size.
@@ -1097,14 +1106,16 @@ void Render()
 
       g_CommandList->DispatchRays(&dispatchDesc);
     }
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
 
     auto after = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &after);
   }
+  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
 
   // Record Full screen triangle pass - Compose final image commands
   {
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
+
     auto rtvHandle = ctx->renderTarget.RtvDescriptorHandle();
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
@@ -1117,6 +1128,8 @@ void Render()
 
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g_CommandList->DrawInstanced(3, 1, 0, 0);
+
+    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeEnd);
   }
 
   ImGui::Render();
