@@ -1684,14 +1684,14 @@ static void InitFrameResources()
   // Mesh Shader Pipeline State for static objects
   {
     // Mesh Shader
-    auto amplificationShaderBlob = ReadData(GetAssetFullPath(L"MeshletAS.cso").c_str());
+    auto amplificationShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.as.cso").c_str());
     D3D12_SHADER_BYTECODE amplificationShader = {amplificationShaderBlob.data(), amplificationShaderBlob.size()};
 
-    auto meshShaderBlob = ReadData(GetAssetFullPath(L"MeshletMS.cso").c_str());
+    auto meshShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.ms.cso").c_str());
     D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
                                         meshShaderBlob.size()};
 
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"MeshletPS.cso").c_str());
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.ps.cso").c_str());
     D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
                                          pixelShaderBlob.size()};
 
@@ -1724,7 +1724,7 @@ static void InitFrameResources()
 
   // Compute skinning pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"SkinningCS.cso").c_str());
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"Skinning.cs.cso").c_str());
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1739,7 +1739,7 @@ static void InitFrameResources()
 
   // Compute culling pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"InstanceCullingCS.cso").c_str());
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"InstanceCulling.cs.cso").c_str());
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1754,7 +1754,7 @@ static void InitFrameResources()
 
   // Fill G-Buffer pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"FillGBufferCS.cso").c_str());
+    auto computeShaderBlob = ReadData(GetAssetFullPath(L"FillGBuffer.cs.cso").c_str());
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1769,10 +1769,10 @@ static void InitFrameResources()
 
   // Final image composition VS/PS pipeline
   {
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"FullScreenTriangleVS.cso").c_str());
+    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"FullScreenTriangle.vs.cso").c_str());
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(), vertexShaderBlob.size()};
 
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"FinalComposePS.cso").c_str());
+    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"FinalCompose.ps.cso").c_str());
     D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(), pixelShaderBlob.size()};
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -1804,7 +1804,7 @@ static void InitFrameResources()
     const wchar_t* AnyHitShaderName = L"ShadowAnyHit";
     const wchar_t* MissShaderName = L"ShadowMiss";
 
-    auto libBlob = ReadData(GetAssetFullPath(L"RayTracingRT.cso").c_str());
+    auto libBlob = ReadData(GetAssetFullPath(L"RayTracing.rt.cso").c_str());
     D3D12_SHADER_BYTECODE libShader = {libBlob.data(), libBlob.size()};
 
     CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};

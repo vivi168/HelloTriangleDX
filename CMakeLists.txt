@@ -39,15 +39,15 @@ set(THIRD_PARTY_SOURCE ${IMGUI_SOURCES} ${D3D12MA_SOURCES})
 
 set(SHADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(HLSL_SOURCES
-    ${SHADERS_DIR}/FillGBufferCS.hlsl
-    ${SHADERS_DIR}/FinalComposePS.hlsl
-    ${SHADERS_DIR}/FullScreenTriangleVS.hlsl
-    ${SHADERS_DIR}/InstanceCullingCS.hlsl
-    ${SHADERS_DIR}/MeshletAS.hlsl
-    ${SHADERS_DIR}/MeshletMS.hlsl
-    ${SHADERS_DIR}/MeshletPS.hlsl
-    ${SHADERS_DIR}/SkinningCS.hlsl
-    ${SHADERS_DIR}/RayTracingRT.hlsl)
+    ${SHADERS_DIR}/FillGBuffer.cs.hlsl
+    ${SHADERS_DIR}/FinalCompose.ps.hlsl
+    ${SHADERS_DIR}/FullScreenTriangle.vs.hlsl
+    ${SHADERS_DIR}/InstanceCulling.cs.hlsl
+    ${SHADERS_DIR}/Meshlet.as.hlsl
+    ${SHADERS_DIR}/Meshlet.ms.hlsl
+    ${SHADERS_DIR}/Meshlet.ps.hlsl
+    ${SHADERS_DIR}/Skinning.cs.hlsl
+    ${SHADERS_DIR}/RayTracing.rt.hlsl)
 
 set(HLSL_HEADERS
     ${SHADERS_DIR}/MeshletCommon.hlsli
@@ -110,9 +110,9 @@ if(NOT DXC_EXECUTABLE)
 endif()
 
 function(get_shader_profile BASENAME OUTPUT_PROFILE)
-    string(LENGTH "${BASENAME}" BASENAME_LENGTH)
-    math(EXPR TYPE_START "${BASENAME_LENGTH} - 2")
-    string(SUBSTRING "${BASENAME}" ${TYPE_START} 2 SHADER_TYPE)
+    get_filename_component(SHADER_EXT ${BASENAME} EXT)
+    string(REGEX REPLACE "^\\." "" SHADER_TYPE ${SHADER_EXT})
+    string(TOUPPER "${SHADER_TYPE}" SHADER_TYPE)
 
     if(SHADER_TYPE STREQUAL "PS")
         set(SM_TYPE ps)
