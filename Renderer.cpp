@@ -622,7 +622,10 @@ void LoadAssets()
       g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
                                           g_Allocator.Get());
 
-      mi->blasBufferAddress = g_Scene.blasBuffers[i].resultData.GpuAddress();
+      // assign blas buffer address to each instances of this mesh
+      for (auto& inst : g_Scene.meshInstanceMap[mesh->name]) {
+        inst->blasBufferAddress = g_Scene.blasBuffers[i].resultData.GpuAddress();
+      }
     }
 
     auto ctx = &g_FrameContext[g_FrameIndex];
