@@ -6,29 +6,67 @@
   },
   "configurePresets": [
     {
-      "name": "Release",
-      "displayName": "Release (Ninja)",
+      "name": "Ninja Base",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/Release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "BC_USE_OPENMP": "OFF",
         "BUILD_DX11": "OFF",
         "BUILD_SAMPLE": "OFF",
         "BUILD_TOOLS": "OFF"
+      },
+      "hidden": true
+    },
+    {
+      "name": "MSVC Base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      },
+      "hidden": true
+    },
+    {
+      "name": "Clang Base",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_C_COMPILER": "clang-cl.exe",
+        "CMAKE_CXX_COMPILER": "clang-cl.exe"
+      },
+      "hidden": true
+    },
+    {
+      "name": "Release",
+      "displayName": "Release (Ninja)",
+      "binaryDir": "${sourceDir}/Release",
+      "inherits": ["Ninja Base", "MSVC Base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
       "name": "Debug",
       "displayName": "Debug (Ninja)",
-      "generator": "Ninja",
       "binaryDir": "${sourceDir}/Debug",
+      "inherits": ["Ninja Base", "MSVC Base"],
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "BC_USE_OPENMP": "OFF",
-        "BUILD_DX11": "OFF",
-        "BUILD_SAMPLE": "OFF",
-        "BUILD_TOOLS": "OFF"
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "Release-Clang",
+      "displayName": "Release-Clang (Ninja)",
+      "binaryDir": "${sourceDir}/Release-Clang",
+      "inherits": ["Ninja Base", "Clang Base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "Debug-Clang",
+      "displayName": "Debug-Clang (Ninja)",
+      "binaryDir": "${sourceDir}/Debug-Clang",
+      "inherits": ["Ninja Base", "Clang Base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
