@@ -8,6 +8,8 @@ using namespace DirectX;
 
 static const wchar_t* const CLASS_NAME = L"HelloTriangleDX";
 static const wchar_t* const WINDOW_TITLE = L"HelloTriangleDX";
+static const LONG WINDOW_WIDTH = 1920;
+static const LONG WINDOW_HEIGHT = 1080;
 
 static HWND g_Hwnd = nullptr;
 static LARGE_INTEGER g_Frequency;
@@ -16,10 +18,9 @@ static LARGE_INTEGER g_LastTime;
 static float g_Time;         // g_TimeValue converted to float, in seconds.
 static float g_TimeDelta;
 
-static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam,
-                                   LPARAM lParam);
+static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
+int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<IssouRHI::Device> device)
 {
   WNDCLASSEX windowClass;
   ZeroMemory(&windowClass, sizeof(windowClass));
@@ -35,11 +36,8 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
   ATOM classR = RegisterClassEx(&windowClass);
   assert(classR);
 
-  Renderer::InitWindow(1280, 720, WINDOW_TITLE);
-
   DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-  RECT windowRect = {0, 0, static_cast<LONG>(Renderer::GetWidth()),
-                     static_cast<LONG>(Renderer::GetHeight())};
+  RECT windowRect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
   AdjustWindowRect(&windowRect, style, FALSE);
 
   // Create the window and store a handle to it.
@@ -59,7 +57,10 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
 
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
 
-  Renderer::Init();
+  // TODO: Create Surface and get info from surface instead
+  Renderer::InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
+  Renderer::Init(device /*, surface */);
+
 
   QueryPerformanceFrequency(&g_Frequency);
   QueryPerformanceCounter(&g_StartTime);
@@ -101,6 +102,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow)
       }
     }
   }
+
+  Renderer::Cleanup();
+
   return (int)msg.wParam;
 }
 
@@ -119,7 +123,6 @@ static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam,
 
   switch (message) {
     case WM_DESTROY:
-      Renderer::Cleanup();
       PostQuitMessage(0);
       return 0;
     case WM_KEYUP:

@@ -20,14 +20,6 @@ namespace Renderer
 {
 // ========== Constants
 
-#ifdef _DEBUG
-#define ENABLE_DEBUG_LAYER true
-#endif
-
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
-static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
-static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
-
 static constexpr size_t FRAME_BUFFER_COUNT = 3;
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
 static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
@@ -118,6 +110,7 @@ struct MeshInstance {
   UINT rtInstanceOffset;
   D3D12_GPU_VIRTUAL_ADDRESS blasBufferAddress = 0;
 
+  // FIXME: circular reference, make this a weak_ptr or simple ptr.
   std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
   std::shared_ptr<Mesh3D> mesh = nullptr;
 };
@@ -443,7 +436,6 @@ static void WaitForFrame(FrameContext* ctx);
 static void MoveToNextFrame();
 static void WaitGPUIdle();
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
-static void PrintAdapterInformation(IDXGIAdapter1* adapter);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
 static UINT CreateTexture(std::filesystem::path filename);
 
@@ -459,14 +451,8 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static IDXGIFactory4* g_Factory = nullptr;
-static ComPtr<IDXGIAdapter1> g_Adapter;
-
 static ComPtr<ID3D12Device5> g_Device;
-static DXGI_ADAPTER_DESC1 g_AdapterDesc;
-static ComPtr<D3D12MA::Allocator> g_Allocator;
-// Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
-static D3D12MA::ALLOCATION_CALLBACKS g_AllocationCallbacks;
+static D3D12MA::Allocator* g_Allocator;
 
 // swapchain used to switch between render targets
 static ComPtr<IDXGISwapChain3> g_SwapChain;
@@ -549,19 +535,12 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_Title = name;
 }
 
-void InitAdapter(IDXGIFactory4* factory, IDXGIAdapter1* adapter)
+void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */)
 {
-  g_Factory = factory;
-  assert(g_Factory);
+  g_Device = device->GetNativeDevice();
+  g_Allocator = device->GetAllocator();
+  g_CommandQueue = device->GetCommandQueue();
 
-  g_Adapter = adapter;
-  assert(g_Adapter);
-
-  CHECK_HR(g_Adapter->GetDesc1(&g_AdapterDesc));
-}
-
-void Init()
-{
   InitD3D();
   InitFrameResources();
 }
@@ -620,7 +599,7 @@ void LoadAssets()
       assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
       g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
-                                          g_Allocator.Get());
+                                          g_Allocator);
 
       // assign blas buffer address to each instances of this mesh
       for (auto& inst : g_Scene.meshInstanceMap[mesh->name]) {
@@ -679,7 +658,7 @@ void LoadAssets()
   {
     size_t bufSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size();
 
-    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator.Get(), HeapType::Upload)
+    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator, HeapType::Upload)
         .Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
   }
 
@@ -699,7 +678,7 @@ void LoadAssets()
 
     // Allocate buffer for scene tlas
     g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
-                                    g_Allocator.Get());
+                                    g_Allocator);
 
     g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device.Get(), g_SrvUavDescHeapAlloc);
 
@@ -1245,7 +1224,7 @@ void Cleanup()
 
   CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
-  g_CommandQueue.Reset();
+  // g_CommandQueue.Reset();
 
   g_SrvUavDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
@@ -1256,24 +1235,16 @@ void Cleanup()
     g_FrameContext[i].Reset();
   }
 
-  PrintStatsString();
+  // PrintStatsString();
 
-  g_Allocator.Reset();
+  // g_Allocator.Reset();
 
-  if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
-    assert(g_CpuAllocationCount.load() == 0);
-  }
+  // if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
+  //   assert(g_CpuAllocationCount.load() == 0);
+  // }
 
-  g_Device.Reset();
+  // g_Device.Reset();
   g_SwapChain.Reset();
-}
-
-void PrintStatsString()
-{
-  WCHAR* statsString = NULL;
-  g_Allocator->BuildStatsString(&statsString, TRUE);
-  wprintf(L"%s\n", statsString);
-  g_Allocator->FreeStatsString(statsString);
 }
 
 UINT GetWidth() { return g_Width; }
@@ -1328,109 +1299,8 @@ UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
 
 // ========== Static functions
 
-static void* CustomAllocate(size_t Size, size_t Alignment, void* pPrivateData)
-{
-  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
-
-  void* memory = _aligned_malloc(Size, Alignment);
-
-  if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
-    wprintf(L"Allocate Size=%llu Alignment=%llu -> %p\n", Size, Alignment,
-            memory);
-  }
-
-  g_CpuAllocationCount++;
-
-  return memory;
-}
-
-static void CustomFree(void* pMemory, void* pPrivateData)
-{
-  assert(pPrivateData == CUSTOM_ALLOCATION_PRIVATE_DATA);
-
-  if (pMemory) {
-    g_CpuAllocationCount--;
-
-    if (ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT) {
-      wprintf(L"Free %p\n", pMemory);
-    }
-
-    _aligned_free(pMemory);
-  }
-}
-
 static void InitD3D()
 {
-#ifdef ENABLE_DEBUG_LAYER
-  ID3D12Debug* debug;
-
-  if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
-    debug->EnableDebugLayer();
-#endif
-
-  // Create Device
-  {
-    ID3D12Device5* device = nullptr;
-    CHECK_HR(D3D12CreateDevice(g_Adapter.Get(), FEATURE_LEVEL, IID_PPV_ARGS(&device)));
-    g_Device.Attach(device);
-
-    // Ray tracing capabilities
-    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
-    assert(options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
-
-    // Mesh shading
-    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
-    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7)));
-    assert(options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1);
-
-    // GPU Upload Heap Supported
-    D3D12_FEATURE_DATA_D3D12_OPTIONS16 options16 = {};
-    CHECK_HR(g_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &options16, sizeof(options16)));
-    assert(options16.GPUUploadHeapSupported);
-  }
-
-#ifdef ENABLE_DEBUG_LAYER
-  ID3D12InfoQueue* pInfoQueue = nullptr;
-  g_Device->QueryInterface(IID_PPV_ARGS(&pInfoQueue));
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
-  pInfoQueue->Release();
-  debug->Release();
-#endif
-
-  // Create Memory allocator
-  {
-    D3D12MA::ALLOCATOR_DESC desc = {};
-    desc.Flags = D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
-    desc.pDevice = g_Device.Get();
-    desc.pAdapter = g_Adapter.Get();
-
-    if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
-      g_AllocationCallbacks.pAllocate = &CustomAllocate;
-      g_AllocationCallbacks.pFree = &CustomFree;
-      g_AllocationCallbacks.pPrivateData = CUSTOM_ALLOCATION_PRIVATE_DATA;
-      desc.pAllocationCallbacks = &g_AllocationCallbacks;
-    }
-
-    CHECK_HR(D3D12MA::CreateAllocator(&desc, &g_Allocator));
-
-    PrintAdapterInformation(g_Adapter.Get());
-  }
-
-  // Create Command Queue
-  {
-    D3D12_COMMAND_QUEUE_DESC cqDesc{
-        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-    };
-
-    ID3D12CommandQueue* commandQueue = nullptr;
-    CHECK_HR(g_Device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&commandQueue)));
-    g_CommandQueue.Attach(commandQueue);
-  }
-
   // Create Command Allocator
   {
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
@@ -1491,7 +1361,7 @@ static void InitD3D()
     // The queue will be flushed once the swap chain is created. Give it the
     // swap chain description we created above and store the created swap chain
     // in a temp IDXGISwapChain interface
-    CHECK_HR(g_Factory->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc,
+    CHECK_HR(IssouRHI::GetDXGIFactory()->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc,
                                         &tempSwapChain));
 
     g_SwapChain.Attach(static_cast<IDXGISwapChain3*>(tempSwapChain));
@@ -1554,7 +1424,7 @@ static void InitFrameResources()
     depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     g_DepthStencilBuffer.CreateResource(
-        g_Allocator.Get(), &depthStencilAllocDesc, &depthStencilResourceDesc,
+        g_Allocator, &depthStencilAllocDesc, &depthStencilResourceDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
 
     g_DepthStencilBuffer.SetName(L"Depth Stencil Buffer");
@@ -1850,7 +1720,7 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(RaygenShaderName);
       UINT numShaderRecords = 1;
       g_RayGenShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"RayGen Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"RayGen Shader Table", g_Allocator, HeapType::Upload)
           .Copy(0, shaderIdentifier, shaderIdentifierSize);
     }
 
@@ -1858,7 +1728,7 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(MissShaderName);
       UINT numShaderRecords = 1;
       g_MissShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"Miss Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"Miss Shader Table", g_Allocator, HeapType::Upload)
           .Copy(0, shaderIdentifier, shaderIdentifierSize);
     }
 
@@ -1866,7 +1736,7 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(HitGroupName);
       UINT numShaderRecords = 1;
       g_HitGroupShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"HitGroup Shader Table", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numShaderRecords * shaderIdentifierSize, L"HitGroup Shader Table", g_Allocator, HeapType::Upload)
           .Copy(0, shaderIdentifier, shaderIdentifierSize);
     }
   }
@@ -1886,7 +1756,7 @@ static void InitFrameResources()
     // Positions buffer
     {
       g_MeshStore.m_VertexPositions
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator.Get(), HeapType::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator, HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc)
           .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
@@ -1894,7 +1764,7 @@ static void InitFrameResources()
     // Normals buffer
     {
       g_MeshStore.m_VertexNormals
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator.Get(), HeapType::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator, HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform normals during skinning
     }
@@ -1902,7 +1772,7 @@ static void InitFrameResources()
     // Tangents buffer
     {
       g_MeshStore.m_VertexTangents
-          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator.Get(), HeapType::Upload, true)
+          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator, HeapType::Upload, true)
           .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device.Get(), g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform tangents during skinning
     }
@@ -1910,56 +1780,56 @@ static void InitFrameResources()
     // UVs buffer
     {
       g_MeshStore.m_VertexUVs
-          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Blend weights/indices buffer
     {
       g_MeshStore.m_VertexBlendWeightsAndIndices
-          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numVertices, sizeof(XMUINT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Vertex indices
     {
       g_MeshStore.m_VertexIndices
-          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlets buffer
     {
       g_MeshStore.m_Meshlets
-          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet unique vertex indices buffer
     {
       g_MeshStore.m_MeshletUniqueIndices
-          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
       g_MeshStore.m_MeshletPrimitives
-          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Materials buffer
     {
       g_MeshStore.m_Materials
-          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator.Get(), HeapType::Upload)
+          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator, HeapType::Upload)
           .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
 
     // Instances buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       g_MeshStore.m_Instances[i]
-          .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator.Get(),
+          .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator,
                  HeapType::Upload)
           .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
@@ -1967,7 +1837,7 @@ static void InitFrameResources()
     // Bone Matrices buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       g_MeshStore.m_BoneMatrices[i]
-          .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator.Get(),
+          .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator,
                  HeapType::Upload)
           .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device.Get(), g_SrvUavDescHeapAlloc);
     }
@@ -1976,7 +1846,7 @@ static void InitFrameResources()
     {
       g_DrawMeshCommands
           .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
-                 L"Draw Meshlets command buffer", g_Allocator.Get(), HeapType::Default, true)
+                 L"Draw Meshlets command buffer", g_Allocator, HeapType::Default, true)
           .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc)
           .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc,
                      g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
@@ -1986,7 +1856,7 @@ static void InitFrameResources()
     {
       size_t bufSiz = sizeof(UINT);
 
-      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator.Get(), HeapType::Upload)
+      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator, HeapType::Upload)
           .Clear(bufSiz)
           .Unmap();
     }
@@ -2001,7 +1871,7 @@ static void InitFrameResources()
     textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
     D3D12_CLEAR_VALUE clear{.Format = textureDesc.Format, .Color = {0.0f, 0.0f, 0.0f, 0.0f}};
-    g_VisibilityBuffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, &clear);
+    g_VisibilityBuffer.CreateResource(g_Allocator, &allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, &clear);
     g_VisibilityBuffer.SetName(L"Visibility Buffer");
 
     // descriptor
@@ -2033,7 +1903,7 @@ static void InitFrameResources()
       textureDesc.MipLevels = 1;
       textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-      buffer.CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
+      buffer.CreateResource(g_Allocator, &allocDesc, &textureDesc);
       buffer.SetName(name);
 
       // descriptor
@@ -2073,7 +1943,7 @@ static void InitFrameResources()
   // timestamp readback buffer
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     g_FrameContext[i].timestampReadBackBuffer.Alloc(sizeof(UINT64) * Timestamp::Count,
-                                                    std::format(L"Timestamp Readback Buffer {}", i), g_Allocator.Get(),
+                                                    std::format(L"Timestamp Readback Buffer {}", i), g_Allocator,
                                                     HeapType::Readback);
   }
 }
@@ -2127,86 +1997,6 @@ static void WaitGPUIdle()
 static std::wstring GetAssetFullPath(LPCWSTR assetName)
 {
   return g_AssetsPath + assetName;
-}
-
-static void PrintAdapterInformation(IDXGIAdapter1* adapter)
-{
-  wprintf(L"DXGI_ADAPTER_DESC1:\n");
-  wprintf(L"    Description = %s\n", g_AdapterDesc.Description);
-  wprintf(L"    VendorId = 0x%X (%s)\n", g_AdapterDesc.VendorId,
-          VendorIDToStr(g_AdapterDesc.VendorId));
-  wprintf(L"    DeviceId = 0x%X\n", g_AdapterDesc.DeviceId);
-  wprintf(L"    SubSysId = 0x%X\n", g_AdapterDesc.SubSysId);
-  wprintf(L"    Revision = 0x%X\n", g_AdapterDesc.Revision);
-  wprintf(L"    DedicatedVideoMemory = %zu B (%s)\n",
-          g_AdapterDesc.DedicatedVideoMemory,
-          SizeToStr(g_AdapterDesc.DedicatedVideoMemory).c_str());
-  wprintf(L"    DedicatedSystemMemory = %zu B (%s)\n",
-          g_AdapterDesc.DedicatedSystemMemory,
-          SizeToStr(g_AdapterDesc.DedicatedSystemMemory).c_str());
-  wprintf(L"    SharedSystemMemory = %zu B (%s)\n",
-          g_AdapterDesc.SharedSystemMemory,
-          SizeToStr(g_AdapterDesc.SharedSystemMemory).c_str());
-
-  const D3D12_FEATURE_DATA_D3D12_OPTIONS& options =
-      g_Allocator->GetD3D12Options();
-  wprintf(L"D3D12_FEATURE_DATA_D3D12_OPTIONS:\n");
-  wprintf(L"    StandardSwizzle64KBSupported = %u\n",
-          options.StandardSwizzle64KBSupported ? 1 : 0);
-  wprintf(L"    CrossAdapterRowMajorTextureSupported = %u\n",
-          options.CrossAdapterRowMajorTextureSupported ? 1 : 0);
-
-  switch (options.ResourceHeapTier) {
-    case D3D12_RESOURCE_HEAP_TIER_1:
-      wprintf(L"    ResourceHeapTier = D3D12_RESOURCE_HEAP_TIER_1\n");
-      break;
-    case D3D12_RESOURCE_HEAP_TIER_2:
-      wprintf(L"    ResourceHeapTier = D3D12_RESOURCE_HEAP_TIER_2\n");
-      break;
-    default:
-      assert(0);
-  }
-
-  ComPtr<IDXGIAdapter3> adapter3;
-
-  if (SUCCEEDED(adapter->QueryInterface(IID_PPV_ARGS(&adapter3)))) {
-    wprintf(L"DXGI_QUERY_VIDEO_MEMORY_INFO:\n");
-
-    for (UINT groupIndex = 0; groupIndex < 2; ++groupIndex) {
-      const DXGI_MEMORY_SEGMENT_GROUP group =
-          groupIndex == 0 ? DXGI_MEMORY_SEGMENT_GROUP_LOCAL
-                          : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL;
-      const wchar_t* const groupName =
-          groupIndex == 0 ? L"DXGI_MEMORY_SEGMENT_GROUP_LOCAL"
-                          : L"DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL";
-      DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
-      CHECK_HR(adapter3->QueryVideoMemoryInfo(0, group, &info));
-
-      wprintf(L"    %s:\n", groupName);
-      wprintf(L"        Budget = %llu B (%s)\n", info.Budget,
-              SizeToStr(info.Budget).c_str());
-      wprintf(L"        CurrentUsage = %llu B (%s)\n", info.CurrentUsage,
-              SizeToStr(info.CurrentUsage).c_str());
-      wprintf(L"        AvailableForReservation = %llu B (%s)\n",
-              info.AvailableForReservation,
-              SizeToStr(info.AvailableForReservation).c_str());
-      wprintf(L"        CurrentReservation = %llu B (%s)\n",
-              info.CurrentReservation,
-              SizeToStr(info.CurrentReservation).c_str());
-    }
-  }
-
-  assert(g_Device);
-  D3D12_FEATURE_DATA_ARCHITECTURE1 architecture1 = {};
-
-  if (SUCCEEDED(g_Device->CheckFeatureSupport(
-          D3D12_FEATURE_ARCHITECTURE1, &architecture1, sizeof architecture1))) {
-    wprintf(L"D3D12_FEATURE_DATA_ARCHITECTURE1:\n");
-    wprintf(L"    UMA: %u\n", architecture1.UMA ? 1 : 0);
-    wprintf(L"    CacheCoherentUMA: %u\n",
-            architecture1.CacheCoherentUMA ? 1 : 0);
-    wprintf(L"    IsolatedMMU: %u\n", architecture1.IsolatedMMU ? 1 : 0);
-  }
 }
 
 // TODO: rewrite this mess
@@ -2348,7 +2138,7 @@ static UINT CreateTexture(std::filesystem::path filename)
                                    static_cast<WORD>(metadata.arraySize), static_cast<WORD>(metadata.mipLevels));
 
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
-  tex->CreateResource(g_Allocator.Get(), &allocDesc, &textureDesc);
+  tex->CreateResource(g_Allocator, &allocDesc, &textureDesc);
   tex->Map();
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;

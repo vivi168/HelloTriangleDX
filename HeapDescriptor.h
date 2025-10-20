@@ -1,5 +1,6 @@
 #pragma once
 
+// FIXME: rename this into DescriptorAllocation
 struct HeapDescriptor {
   void Alloc(DescriptorHeapListAllocator& allocator)
   {

@@ -206,6 +206,8 @@ void Mesh3D::Read(std::filesystem::path filename, bool skinned)
     for (size_t i = 0; i < header.numSubsets; i++) {
       subsets[i].start = tmpSubsets[i].start;
       subsets[i].count = tmpSubsets[i].count;
+      // FIXME: remove everything backend specific from this file. only read file into a struct that's it.
+      // create a Renderer::CreateMesh function that takes care of CreateMaterial, ComputeAdditionalData, etc
       subsets[i].materialIndex = Renderer::CreateMaterial(baseDir, std::wstring(tmpSubsets[i].materialName));
     }
   }

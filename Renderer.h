@@ -1,13 +1,14 @@
 #pragma once
 
+#include "IssouRHI.h"
+
 class Camera;
 struct Model3D;
 
 namespace Renderer
 {
 void InitWindow(UINT width, UINT height, std::wstring name);
-void InitAdapter(IDXGIFactory4*, IDXGIAdapter1*);
-void Init();
+void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */);
 void LoadAssets();
 void Update(float, float);
 void Render();

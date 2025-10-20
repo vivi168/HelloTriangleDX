@@ -35,7 +35,17 @@ set(IMGUI_SOURCES
 set(D3D12MA_SOURCES
     third_party/D3D12MemoryAllocator/src/D3D12MemAlloc.cpp)
 
-set(THIRD_PARTY_SOURCE ${IMGUI_SOURCES} ${D3D12MA_SOURCES})
+set(THIRD_PARTY_SOURCES ${IMGUI_SOURCES} ${D3D12MA_SOURCES})
+
+# TODO: move to standalone library later
+set(ISSOURHI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/IssouRHI)
+set(ISSOURHI_SOURCES
+    ${ISSOURHI_DIR}/DescriptorHeap.cpp
+    ${ISSOURHI_DIR}/Device.cpp
+    ${ISSOURHI_DIR}/Utils.cpp
+    ${ISSOURHI_DIR}/Surface.cpp)
+set(ISSOURHI_HEADERS
+    ${ISSOURHI_DIR}/include/IssouRHI.h)
 
 set(SHADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(HLSL_SOURCES
@@ -63,7 +73,8 @@ set(SOURCES
     Mesh.cpp
     Renderer.cpp
     Win32Application.cpp
-    ${THIRD_PARTY_SOURCE})
+    ${ISSOURHI_SOURCES}
+    ${THIRD_PARTY_SOURCES})
 
 set(HEADERS
     Camera.h
@@ -77,6 +88,7 @@ set(HEADERS
     Renderer.h
     RendererHelper.h
     Win32Application.h
+    ${ISSOURHI_HEADERS}
     ${SHADERS_DIR}/Shared.h)
 
 set(STDAFX_HEADER stdafx.h)
@@ -84,9 +96,10 @@ set(STDAFX_HEADER stdafx.h)
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${STDAFX_HEADER})
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE ${STDAFX_HEADER})
-set_source_files_properties(${THIRD_PARTY_SOURCE} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+set_source_files_properties(${THIRD_PARTY_SOURCES} ${ISSOURHI_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_include_directories(HelloTriangleDX PRIVATE
+    ${ISSOURHI_DIR}/include
     third_party/D3D12MemoryAllocator/include
     third_party/DirectX-Headers/include/directx
     third_party/DirectXMesh/DirectXMesh
