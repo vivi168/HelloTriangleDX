@@ -15,6 +15,8 @@ static std::atomic<size_t> g_CpuAllocationCount{0};
 
 static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
+static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
+
 static ComPtr<IDXGIAdapter1> SelectAdapter(const GPUSelection& GPUSelection)
 {
   ComPtr<IDXGIAdapter1> adapter;
@@ -163,9 +165,16 @@ Device::Device(const GPUSelection& gpuSelection)
     CHECK_HR(m_Device->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&commandQueue)));
     m_CommandQueue.Attach(commandQueue);
   }
-  
-  // TODO: create descriptor heaps
-  
+
+  // Create descriptor heaps
+  {
+    m_SrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP,
+                                  D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+    m_RtvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, NUM_DESCRIPTORS_PER_HEAP,
+                               D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_DepthStencilDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP,
+                                        D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+  }
 }
 
 Device::~Device()
@@ -250,6 +259,11 @@ void Device::PrintAdapterInformation()
     wprintf(L"    CacheCoherentUMA: %u\n", architecture1.CacheCoherentUMA ? 1 : 0);
     wprintf(L"    IsolatedMMU: %u\n", architecture1.IsolatedMMU ? 1 : 0);
   }
+}
+
+std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
+{
+  return std::make_shared<Texture>(this, desc);
 }
 
 }  // namespace IssouRHI

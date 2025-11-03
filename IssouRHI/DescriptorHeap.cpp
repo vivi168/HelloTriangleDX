@@ -21,7 +21,44 @@ namespace IssouRHI
 
     m_HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(type);
     m_NumDescriptors = numDescriptors;
+
+    for (UINT i = 0; i < m_NumDescriptors; i++) m_FreeIndices.push_back(i);
   }
 
-  DescriptorHeap::~DescriptorHeap() { m_Heap.Reset(); }
+  DescriptorAllocation DescriptorHeap::Alloc()
+  {
+    assert(m_FreeIndices.size() > 0);
+    // TODO: mutex
+
+    UINT idx = m_FreeIndices.front();
+    m_FreeIndices.pop_front();
+
+    DescriptorAllocation alloc = {
+      .index = idx,
+      .cpuHandle = { .ptr = m_HeapStartCpu.ptr + (idx * m_HeapHandleIncrement) },
+      .gpuHandle = { .ptr = m_HeapStartGpu.ptr + (idx * m_HeapHandleIncrement) },
+    };
+
+    return alloc;
+  }
+
+  void DescriptorHeap::Free(DescriptorAllocation alloc)
+  {
+    assert(m_FreeIndices.size() < m_NumDescriptors);
+    // TODO: mutex
+
+    UINT cpuIdx = static_cast<UINT>((alloc.cpuHandle.ptr - m_HeapStartCpu.ptr) / m_HeapHandleIncrement);
+    UINT gpuIdx = static_cast<UINT>((alloc.gpuHandle.ptr - m_HeapStartGpu.ptr) / m_HeapHandleIncrement);
+
+    assert(cpuIdx == gpuIdx);
+    m_FreeIndices.push_front(cpuIdx);
+  }
+
+  void DescriptorHeap::Free(UINT index)
+  {
+    assert(m_FreeIndices.size() < m_NumDescriptors);
+    // TODO: mutex
+
+    m_FreeIndices.push_front(index);
+  }
 }

@@ -43,7 +43,8 @@ set(ISSOURHI_SOURCES
     ${ISSOURHI_DIR}/DescriptorHeap.cpp
     ${ISSOURHI_DIR}/Device.cpp
     ${ISSOURHI_DIR}/Utils.cpp
-    ${ISSOURHI_DIR}/Surface.cpp)
+    ${ISSOURHI_DIR}/Surface.cpp
+    ${ISSOURHI_DIR}/Texture.cpp)
 set(ISSOURHI_HEADERS
     ${ISSOURHI_DIR}/include/IssouRHI.h)
 

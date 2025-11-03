@@ -14,12 +14,21 @@
 #include <vector>
 
 #include <cassert>
+#include <cstdint>
 
 #include <D3D12MemAlloc.h>
 
 #ifdef _DEBUG
 #define ENABLE_DEBUG_LAYER true
 #endif
+
+#define ISSOURHI_ENUM_CLASS_OP(e) \
+  static_assert(sizeof(e) <= sizeof(uint32_t)); \
+  constexpr e operator ~ (e a) { return (e)(~(uint32_t)a); } \
+  constexpr uint32_t operator & (e a, e b) { return (uint32_t)a & (uint32_t)b; } \
+  constexpr e operator | (e a, e b) { return (e)((uint32_t)a | (uint32_t)b); } \
+  constexpr e& operator &= (e& a, e b) { a = (e)(a & b); return a; } \
+  constexpr e& operator |= (e& a, e b) { a = (e)(a | b); return a; }
 
 namespace IssouRHI
 {
@@ -31,43 +40,150 @@ struct GPUSelection {
 Microsoft::WRL::ComPtr<IDXGIFactory4> GetDXGIFactory();
 void PrintAdapterList();
 
-class DescriptorAllocation
-{
-  UINT Index() const { return m_Index; }
 
-  D3D12_GPU_DESCRIPTOR_HANDLE NativeHandle() const
-  {
-    if (m_Handle.ptr == 0) throw std::runtime_error("Handle not set");
-
-    return m_Handle;
-  }
-
-private:
-  UINT m_Index;
-  D3D12_GPU_DESCRIPTOR_HANDLE m_Handle = {0};
+struct DescriptorAllocation {
+  UINT index;
+  D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle{};
+  D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle{};
 };
 
 class DescriptorHeap
 {
 public:
-  void Create(ID3D12Device* device,
-              D3D12_DESCRIPTOR_HEAP_TYPE type,
-              UINT numDescriptors,
-              D3D12_DESCRIPTOR_HEAP_FLAGS flags);
-  ~DescriptorHeap();
-
+  void Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags);
   DescriptorAllocation Alloc();
+  void Free(DescriptorAllocation alloc);
   void Free(UINT index);
 
 private:
   Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_Heap;
-  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu = {0};
-  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu = {0};
 
-  std::deque<UINT> m_FreeIndices;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu{};
+  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu{};
   UINT m_HeapHandleIncrement;
   UINT m_NumDescriptors;
+  std::deque<UINT> m_FreeIndices;
+
+  // TODO: mutex
 };
+
+enum class TextureDimension {
+  Texture1D,
+  Texture2D,
+  Texture3D,
+};
+
+enum class TextureViewDimension {
+  Texture1D,
+  Texture2D,
+  Texture2DAry,
+  TextureCube,
+  TextureCubeAry,
+  Texture3D,
+};
+
+enum class TextureUsage {
+  CopySrc = 1 << 0,
+  CopyDst = 1 << 1,
+  TextureBinding = 1 << 2,
+  StorageBinding = 1 << 3,
+  RenderAttachment = 1 << 4,
+};
+ISSOURHI_ENUM_CLASS_OP(TextureUsage)
+
+enum class TextureAspect {
+  All,
+  StencilOnly,
+  DepthOnly,
+};
+
+enum class TextureFormat {
+  Depth32Float,
+  R8Unorm,
+  RG8Unorm,
+  R32Uint,
+  RGBA8Unorm,
+  RGB10A2Unorm,
+  RGBA32Float,
+  Undefined,
+};
+
+enum class VertexFormat {
+  Float32x3,
+};
+
+struct Extent3D {
+  uint32_t width;
+  uint32_t height = 1;
+  uint32_t depth = 1;
+};
+
+struct TextureDesc {
+  std::string label;
+  Extent3D size;
+  uint32_t mipLevelCount = 1;
+  uint32_t sampleCount = 1;
+  TextureDimension dimension = TextureDimension::Texture2D;
+  TextureFormat format;
+  TextureUsage usage;
+};
+
+struct TextureViewDesc {
+  TextureFormat format;
+  TextureViewDimension dimension;
+  TextureUsage usage;
+  TextureAspect aspect = TextureAspect::All;
+  uint32_t baseMipLevel = 0;
+  uint32_t mipLevelCount;
+  uint32_t baseArrayLayer = 0;
+  uint32_t arrayLayerCount;
+};
+
+// forward decl.
+// should be useless one we split files correctly (public interface + backend specific)
+class Device;
+class TextureView;
+
+class Texture {
+public:
+  Texture(Device* device, TextureDesc& desc);
+  std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
+
+  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
+
+private:
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
+  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
+  // hash map for already created SRV, RTV, DSV, UAV
+
+  void Map();
+  void Unmap();
+
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
+  D3D12MA::Allocation* m_Allocation = nullptr;
+  Device* m_Device;
+  TextureDesc m_Desc;
+  boolean m_Mapped = false;
+};
+
+class TextureView {
+public:
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle();
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle();
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle();
+  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle();
+
+private:
+  friend class Texture;
+
+  Texture* m_Texture;
+  TextureViewDesc m_Desc;
+};
+
+struct BufferDesc;
+class Buffer;
 
 class Device
 {
@@ -77,10 +193,12 @@ public:
 
   void PrintAdapterInformation();
 
-  // TODO: tmp. make interface
+  // TODO: tmp. make interface.
   Microsoft::WRL::ComPtr<ID3D12Device5> GetNativeDevice() const { return m_Device; }
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> GetCommandQueue() const { return m_CommandQueue; }
+
+  std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
 
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
@@ -97,19 +215,9 @@ private:
   DescriptorHeap m_DepthStencilDescriptorHeap;
 };
 
-struct TextureDesc;
-class Texture;
-struct TextureViewDesc;
-class TextureView;
-
-struct BufferDesc;
-class Buffer;
-struct BufferViewDesc;
-class BufferView;
-
 struct SurfaceConfiguration {
-  DXGI_FORMAT format;
-  DXGI_SWAP_EFFECT swapEffect;
+  TextureFormat format;
+  DXGI_SWAP_EFFECT swapEffect;  // TODO: expose our own API agnostic enum
   UINT width;
   UINT height;
   UINT bufferCount;
@@ -122,7 +230,7 @@ public:
   ~Surface();
 
   void Configure(SurfaceConfiguration& desc);
-  std::shared_ptr<Texture> GetCurrentTexture();
+  Texture* GetCurrentTexture();
   void Present();
 
 private:
@@ -132,6 +240,7 @@ private:
   bool m_Configured = false;
 
   HWND m_Handle;
+  // TODO: should we roll our own RefCountPtr instead of using shared_ptr?
   std::shared_ptr<Device> m_Device;
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
   Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
