@@ -110,8 +110,7 @@ struct MeshInstance {
   UINT rtInstanceOffset;
   D3D12_GPU_VIRTUAL_ADDRESS blasBufferAddress = 0;
 
-  // FIXME: circular reference, make this a weak_ptr or simple ptr.
-  std::shared_ptr<SkinnedMeshInstance> skinnedMeshInstance = nullptr; // not null if skinned mesh
+  std::weak_ptr<SkinnedMeshInstance> skinnedMeshInstance;
   std::shared_ptr<Mesh3D> mesh = nullptr;
 };
 
@@ -552,8 +551,8 @@ void LoadAssets()
       auto mi = LoadMesh3D(mesh);
 
       node.meshInstances.push_back(mi);
-      if (mi->skinnedMeshInstance) {
-        node.skinnedMeshInstances.push_back(mi->skinnedMeshInstance);
+      if (auto smi = mi->skinnedMeshInstance.lock()) {
+        node.skinnedMeshInstances.push_back(smi);
       }
     }
   }
@@ -2093,10 +2092,11 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         mi->data.firstTangent = g_MeshStore.ReserveTangents(mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
 
         auto smi = std::make_shared<SkinnedMeshInstance>();
-        smi->offsets = i->skinnedMeshInstance->offsets;
-
         smi->numVertices = mesh->header.numVerts;
-        smi->numBoneMatrices = i->skinnedMeshInstance->numBoneMatrices;
+        if (auto iSmi = i->skinnedMeshInstance.lock()) {
+          smi->offsets = iSmi->offsets;
+          smi->numBoneMatrices = iSmi->numBoneMatrices;
+        }
         // TODO: should reuse bone matrice buffer for meshes of same model which share skin
         smi->offsets.boneMatricesBuffer =
             g_MeshStore.ReserveBoneMatrices(smi->BoneMatricesBufferSize()) / sizeof(XMFLOAT4X4);
