@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #include <cassert>
 #include <cstdint>
@@ -67,13 +68,13 @@ private:
   // TODO: mutex
 };
 
-enum class TextureDimension {
+enum class TextureDimension : uint32_t {
   Texture1D,
   Texture2D,
   Texture3D,
 };
 
-enum class TextureViewDimension {
+enum class TextureViewDimension : uint32_t {
   Texture1D,
   Texture2D,
   Texture2DAry,
@@ -82,7 +83,7 @@ enum class TextureViewDimension {
   Texture3D,
 };
 
-enum class TextureUsage {
+enum class TextureUsage : uint32_t {
   CopySrc = 1 << 0,
   CopyDst = 1 << 1,
   TextureBinding = 1 << 2,
@@ -91,13 +92,13 @@ enum class TextureUsage {
 };
 ISSOURHI_ENUM_CLASS_OP(TextureUsage)
 
-enum class TextureAspect {
+enum class TextureAspect : uint32_t {
   All,
   StencilOnly,
   DepthOnly,
 };
 
-enum class TextureFormat {
+enum class TextureFormat : uint32_t {
   Depth32Float,
   R8Unorm,
   RG8Unorm,
@@ -108,7 +109,7 @@ enum class TextureFormat {
   Undefined,
 };
 
-enum class VertexFormat {
+enum class VertexFormat : uint32_t {
   Float32x3,
 };
 
@@ -128,15 +129,56 @@ struct TextureDesc {
   TextureUsage usage;
 };
 
-struct TextureViewDesc {
-  TextureFormat format;
-  TextureViewDimension dimension;
-  TextureUsage usage;
-  TextureAspect aspect = TextureAspect::All;
+inline void HashCombine(size_t& seed, const size_t value)
+{
+  seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+struct SubresourceRange {
   uint32_t baseMipLevel = 0;
   uint32_t mipLevelCount;
   uint32_t baseArrayLayer = 0;
   uint32_t arrayLayerCount;
+
+  bool operator == (const SubresourceRange& other) const
+  {
+    return baseMipLevel == other.baseMipLevel &&
+        mipLevelCount == other.mipLevelCount &&
+        baseArrayLayer == other.baseArrayLayer &&
+        arrayLayerCount == other.arrayLayerCount;
+  }
+};
+
+struct TextureViewDesc {
+  TextureFormat format;
+  TextureViewDimension dimension;
+  TextureAspect aspect = TextureAspect::All;
+  SubresourceRange range;
+
+  bool operator == (const TextureViewDesc& other) const
+  {
+    return format == other.format &&
+        dimension == other.dimension &&
+        aspect == other.aspect &&
+        range == other.range;
+  }
+
+  struct Hasher {
+    size_t operator () (const TextureViewDesc& desc) const
+    {
+      size_t hash = 0;
+
+      HashCombine(hash, static_cast<uint32_t>(desc.format));
+      HashCombine(hash, static_cast<uint32_t>(desc.dimension));
+      HashCombine(hash, static_cast<uint32_t>(desc.aspect));
+      HashCombine(hash, desc.range.baseMipLevel);
+      HashCombine(hash, desc.range.mipLevelCount);
+      HashCombine(hash, desc.range.baseArrayLayer);
+      HashCombine(hash, desc.range.arrayLayerCount);
+
+      return hash;
+    }
+  };
 };
 
 // forward decl.
@@ -146,17 +188,22 @@ class TextureView;
 
 class Texture {
 public:
+  static D3D12_RESOURCE_DESC D3D12ResourceDesc(TextureDesc& desc);
+
   Texture(Device* device, TextureDesc& desc);
+  ~Texture();
+
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
 
+  void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
+  D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(TextureViewDesc& desc) const;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
+  D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(TextureViewDesc& desc) const;
+  D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(TextureViewDesc& desc) const;
 private:
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
-  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
-  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle(DXGI_FORMAT format, TextureDimension dimension);
-  // hash map for already created SRV, RTV, DSV, UAV
+  std::unordered_map<TextureViewDesc, std::shared_ptr<TextureView>, TextureViewDesc::Hasher> m_Views;
 
   void Map();
   void Unmap();
@@ -170,16 +217,26 @@ private:
 
 class TextureView {
 public:
+  TextureView(Texture* tex, TextureViewDesc& desc);
+  ~TextureView();
+
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle();
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle();
   D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle();
   D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle();
 
-private:
-  friend class Texture;
+  UINT SrvDescriptorIndex();
+  UINT UavDescriptorIndex();
+  UINT RtvDescriptorIndex();
+  UINT DsvDescriptorIndex();
 
+private:
   Texture* m_Texture;
   TextureViewDesc m_Desc;
+  DescriptorAllocation m_Srv;
+  DescriptorAllocation m_Uav;
+  DescriptorAllocation m_Rtv;
+  DescriptorAllocation m_Dsv;
 };
 
 struct BufferDesc;

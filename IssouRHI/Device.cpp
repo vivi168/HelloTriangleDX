@@ -263,7 +263,24 @@ void Device::PrintAdapterInformation()
 
 std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 {
-  return std::make_shared<Texture>(this, desc);
+  auto tex = std::make_shared<Texture>(this, desc);
+
+  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
+  if (desc.usage & TextureUsage::CopyDst) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
+  } else {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+  }
+
+  D3D12_RESOURCE_DESC textureDesc = Texture::D3D12ResourceDesc(desc);
+
+  ID3D12Resource* resource;
+  D3D12MA::Allocation* allocation;
+  CHECK_HR(m_Allocator->CreateResource(&allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation,
+                                       IID_PPV_ARGS(&resource)));
+
+  tex->Attach(resource, allocation);
+  return tex;
 }
 
 }  // namespace IssouRHI
