@@ -251,9 +251,9 @@ public:
   void PrintAdapterInformation();
 
   // TODO: tmp. make interface.
-  Microsoft::WRL::ComPtr<ID3D12Device5> GetNativeDevice() const { return m_Device; }
+  ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
-  Microsoft::WRL::ComPtr<ID3D12CommandQueue> GetCommandQueue() const { return m_CommandQueue; }
+  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 
   std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
 

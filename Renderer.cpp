@@ -450,7 +450,7 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static ComPtr<ID3D12Device5> g_Device;
+static ID3D12Device5* g_Device;
 static D3D12MA::Allocator* g_Allocator;
 
 // swapchain used to switch between render targets
@@ -538,7 +538,7 @@ void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI:
 {
   g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
-  g_CommandQueue = device->GetCommandQueue();
+  g_CommandQueue = device->GetNativeQueue();
 
   InitD3D();
   InitFrameResources();
@@ -679,7 +679,7 @@ void LoadAssets()
     g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
                                     g_Allocator);
 
-    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device.Get(), g_SrvUavDescHeapAlloc);
+    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device, g_SrvUavDescHeapAlloc);
 
     auto ctx = &g_FrameContext[g_FrameIndex];
     CHECK_HR(ctx->commandAllocator->Reset());
@@ -1385,7 +1385,7 @@ static void InitFrameResources()
     CHECK_HR(g_Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap)));
     g_RtvDescriptorHeap.Attach(rtvDescriptorHeap);
 
-    g_RtvDescHeapAlloc.Create(g_Device.Get(), g_RtvDescriptorHeap.Get());
+    g_RtvDescHeapAlloc.Create(g_Device, g_RtvDescriptorHeap.Get());
 
     // Create a RTV for each buffer (double buffering is two buffers, tripple buffering is 3).
     for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
@@ -1446,7 +1446,7 @@ static void InitFrameResources()
     };
     CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_SrvUavDescriptorHeap)));
 
-    g_SrvUavDescHeapAlloc.Create(g_Device.Get(), g_SrvUavDescriptorHeap.Get());
+    g_SrvUavDescHeapAlloc.Create(g_Device, g_SrvUavDescriptorHeap.Get());
   }
 
   // Query heap
@@ -1460,7 +1460,7 @@ static void InitFrameResources()
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
-  initInfo.Device = g_Device.Get();
+  initInfo.Device = g_Device;
   initInfo.CommandQueue = g_CommandQueue.Get();
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
   initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1756,15 +1756,15 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexPositions
           .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc)
-          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc)
+          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Normals buffer
     {
       g_MeshStore.m_VertexNormals
           .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform normals during skinning
     }
 
@@ -1772,7 +1772,7 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexTangents
           .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device, g_SrvUavDescHeapAlloc);
       // TODO: we also need a UAV because we need to transform tangents during skinning
     }
 
@@ -1780,49 +1780,49 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexUVs
           .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Blend weights/indices buffer
     {
       g_MeshStore.m_VertexBlendWeightsAndIndices
           .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Vertex indices
     {
       g_MeshStore.m_VertexIndices
           .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Meshlets buffer
     {
       g_MeshStore.m_Meshlets
           .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet unique vertex indices buffer
     {
       g_MeshStore.m_MeshletUniqueIndices
           .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
       g_MeshStore.m_MeshletPrimitives
           .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Materials buffer
     {
       g_MeshStore.m_Materials
           .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Instances buffer
@@ -1830,7 +1830,7 @@ static void InitFrameResources()
       g_MeshStore.m_Instances[i]
           .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator,
                  HeapType::Upload)
-          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Bone Matrices buffer
@@ -1838,7 +1838,7 @@ static void InitFrameResources()
       g_MeshStore.m_BoneMatrices[i]
           .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator,
                  HeapType::Upload)
-          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device.Get(), g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device, g_SrvUavDescHeapAlloc);
     }
 
     // Draw Meshlets commands
@@ -1846,8 +1846,8 @@ static void InitFrameResources()
       g_DrawMeshCommands
           .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
                  L"Draw Meshlets command buffer", g_Allocator, HeapType::Default, true)
-          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc)
-          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device.Get(), g_SrvUavDescHeapAlloc,
+          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device, g_SrvUavDescHeapAlloc)
+          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device, g_SrvUavDescHeapAlloc,
                      g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
     }
 
@@ -1890,7 +1890,7 @@ static void InitFrameResources()
         .Texture2D = {},
     };
     g_VisibilityBuffer.AllocRtvDescriptor(g_RtvDescHeapAlloc);
-    g_Device->CreateRenderTargetView(g_VisibilityBuffer.Resource(), nullptr, g_VisibilityBuffer.RtvDescriptorHandle());
+    g_Device->CreateRenderTargetView(g_VisibilityBuffer.Resource(), &rtvDesc, g_VisibilityBuffer.RtvDescriptorHandle());
   }
 
   // G-Buffer output
@@ -2142,7 +2142,7 @@ static UINT CreateTexture(std::filesystem::path filename)
   tex->Map();
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
-  CHECK_HR(PrepareUpload(g_Device.Get(), image.GetImages(), image.GetImageCount(), metadata, subresources));
+  CHECK_HR(PrepareUpload(g_Device, image.GetImages(), image.GetImageCount(), metadata, subresources));
 
   tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()));
 
