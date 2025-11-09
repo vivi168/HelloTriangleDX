@@ -119,18 +119,18 @@ std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
   auto view = std::make_shared<TextureView>(this, desc);
   auto device = m_Device->GetNativeDevice();
 
-  if (m_Desc.usage & TextureUsage::TextureBinding) {
+  if (Usage() & TextureUsage::TextureBinding) {
     auto srvDesc = SrvDescriptor(desc);
     device->CreateShaderResourceView(m_Resource.Get(), &srvDesc, view->SrvDescriptorHandle());
   }
 
-  if (m_Desc.usage & TextureUsage::StorageBinding) {
+  if (Usage() & TextureUsage::StorageBinding) {
     auto uavDesc = UavDescriptor(desc);
     device->CreateUnorderedAccessView(m_Resource.Get(), nullptr, &uavDesc, view->UavDescriptorHandle());
   }
 
-  if (m_Desc.usage & TextureUsage::RenderAttachment) {
-    if (IsDepthStencil(m_Desc.format)) {
+  if (Usage() & TextureUsage::RenderAttachment) {
+    if (IsDepthStencil(Format())) {
       auto dsvDesc = DsvDescriptor(desc);
     } else {
       auto rtvDesc = RtvDescriptor(desc);
@@ -151,7 +151,7 @@ void Texture::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
 
 void Texture::Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource)
 {
-  assert(m_Desc.usage & TextureUsage::CopyDst);
+  assert(Usage() & TextureUsage::CopyDst);
 
   if (!m_Mapped) {
     Map();
@@ -325,16 +325,25 @@ void Texture::Unmap()
 
 TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc)
 {
-  // FIXME!!!: only allocate what we need...
-  m_Srv = m_Texture->GetDevice()->AllocSrvUavDescriptor();
-  m_Uav = m_Texture->GetDevice()->AllocSrvUavDescriptor();
-  m_Rtv = m_Texture->GetDevice()->AllocRtvDescriptor();
-  m_Dsv = m_Texture->GetDevice()->AllocDsvDescriptor();
+  if (m_Texture->Usage() & TextureUsage::TextureBinding) {
+    m_Srv = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+  }
+
+  if (m_Texture->Usage() & TextureUsage::StorageBinding) {
+    m_Uav = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+  }
+
+  if (m_Texture->Usage() & TextureUsage::RenderAttachment) {
+    if (IsDepthStencil(m_Texture->Format())) {
+      m_Rtv = m_Texture->GetDevice()->AllocRtvDescriptor();
+    } else {
+      m_Dsv = m_Texture->GetDevice()->AllocDsvDescriptor();
+    }
+  }
 }
 
 TextureView::~TextureView()
 {
-  // FIXME!!!: only free what we allocated...
   m_Texture->GetDevice()->FreeSrvUavDescriptor(m_Srv);
   m_Texture->GetDevice()->FreeSrvUavDescriptor(m_Uav);
   m_Texture->GetDevice()->FreeRtvDescriptor(m_Rtv);

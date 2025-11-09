@@ -44,6 +44,8 @@ namespace IssouRHI
 
   void DescriptorHeap::Free(DescriptorAllocation alloc)
   {
+    if (!alloc) return;
+
     assert(m_FreeIndices.size() < m_NumDescriptors);
     // TODO: mutex
 
@@ -52,13 +54,5 @@ namespace IssouRHI
 
     assert(cpuIdx == gpuIdx);
     m_FreeIndices.push_front(cpuIdx);
-  }
-
-  void DescriptorHeap::Free(UINT index)
-  {
-    assert(m_FreeIndices.size() < m_NumDescriptors);
-    // TODO: mutex
-
-    m_FreeIndices.push_front(index);
   }
 }
