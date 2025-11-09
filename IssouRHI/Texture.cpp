@@ -22,7 +22,8 @@ static DXGI_FORMAT DXGIFormat(TextureFormat format)
   case TextureFormat::RGBA32Float:
     return DXGI_FORMAT_R32G32B32A32_FLOAT;
   case TextureFormat::Undefined:
-    assert(false); // FIXME std::unreachable(); C++23
+    assert(false);
+    // FIXME C++23: std::unreachable();
     return DXGI_FORMAT_UNKNOWN;
   }
 }
@@ -116,7 +117,26 @@ Texture::~Texture()
 std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
 {
   auto view = std::make_shared<TextureView>(this, desc);
-  // call device->CreateUnorderedAccessView etc from here?
+  auto device = m_Device->GetNativeDevice();
+
+  if (m_Desc.usage & TextureUsage::TextureBinding) {
+    auto srvDesc = SrvDescriptor(desc);
+    device->CreateShaderResourceView(m_Resource.Get(), &srvDesc, view->SrvDescriptorHandle());
+  }
+
+  if (m_Desc.usage & TextureUsage::StorageBinding) {
+    auto uavDesc = UavDescriptor(desc);
+    device->CreateUnorderedAccessView(m_Resource.Get(), nullptr, &uavDesc, view->UavDescriptorHandle());
+  }
+
+  if (m_Desc.usage & TextureUsage::RenderAttachment) {
+    if (IsDepthStencil(m_Desc.format)) {
+      auto dsvDesc = DsvDescriptor(desc);
+    } else {
+      auto rtvDesc = RtvDescriptor(desc);
+    }
+  }
+
   return view;
 }
 
@@ -143,6 +163,11 @@ void Texture::Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firs
   }
 }
 
+D3D12_RESOURCE_BARRIER Texture::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
+{
+  return CD3DX12_RESOURCE_BARRIER::Transition(m_Resource.Get(), stateBefore, stateAfter);
+}
+
 D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) const
 {
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
@@ -155,7 +180,7 @@ D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) co
       // TODO
       break;
     case TextureViewDimension::Texture2D:
-      if (m_Desc.sampleCount > 1) {
+      if (IsMultiSampled()) {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
         // TODO
       } else {
@@ -166,7 +191,7 @@ D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) co
       }
       break;
     case TextureViewDimension::Texture2DAry:
-      if (m_Desc.sampleCount > 1) {
+      if (IsMultiSampled()) {
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
         // TODO
       } else {
@@ -212,7 +237,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC Texture::UavDescriptor(TextureViewDesc& desc) c
     case TextureViewDimension::TextureCube:
     case TextureViewDimension::TextureCubeAry:
       assert(false);
-      // std::unreachable();
+      // FIXME C++23: std::unreachable();
       break;
     case TextureViewDimension::Texture3D:
       uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
@@ -230,25 +255,26 @@ D3D12_RENDER_TARGET_VIEW_DESC Texture::RtvDescriptor(TextureViewDesc& desc) cons
   D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
   rtvDesc.Format = DXGIFormat(desc.format);
 
-  switch (desc.dimension) {
-    case TextureViewDimension::Texture1D:
-      // TODO
-      break;
-    case TextureViewDimension::Texture2D:
-      // TODO
-      break;
-    case TextureViewDimension::Texture2DAry:
-      // TODO
-      break;
-    case TextureViewDimension::TextureCube:
-      // TODO
-      break;
-    case TextureViewDimension::TextureCubeAry:
-      // TODO
-      break;
-    case TextureViewDimension::Texture3D:
-      // TODO
-      break;
+  if (IsMultiSampled()) {
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+    // TODO
+  } else {
+    switch (m_Desc.dimension) {
+      case TextureDimension::Texture1D:
+        assert(false);
+        // FIXME C++23: std::unreachable();
+        break;
+      case TextureDimension::Texture2D:
+        rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+        rtvDesc.Texture2DArray.FirstArraySlice = desc.range.baseArrayLayer;
+        rtvDesc.Texture2DArray.ArraySize = desc.range.arrayLayerCount;
+        rtvDesc.Texture2DArray.MipSlice = desc.range.baseMipLevel;
+        rtvDesc.Texture2DArray.PlaneSlice = 0;
+        break;
+      case TextureDimension::Texture3D:
+        // TODO
+        break;
+    }
   }
 
   return rtvDesc;
@@ -259,25 +285,21 @@ D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(TextureViewDesc& desc) cons
   D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
   dsvDesc.Format = DXGIFormat(desc.format);
 
-  switch (desc.dimension) {
-    case TextureViewDimension::Texture1D:
-      // TODO
-      break;
-    case TextureViewDimension::Texture2D:
-      // TODO
-      break;
-    case TextureViewDimension::Texture2DAry:
-      // TODO
-      break;
-    case TextureViewDimension::TextureCube:
-      // TODO
-      break;
-    case TextureViewDimension::TextureCubeAry:
-      // TODO
-      break;
-    case TextureViewDimension::Texture3D:
-      // TODO
-      break;
+  dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+  if (desc.aspect == TextureAspect::DepthOnly) {
+    dsvDesc.Flags |= D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+  } else if (desc.aspect == TextureAspect::StencilOnly) {
+    dsvDesc.Flags |= D3D12_DSV_FLAG_READ_ONLY_STENCIL;
+  }
+
+  if (IsMultiSampled()) {
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+    // TODO
+  } else {
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+    dsvDesc.Texture2DArray.FirstArraySlice = desc.range.baseArrayLayer;
+    dsvDesc.Texture2DArray.ArraySize = desc.range.arrayLayerCount;
+    dsvDesc.Texture2DArray.MipSlice = desc.range.baseMipLevel;
   }
 
   return dsvDesc;
@@ -301,11 +323,22 @@ void Texture::Unmap()
   m_Mapped = false;
 }
 
-TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc) {}
+TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc)
+{
+  // FIXME!!!: only allocate what we need...
+  m_Srv = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+  m_Uav = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+  m_Rtv = m_Texture->GetDevice()->AllocRtvDescriptor();
+  m_Dsv = m_Texture->GetDevice()->AllocDsvDescriptor();
+}
 
 TextureView::~TextureView()
 {
-  // TODO: Free Allocations etc
+  // FIXME!!!: only free what we allocated...
+  m_Texture->GetDevice()->FreeSrvUavDescriptor(m_Srv);
+  m_Texture->GetDevice()->FreeSrvUavDescriptor(m_Uav);
+  m_Texture->GetDevice()->FreeRtvDescriptor(m_Rtv);
+  m_Texture->GetDevice()->FreeDsvDescriptor(m_Dsv);
 }
 
 }  // namespace IssouRHI

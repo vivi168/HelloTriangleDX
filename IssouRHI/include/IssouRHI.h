@@ -94,8 +94,8 @@ ISSOURHI_ENUM_CLASS_OP(TextureUsage)
 
 enum class TextureAspect : uint32_t {
   All,
-  StencilOnly,
   DepthOnly,
+  StencilOnly,
 };
 
 enum class TextureFormat : uint32_t {
@@ -136,9 +136,9 @@ inline void HashCombine(size_t& seed, const size_t value)
 
 struct SubresourceRange {
   uint32_t baseMipLevel = 0;
-  uint32_t mipLevelCount;
+  uint32_t mipLevelCount = 1;
   uint32_t baseArrayLayer = 0;
-  uint32_t arrayLayerCount;
+  uint32_t arrayLayerCount = 1;
 
   bool operator == (const SubresourceRange& other) const
   {
@@ -198,15 +198,22 @@ public:
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
+  // TODO: abstraction over this (automatic barrier placement) + handle from passes + use enhanced barriers
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
+
   D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(TextureViewDesc& desc) const;
   D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
   D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(TextureViewDesc& desc) const;
   D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(TextureViewDesc& desc) const;
+
+  Device* GetDevice() const { return m_Device; }
 private:
   std::unordered_map<TextureViewDesc, std::shared_ptr<TextureView>, TextureViewDesc::Hasher> m_Views;
 
   void Map();
   void Unmap();
+
+  bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
 
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
@@ -220,15 +227,15 @@ public:
   TextureView(Texture* tex, TextureViewDesc& desc);
   ~TextureView();
 
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle();
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle();
-  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle();
-  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle();
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_Srv.cpuHandle; }
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_Uav.cpuHandle; }
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_Rtv.cpuHandle; }
+  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle() const { return m_Dsv.cpuHandle; }
 
-  UINT SrvDescriptorIndex();
-  UINT UavDescriptorIndex();
-  UINT RtvDescriptorIndex();
-  UINT DsvDescriptorIndex();
+  UINT SrvDescriptorIndex() const { return m_Srv.index; }
+  UINT UavDescriptorIndex() const { return m_Uav.index; }
+  UINT RtvDescriptorIndex() const { return m_Rtv.index; }
+  UINT DsvDescriptorIndex() const { return m_Dsv.index; }
 
 private:
   Texture* m_Texture;
@@ -257,6 +264,14 @@ public:
 
   std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
 
+  DescriptorAllocation AllocSrvUavDescriptor();
+  DescriptorAllocation AllocRtvDescriptor();
+  DescriptorAllocation AllocDsvDescriptor();
+
+  void FreeSrvUavDescriptor(DescriptorAllocation alloc);
+  void FreeRtvDescriptor(DescriptorAllocation alloc);
+  void FreeDsvDescriptor(DescriptorAllocation alloc);
+
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
   Microsoft::WRL::ComPtr<IDXGIFactory4> m_Factory;
@@ -265,7 +280,7 @@ private:
   // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
   D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
 
-  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: wrapper for this
+  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: our own Queue class here
 
   DescriptorHeap m_SrvUavDescriptorHeap;
   DescriptorHeap m_RtvDescriptorHeap;
@@ -274,7 +289,6 @@ private:
 
 struct SurfaceConfiguration {
   TextureFormat format;
-  DXGI_SWAP_EFFECT swapEffect;  // TODO: expose our own API agnostic enum
   UINT width;
   UINT height;
   UINT bufferCount;
@@ -283,24 +297,26 @@ struct SurfaceConfiguration {
 class Surface
 {
 public:
-  Surface(Device& device, HWND hwnd);
+  Surface(Device* device, HWND hwnd);
   ~Surface();
 
-  void Configure(SurfaceConfiguration& desc);
+  void Configure(SurfaceConfiguration& config);
   Texture* GetCurrentTexture();
   void Present();
 
 private:
-  void CreateSwapChain(SurfaceConfiguration& desc);
-  void CreateTextures(SurfaceConfiguration& desc);
+  void CreateSwapChain();
+  void CreateTextures();
 
+  SurfaceConfiguration m_Config{};
   bool m_Configured = false;
 
   HWND m_Handle;
   // TODO: should we roll our own RefCountPtr instead of using shared_ptr?
-  std::shared_ptr<Device> m_Device;
-  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
   Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
+  Device* m_Device;
+  ID3D12CommandQueue* m_CommandQueue; // make this our Queue not native queue
+
   UINT m_FrameIndex;
   Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
   std::vector<HANDLE> m_FenceEvent;

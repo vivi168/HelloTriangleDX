@@ -283,4 +283,34 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
   return tex;
 }
 
+  DescriptorAllocation Device::AllocSrvUavDescriptor()
+  {
+    return m_SrvUavDescriptorHeap.Alloc();
+  }
+
+  DescriptorAllocation Device::AllocRtvDescriptor()
+  {
+    return m_RtvDescriptorHeap.Alloc();
+  }
+
+  DescriptorAllocation Device::AllocDsvDescriptor()
+  {
+    return m_DepthStencilDescriptorHeap.Alloc();
+  }
+
+  void Device::FreeSrvUavDescriptor(DescriptorAllocation alloc)
+  {
+    m_SrvUavDescriptorHeap.Free(alloc);
+  }
+
+  void Device::FreeRtvDescriptor(DescriptorAllocation alloc)
+  {
+    m_RtvDescriptorHeap.Free(alloc);
+  }
+
+  void Device::FreeDsvDescriptor(DescriptorAllocation alloc)
+  {
+    m_DepthStencilDescriptorHeap.Free(alloc);
+  }
+
 }  // namespace IssouRHI
