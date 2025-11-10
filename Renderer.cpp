@@ -1266,8 +1266,9 @@ UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
 {
   // TODO: CreateTextures won't work from here. split it to ? CreateTexture + UploadTexture
   std::filesystem::path materialPath = baseDir / filename;
-  auto it = g_MaterialMap.find(materialPath);
-  if (it != g_MaterialMap.end()) return it->second->MaterialIndex();
+  if (auto it = g_MaterialMap.find(materialPath); it != g_MaterialMap.end()) {
+    return it->second->MaterialIndex();
+  }
 
   auto material = std::make_shared<Material>();
 
@@ -2121,8 +2122,9 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
 static UINT CreateTexture(std::filesystem::path filename)
 {
-  auto it = g_Textures.find(filename);
-  if (it != g_Textures.end()) return it->second->SrvDescriptorIndex();
+  if (auto it = g_Textures.find(filename); it != g_Textures.end()) {
+    return it->second->SrvDescriptorIndex();
+  }
 
   auto tex = std::make_shared<Texture>(); // unique_ptr?
 
