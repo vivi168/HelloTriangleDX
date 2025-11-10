@@ -575,6 +575,13 @@ void LoadAssets()
     assert(fenceEvent);
   }
 
+  auto waitForGpu = [&]() {
+    UINT64 value = fenceValue++;
+    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
+    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
+    WaitForSingleObject(fenceEvent, INFINITE);
+  };
+
   // BLAS creation
   {
     const size_t numMeshes = g_Scene.uniqueMeshInstances.size();
@@ -639,10 +646,7 @@ void LoadAssets()
     commandList->Close();
     std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
     g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    UINT64 value = fenceValue++;
-    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
-    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
-    WaitForSingleObject(fenceEvent, INFINITE);
+    waitForGpu();
   }
 
   // Fill rtInstanceBuffer
@@ -714,10 +718,7 @@ void LoadAssets()
     commandList->Close();
     std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
     g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    UINT64 value = fenceValue++;
-    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
-    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
-    WaitForSingleObject(fenceEvent, INFINITE);
+    waitForGpu();
   }
 }
 
