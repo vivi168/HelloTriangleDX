@@ -180,8 +180,9 @@ struct Model3D {
     auto mesh = std::make_shared<Mesh3D>();
     mesh->Read(meshFilename, true);
 
-    auto it = skins.find(skinFilename);
-    if (it == std::end(skins)) {
+    if (auto it = skins.find(skinFilename); it != std::end(skins)) {
+      mesh->skin = it->second;
+    } else {
       auto skin = std::make_shared<Skin>();
       skin->Read(skinFilename);
 
@@ -191,8 +192,6 @@ struct Model3D {
 
       mesh->skin = skin;
       skins[skinFilename] = skin;
-    } else {
-      mesh->skin = skins[skinFilename];
     }
 
     meshes.push_back(mesh);
