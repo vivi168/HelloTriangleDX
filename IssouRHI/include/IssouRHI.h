@@ -194,6 +194,7 @@ public:
   Texture(Device* device, TextureDesc& desc);
   ~Texture();
 
+  std::shared_ptr<TextureView> CreateView();
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
 
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);

@@ -114,8 +114,33 @@ Texture::~Texture()
   }
 }
 
+static TextureViewDimension ViewDimension(TextureDimension dim)
+{
+  switch (dim) {
+    case TextureDimension::Texture1D:
+      return TextureViewDimension::Texture1D;
+    case TextureDimension::Texture2D:
+      return TextureViewDimension::Texture2D;
+    case TextureDimension::Texture3D:
+      return TextureViewDimension::Texture3D;
+  }
+}
+
+std::shared_ptr<TextureView> Texture::CreateView()
+{
+  TextureViewDesc desc{};
+  desc.format = Format();
+  desc.dimension = ViewDimension(m_Desc.dimension);
+
+  return CreateView(desc);
+}
+
 std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
 {
+  if (auto it = m_Views.find(desc); it != m_Views.end()) {
+    return it->second;
+  }
+
   auto view = std::make_shared<TextureView>(this, desc);
   auto device = m_Device->GetNativeDevice();
 
@@ -136,6 +161,8 @@ std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
       auto rtvDesc = RtvDescriptor(desc);
     }
   }
+
+  m_Views[desc] = view;
 
   return view;
 }
