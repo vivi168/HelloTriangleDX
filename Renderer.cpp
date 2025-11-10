@@ -198,14 +198,12 @@ struct FrameContext {
   GpuBuffer timestampReadBackBuffer;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
-  ComPtr<ID3D12Fence> fence;
-  UINT64 fenceValue;
+  UINT64 fenceValue = 1;
 
   void Reset() {
     renderTarget.Reset();
     timestampReadBackBuffer.Reset();
     commandAllocator.Reset();
-    fence.Reset();
   }
 };
 
@@ -461,6 +459,7 @@ static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
+static ComPtr<ID3D12Fence> g_Fence;
 static HANDLE g_FenceEvent;
 
 // Resources
@@ -558,6 +557,24 @@ void LoadAssets()
   }
 
   // RayTracing acceleration structures setup
+  ComPtr<ID3D12CommandAllocator> commandAllocator;
+  ComPtr<ID3D12GraphicsCommandList4> commandList;
+  ComPtr<ID3D12Fence> fence;
+  UINT64 fenceValue = 1;
+  HANDLE fenceEvent = nullptr;
+
+  {
+    CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), NULL,
+                                         IID_PPV_ARGS(&commandList)));
+    // Command lists are created in the recording state; close until needed.
+    CHECK_HR(commandList->Close());
+
+    CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    assert(fenceEvent);
+  }
+
   // BLAS creation
   {
     const size_t numMeshes = g_Scene.uniqueMeshInstances.size();
@@ -606,9 +623,8 @@ void LoadAssets()
       }
     }
 
-    auto ctx = &g_FrameContext[g_FrameIndex];
-    CHECK_HR(ctx->commandAllocator->Reset());
-    CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+    CHECK_HR(commandAllocator->Reset());
+    CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
 
     for (size_t i = 0; i < numMeshes; i++) {
       D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
@@ -617,13 +633,16 @@ void LoadAssets()
           .ScratchAccelerationStructureData = g_Scene.blasBuffers[i].scratch.GpuAddress(),
       };
 
-      g_CommandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+      commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
     }
 
-    g_CommandList->Close();
-    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
+    commandList->Close();
+    std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
     g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    WaitGPUIdle();
+    UINT64 value = fenceValue++;
+    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
+    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
+    WaitForSingleObject(fenceEvent, INFINITE);
   }
 
   // Fill rtInstanceBuffer
@@ -681,9 +700,8 @@ void LoadAssets()
 
     g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device, g_SrvUavDescHeapAlloc);
 
-    auto ctx = &g_FrameContext[g_FrameIndex];
-    CHECK_HR(ctx->commandAllocator->Reset());
-    CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), NULL));
+    CHECK_HR(commandAllocator->Reset());
+    CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
         .DestAccelerationStructureData = g_Scene.tlasBuffer.resultData.GpuAddress(),
@@ -691,12 +709,15 @@ void LoadAssets()
         .ScratchAccelerationStructureData = g_Scene.tlasBuffer.scratch.GpuAddress(),
     };
 
-    g_CommandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+    commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
 
-    g_CommandList->Close();
-    std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
+    commandList->Close();
+    std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
     g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    WaitGPUIdle();
+    UINT64 value = fenceValue++;
+    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
+    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
+    WaitForSingleObject(fenceEvent, INFINITE);
   }
 }
 
@@ -1158,7 +1179,7 @@ void Cleanup()
     // TODO: Method from FrameContext
     auto ctx = &g_FrameContext[i];
 
-    CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
+    CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ctx->fenceValue));
     WaitForFrame(ctx);
   }
 
@@ -1320,12 +1341,9 @@ static void InitD3D()
 
   // Create Synchronization objects
   {
-    for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      ID3D12Fence* fence = nullptr;
-      CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-      g_FrameContext[i].fence.Attach(fence);
-      g_FrameContext[i].fenceValue = 0;
-    }
+    ID3D12Fence* fence = nullptr;
+    CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    g_Fence.Attach(fence);
 
     g_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     assert(g_FenceEvent);
@@ -1951,7 +1969,8 @@ static void InitFrameResources()
 static void MoveToNextFrame()
 {
   auto ctx = &g_FrameContext[g_FrameIndex];
-  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
+  const UINT64 currentFenceValue = ctx->fenceValue;
+  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), currentFenceValue));
 
   g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
   auto nextCtx = &g_FrameContext[g_FrameIndex];
@@ -1960,7 +1979,7 @@ static void MoveToNextFrame()
   WaitForFrame(nextCtx);
 
   // Set the fence value for the next frame
-  nextCtx->fenceValue++;
+  nextCtx->fenceValue = currentFenceValue + 1;
 }
 
 // wait until gpu is finished with command list
@@ -1969,10 +1988,10 @@ static void WaitForFrame(FrameContext* ctx)
   // if the current fence value is still less than "fenceValue", then we
   // know the GPU has not finished executing the command queue since it has
   // not reached the "g_CommandQueue->Signal(fence, fenceValue)" command
-  if (ctx->fence->GetCompletedValue() < ctx->fenceValue) {
+  if (g_Fence->GetCompletedValue() < ctx->fenceValue) {
     // we have the fence create an event which is signaled once the
     // fence's current value is "fenceValue"
-    CHECK_HR(ctx->fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
+    CHECK_HR(g_Fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
 
     // We will wait until the fence has triggered the event that it's
     // current value has reached "fenceValue". once it's value has reached
@@ -1987,9 +2006,9 @@ static void WaitGPUIdle()
 
   ctx->fenceValue++;
 
-  CHECK_HR(g_CommandQueue->Signal(ctx->fence.Get(), ctx->fenceValue));
+  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ctx->fenceValue));
 
-  CHECK_HR(ctx->fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
+  CHECK_HR(g_Fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
   WaitForSingleObject(g_FenceEvent, INFINITE);
 }
 
