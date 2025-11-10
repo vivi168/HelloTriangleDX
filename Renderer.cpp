@@ -456,7 +456,7 @@ static D3D12MA::Allocator* g_Allocator;
 // swapchain used to switch between render targets
 static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
-static ComPtr<ID3D12CommandQueue> g_CommandQueue;
+static ID3D12CommandQueue* g_CommandQueue;
 static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
@@ -1361,7 +1361,7 @@ static void InitD3D()
     // The queue will be flushed once the swap chain is created. Give it the
     // swap chain description we created above and store the created swap chain
     // in a temp IDXGISwapChain interface
-    CHECK_HR(IssouRHI::GetDXGIFactory()->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc,
+    CHECK_HR(IssouRHI::GetDXGIFactory()->CreateSwapChain(g_CommandQueue, &swapChainDesc,
                                         &tempSwapChain));
 
     g_SwapChain.Attach(static_cast<IDXGISwapChain3*>(tempSwapChain));
@@ -1462,7 +1462,7 @@ static void InitFrameResources()
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
   initInfo.Device = g_Device;
-  initInfo.CommandQueue = g_CommandQueue.Get();
+  initInfo.CommandQueue = g_CommandQueue;
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
   initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
   initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
