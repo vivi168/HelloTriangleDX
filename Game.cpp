@@ -86,5 +86,3 @@ void Game::Update(float time, float deltaTime)
 
   camera.ProcessKeyboard(deltaTime);
 }
-
-void Game::DebugWindow() { camera.DebugWindow(); }

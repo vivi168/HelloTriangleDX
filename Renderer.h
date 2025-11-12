@@ -10,8 +10,7 @@ namespace Renderer
 void InitWindow(UINT width, UINT height, std::wstring name);
 void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */);
 void LoadAssets();
-void Update(float, float);
-void Render();
+void Render(float, float);
 void Cleanup();
 void PrintStatsString();
 

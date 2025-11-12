@@ -728,10 +728,8 @@ void LoadAssets()
   }
 }
 
-void Update(float time, float dt)
+static void Update(FrameContext* ctx, float time, float dt)
 {
-  auto ctx = &g_FrameContext[g_FrameIndex];
-
   // Per frame root constants
   {
     ctx->frameConstants.Time = time;
@@ -825,6 +823,8 @@ void Update(float time, float dt)
     ImGui::NewFrame();
   }
 
+  g_Scene.camera->DebugWindow();
+
   {
     ImGui::Begin("Ray tracing");
     ImGui::Checkbox("Enable RT shadows", &g_EnableRTShadows);
@@ -912,9 +912,11 @@ void Update(float time, float dt)
   }
 }
 
-void Render()
+void Render(float time, float dt)
 {
   auto ctx = AcquireNextCtx();
+
+  Update(ctx, time, dt);
 
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in

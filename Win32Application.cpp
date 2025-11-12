@@ -95,10 +95,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<Iss
         }
 
         Game::Update(g_Time, g_TimeDelta);
-        Renderer::Update(g_Time, g_TimeDelta);
-        Game::DebugWindow();
-
-        Renderer::Render();
+        Renderer::Render(g_Time, g_TimeDelta);
       }
     }
   }
