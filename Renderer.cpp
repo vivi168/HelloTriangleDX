@@ -198,7 +198,7 @@ struct FrameContext {
   GpuBuffer timestampReadBackBuffer;
 
   ComPtr<ID3D12CommandAllocator> commandAllocator;
-  UINT64 fenceValue = 1;
+  UINT64 fenceValue = 0;
 
   void Reset() {
     renderTarget.Reset();
@@ -429,8 +429,9 @@ struct MeshStore {
 
 static void InitD3D();
 static void InitFrameResources();
+static FrameContext* AcquireNextCtx();
+static void Present(FrameContext* ctx);
 static void WaitForFrame(FrameContext* ctx);
-static void MoveToNextFrame();
 static void WaitGPUIdle();
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
@@ -461,6 +462,7 @@ static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
 static ComPtr<ID3D12Fence> g_Fence;
 static HANDLE g_FenceEvent;
+static UINT64 g_FenceValue = 1;
 
 // Resources
 static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
@@ -576,9 +578,13 @@ void LoadAssets()
   }
 
   auto waitForGpu = [&]() {
-    UINT64 value = fenceValue++;
-    CHECK_HR(g_CommandQueue->Signal(fence.Get(), value));
-    CHECK_HR(fence->SetEventOnCompletion(value, fenceEvent));
+    // Signal and increment the fence value.
+    UINT64 fenceToWaitFor = fenceValue;
+    CHECK_HR(g_CommandQueue->Signal(fence.Get(), fenceToWaitFor));
+    fenceValue++;
+
+    // Wait until the fence is completed.
+    CHECK_HR(fence->SetEventOnCompletion(fenceToWaitFor, fenceEvent));
     WaitForSingleObject(fenceEvent, INFINITE);
   };
 
@@ -908,7 +914,7 @@ void Update(float time, float dt)
 
 void Render()
 {
-  auto ctx = &g_FrameContext[g_FrameIndex];
+  auto ctx = AcquireNextCtx();
 
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in
@@ -1163,10 +1169,7 @@ void Render()
   std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
   g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
 
-  // present the current backbuffer
-  CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
-
-  MoveToNextFrame();
+  Present(ctx);
 }
 
 void Cleanup()
@@ -1967,20 +1970,22 @@ static void InitFrameResources()
   }
 }
 
-static void MoveToNextFrame()
+static FrameContext* AcquireNextCtx()
 {
-  auto ctx = &g_FrameContext[g_FrameIndex];
-  const UINT64 currentFenceValue = ctx->fenceValue;
-  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), currentFenceValue));
-
   g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
   auto nextCtx = &g_FrameContext[g_FrameIndex];
 
-  // If the next frame is not ready to be rendered yet, wait until it is ready
   WaitForFrame(nextCtx);
 
-  // Set the fence value for the next frame
-  nextCtx->fenceValue = currentFenceValue + 1;
+  return nextCtx;
+}
+
+static void Present(FrameContext* ctx)
+{
+  CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
+
+  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ++g_FenceValue));
+  ctx->fenceValue = g_FenceValue;
 }
 
 // wait until gpu is finished with command list
@@ -2003,13 +2008,8 @@ static void WaitForFrame(FrameContext* ctx)
 
 static void WaitGPUIdle()
 {
-  auto ctx = &g_FrameContext[g_FrameIndex];
-
-  ctx->fenceValue++;
-
-  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ctx->fenceValue));
-
-  CHECK_HR(g_Fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
+  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ++g_FenceValue));
+  CHECK_HR(g_Fence->SetEventOnCompletion(g_FenceValue, g_FenceEvent));
   WaitForSingleObject(g_FenceEvent, INFINITE);
 }
 
