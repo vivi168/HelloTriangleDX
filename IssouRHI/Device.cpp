@@ -127,12 +127,11 @@ Device::Device(const GPUSelection& gpuSelection)
 
 #ifdef ENABLE_DEBUG_LAYER
   ID3D12InfoQueue* pInfoQueue = nullptr;
-  m_Device->QueryInterface(IID_PPV_ARGS(&pInfoQueue));
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-  pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
-  pInfoQueue->Release();
-  debugController->Release();
+  if (SUCCEEDED(m_Device->QueryInterface(IID_PPV_ARGS(&pInfoQueue)))) {
+    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+  }
 #endif
 
   // Create Memory allocator
