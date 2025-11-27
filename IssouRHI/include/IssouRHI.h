@@ -194,6 +194,7 @@ public:
   Texture(Device* device, TextureDesc& desc);
   ~Texture();
 
+  // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
 

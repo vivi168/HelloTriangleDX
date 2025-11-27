@@ -263,9 +263,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC Texture::UavDescriptor(TextureViewDesc& desc) c
       break;
     case TextureViewDimension::TextureCube:
     case TextureViewDimension::TextureCubeAry:
-      assert(false);
-      // FIXME C++23: std::unreachable();
-      break;
+      std::unreachable();
     case TextureViewDimension::Texture3D:
       uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
       uavDesc.Texture3D.MipSlice = desc.range.baseMipLevel;
@@ -288,9 +286,7 @@ D3D12_RENDER_TARGET_VIEW_DESC Texture::RtvDescriptor(TextureViewDesc& desc) cons
   } else {
     switch (m_Desc.dimension) {
       case TextureDimension::Texture1D:
-        assert(false);
-        // FIXME C++23: std::unreachable();
-        break;
+        std::unreachable();
       case TextureDimension::Texture2D:
         rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
         rtvDesc.Texture2DArray.FirstArraySlice = desc.range.baseArrayLayer;
