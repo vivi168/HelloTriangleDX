@@ -6,71 +6,106 @@ using Microsoft::WRL::ComPtr;
 namespace IssouRHI
 {
 
-// Surface::Surface(std::shared_ptr<Device> device, HWND hwnd)
-// {
-//   m_Device = device;
-//   m_CommandQueue = device->GetCommandQueue();
-//   m_Handle = hwnd;
-//   // create fence
-// }
+Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
+{
+  m_CommandQueue = device->GetNativeQueue();
 
-// void Surface::Configure(SurfaceConfiguration& desc)
-// {
-//   CreateSwapChain(SurfaceConfiguration& desc);
-//   CreateTextures(SurfaceConfiguration& desc);
+  // Fence
+  {
+    ID3D12Fence* fence = nullptr;
+    CHECK_HR(device->GetNativeDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    m_Fence.Attach(fence);
 
-//   m_Configured = true;
-// }
+    m_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    assert(m_FenceEvent);
+  }
+}
 
-// void Surface::CreateSwapChain(SurfaceConfiguration& desc)
-// {
-//   if (m_Configured) return;
+void Surface::Configure(SurfaceConfiguration& config)
+{
+  CreateSwapChain(config);
+  CreateTextures(config);
+  m_EnableVsync = config.enableVsync;
 
-//   // this is to describe our display mode
-//   DXGI_MODE_DESC backBufferDesc = {};
-//   backBufferDesc.Width = desc.width;
-//   backBufferDesc.Height = desc.height;
-//   backBufferDesc.Format = desc.format;
+  m_Configured = true;
+}
 
-//   // Describe and create the swap chain.
-//   DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-//   swapChainDesc.BufferCount = desc.bufferCount;
-//   swapChainDesc.BufferDesc = backBufferDesc;
-//   // this says the pipeline will render to this swap chain
-//   swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-//   // dxgi will discard the buffer (data) after we call present
-//   swapChainDesc.SwapEffect = desc.swapEffect;
-//   swapChainDesc.OutputWindow = m_Handle;
+void Surface::CreateSwapChain(SurfaceConfiguration& config)
+{
+  if (m_Configured) return;
 
-//   swapChainDesc.SampleDesc.Count = 1;  // our multi-sampling description
-//   swapChainDesc.SampleDesc.Quality = 0;
+  // this is to describe our display mode
+  DXGI_MODE_DESC backBufferDesc = {};
+  backBufferDesc.Width = config.width;
+  backBufferDesc.Height = config.height;
+  backBufferDesc.Format = DXGIFormat(config.format);
 
-//   swapChainDesc.Windowed = true;  // set to true, then if in fullscreen must
-//                                   // call SetFullScreenState with true for
-//                                   // full screen to get uncapped fps
+  // Describe and create the swap chain.
+  DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+  swapChainDesc.BufferCount = config.bufferCount;
+  swapChainDesc.BufferDesc = backBufferDesc;
+  swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+  swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+  swapChainDesc.OutputWindow = m_Handle;
 
-//   IDXGISwapChain* swapChain = nullptr;
-//   CHECK_HR(g_Factory->CreateSwapChain(g_CommandQueue.Get(), &swapChainDesc, &swapChain));
-//   m_SwapChain.Attach(static_cast<IDXGISwapChain3*>(swapChain));
+  swapChainDesc.SampleDesc.Count = 1;  // our multi-sampling description
+  swapChainDesc.SampleDesc.Quality = 0;
 
-//   m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
-// }
+  swapChainDesc.Windowed = true;
 
-// void Surface::CreateTextures(SurfaceConfiguration& desc)
-// {
-//   if (m_Configured) return;
+  IDXGISwapChain* swapChain = nullptr;
+  CHECK_HR(GetDXGIFactory()->CreateSwapChain(m_CommandQueue, &swapChainDesc, &swapChain));
+  m_SwapChain.Attach(static_cast<IDXGISwapChain3*>(swapChain));
 
-//   m_Textures.reserve(desc.bufferCount);
+  m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
+}
 
-//   for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-//     ID3D12Resource* res = nullptr;
-//     CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
+void Surface::CreateTextures(SurfaceConfiguration& config)
+{
+  if (m_Configured) return;
 
+  m_Textures.resize(config.bufferCount);
+  m_FenceValues.resize(config.bufferCount);
 
-//     // also set a TextureDesc, and pass it to Texture.
-//     // m_Textures[i] = std::make_shared<Texture>(desc);
-//     // m_Textures[i].Attach(res);
-//   }
-// }
+  TextureDesc desc{};
+  desc.size = {
+    .width = config.width,
+    .height = config.height,
+  };
+  desc.format = config.format;
+  desc.usage = TextureUsage::RenderAttachment;
+
+  for (int i = 0; i < config.bufferCount; i++) {
+    ID3D12Resource* res = nullptr;
+    CHECK_HR(m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
+
+    m_Textures[i] = std::make_shared<Texture>(m_Device, desc);
+    m_Textures[i]->Attach(res);
+
+    m_FenceValues[i] = 0;
+  }
+}
+
+std::shared_ptr<Texture> Surface::GetCurrentTexture()
+{
+  m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
+  auto texture = m_Textures[m_FrameIndex];
+
+  UINT64 fenceValue = m_FenceValues[m_FrameIndex];
+  if (m_Fence->GetCompletedValue() < fenceValue) {
+    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
+    WaitForSingleObject(m_FenceEvent, INFINITE);
+  }
+
+  return texture;
+}
+
+void Surface::Present()
+{
+  CHECK_HR(m_SwapChain->Present(m_EnableVsync ? 1 : 0, 0));
+
+  CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), ++m_NextFenceValue));
+  m_FenceValues[m_FrameIndex] = m_NextFenceValue;
+}
 
 }

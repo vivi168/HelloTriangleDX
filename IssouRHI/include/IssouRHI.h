@@ -110,6 +110,29 @@ enum class TextureFormat : uint32_t {
   Undefined,
 };
 
+// TODO: where to put this
+inline DXGI_FORMAT DXGIFormat(TextureFormat format)
+{
+  switch (format) {
+  case TextureFormat::Depth32Float:
+    return DXGI_FORMAT_D32_FLOAT;
+  case TextureFormat::R8Unorm:
+    return DXGI_FORMAT_R8_UNORM;
+  case TextureFormat::RG8Unorm:
+    return DXGI_FORMAT_R8G8_UNORM;
+  case TextureFormat::R32Uint:
+    return DXGI_FORMAT_R32_UINT;
+  case TextureFormat::RGBA8Unorm:
+    return DXGI_FORMAT_R8G8B8A8_UNORM;
+  case TextureFormat::RGB10A2Unorm:
+    return DXGI_FORMAT_R10G10B10A2_UNORM;
+  case TextureFormat::RGBA32Float:
+    return DXGI_FORMAT_R32G32B32A32_FLOAT;
+  case TextureFormat::Undefined:
+    return DXGI_FORMAT_UNKNOWN;
+  }
+}
+
 enum class VertexFormat : uint32_t {
   Float32x3,
 };
@@ -298,6 +321,7 @@ struct SurfaceConfiguration {
   UINT width;
   UINT height;
   UINT bufferCount;
+  bool enableVsync = false;
 };
 
 class Surface
@@ -307,28 +331,28 @@ public:
   ~Surface();
 
   void Configure(SurfaceConfiguration& config);
-  Texture* GetCurrentTexture();
+  std::shared_ptr<Texture> GetCurrentTexture();
   void Present();
 
 private:
-  void CreateSwapChain();
-  void CreateTextures();
+  void CreateSwapChain(SurfaceConfiguration& config);
+  void CreateTextures(SurfaceConfiguration& config);
 
-  SurfaceConfiguration m_Config{};
+  bool m_EnableVsync = false;
   bool m_Configured = false;
 
   HWND m_Handle;
-  // TODO: should we roll our own RefCountPtr instead of using shared_ptr?
   Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
   Device* m_Device;
-  ID3D12CommandQueue* m_CommandQueue; // make this our Queue not native queue
+  ID3D12CommandQueue* m_CommandQueue; // TODO: make this our Queue not native queue
 
   UINT m_FrameIndex;
   Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
-  std::vector<HANDLE> m_FenceEvent;
-  UINT64 m_FenceValue = 0;
+  HANDLE m_FenceEvent = nullptr;
+  UINT64 m_NextFenceValue = 0;
 
   std::vector<std::shared_ptr<Texture>> m_Textures;
+  std::vector<UINT64> m_FenceValues;
 };
 
 class CommandEncoder;

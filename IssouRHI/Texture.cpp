@@ -4,30 +4,6 @@
 namespace IssouRHI
 {
 
-static DXGI_FORMAT DXGIFormat(TextureFormat format)
-{
-  switch (format) {
-  case TextureFormat::Depth32Float:
-    return DXGI_FORMAT_D32_FLOAT;
-  case TextureFormat::R8Unorm:
-    return DXGI_FORMAT_R8_UNORM;
-  case TextureFormat::RG8Unorm:
-    return DXGI_FORMAT_R8G8_UNORM;
-  case TextureFormat::R32Uint:
-    return DXGI_FORMAT_R32_UINT;
-  case TextureFormat::RGBA8Unorm:
-    return DXGI_FORMAT_R8G8B8A8_UNORM;
-  case TextureFormat::RGB10A2Unorm:
-    return DXGI_FORMAT_R10G10B10A2_UNORM;
-  case TextureFormat::RGBA32Float:
-    return DXGI_FORMAT_R32G32B32A32_FLOAT;
-  case TextureFormat::Undefined:
-    assert(false);
-    // FIXME C++23: std::unreachable();
-    return DXGI_FORMAT_UNKNOWN;
-  }
-}
-
 static bool IsDepthStencil(TextureFormat format)
 {
   switch (format) {

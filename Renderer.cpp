@@ -449,6 +449,7 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
+static IssouRHI::Device* g_RhiDevice;
 static ID3D12Device5* g_Device;
 static D3D12MA::Allocator* g_Allocator;
 
@@ -462,7 +463,7 @@ static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 static UINT g_FrameIndex;
 static ComPtr<ID3D12Fence> g_Fence;
 static HANDLE g_FenceEvent;
-static UINT64 g_FenceValue = 1;
+static UINT64 g_FenceValue = 0;
 
 // Resources
 static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
@@ -537,6 +538,7 @@ void InitWindow(UINT width, UINT height, std::wstring name)
 
 void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */)
 {
+  g_RhiDevice = device.get(); // FIXME: TMP raw ptr!
   g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
   g_CommandQueue = device->GetNativeQueue();
