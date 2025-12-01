@@ -12,10 +12,10 @@ if(IS_MULTI_CONFIG)
 endif()
 
 if(MSVC)
-    add_compile_options(/W4 /MP /permissive-)
+    add_compile_options(/W4 /permissive-)
 
     if(CMAKE_GENERATOR MATCHES "Visual Studio")
-        add_compile_options("$<$<CONFIG:RELEASE>:/Zi>")
+        add_compile_options("/MP $<$<CONFIG:RELEASE>:/Zi>")
         add_link_options("$<$<CONFIG:RELEASE>:/DEBUG>")
     endif()
 endif()
