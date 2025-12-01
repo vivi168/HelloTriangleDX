@@ -22,7 +22,6 @@ namespace Renderer
 
 static constexpr size_t FRAME_BUFFER_COUNT = 3;
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
-static constexpr UINT PRESENT_SYNC_INTERVAL = 0;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
 static constexpr DXGI_FORMAT VISIBILITY_BUFFER_FORMAT = DXGI_FORMAT_R32_UINT;
@@ -33,7 +32,6 @@ static constexpr DXGI_FORMAT GBUFFER_BASE_COLOR_FORMAT = DXGI_FORMAT_R8G8B8A8_UN
 static constexpr DXGI_FORMAT GBUFFER_METALLIC_ROUGHNESS_FORMAT = DXGI_FORMAT_R8G8_UNORM;
 static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
-static constexpr D3D_FEATURE_LEVEL FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 
 // ========== Enums
 
@@ -194,14 +192,10 @@ struct FrameContext {
 
   static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
-  Texture renderTarget;
   GpuBuffer timestampReadBackBuffer;
-
   ComPtr<ID3D12CommandAllocator> commandAllocator;
-  UINT64 fenceValue = 0;
 
   void Reset() {
-    renderTarget.Reset();
     timestampReadBackBuffer.Reset();
     commandAllocator.Reset();
   }
@@ -429,10 +423,6 @@ struct MeshStore {
 
 static void InitD3D();
 static void InitFrameResources();
-static FrameContext* AcquireNextCtx();
-static void Present(FrameContext* ctx);
-static void WaitForFrame(FrameContext* ctx);
-static void WaitGPUIdle();
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
 static UINT CreateTexture(std::filesystem::path filename);
@@ -449,21 +439,16 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static IssouRHI::Device* g_RhiDevice;
 static ID3D12Device5* g_Device;
 static D3D12MA::Allocator* g_Allocator;
+static IssouRHI::Surface* g_Surface;
 
 // swapchain used to switch between render targets
-static ComPtr<IDXGISwapChain3> g_SwapChain;
 // container for command lists
 static ID3D12CommandQueue* g_CommandQueue;
 static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
-static UINT g_FrameIndex;
-static ComPtr<ID3D12Fence> g_Fence;
-static HANDLE g_FenceEvent;
-static UINT64 g_FenceValue = 0;
 
 // Resources
 static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
@@ -536,9 +521,9 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_Title = name;
 }
 
-void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */)
+void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface)
 {
-  g_RhiDevice = device.get(); // FIXME: TMP raw ptr!
+  g_Surface = surface.get(); // FIXME: TMP raw ptr!
   g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
   g_CommandQueue = device->GetNativeQueue();
@@ -813,9 +798,9 @@ static void Update(FrameContext* ctx, float time, float dt)
 
     if (g_Scene.numBoneMatrices > 0) {
       g_MeshStore.UpdateBoneMatrices(tmpBoneMatrices.data(), g_Scene.numBoneMatrices * sizeof(XMFLOAT4X4), 0,
-                                     g_FrameIndex);
+                                     g_Surface->CurrentFrameIndex());
     }
-    g_MeshStore.UpdateInstances(tmpInstances.data(), g_Scene.numMeshInstances * sizeof(MeshInstance::data), 0, g_FrameIndex);
+    g_MeshStore.UpdateInstances(tmpInstances.data(), g_Scene.numMeshInstances * sizeof(MeshInstance::data), 0, g_Surface->CurrentFrameIndex());
   }
 
   // ImGui
@@ -916,7 +901,9 @@ static void Update(FrameContext* ctx, float time, float dt)
 
 void Render(float time, float dt)
 {
-  auto ctx = AcquireNextCtx();
+  auto renderTarget = g_Surface->GetCurrentTexture();
+  auto renderTargetView = renderTarget->CreateView();
+  auto ctx = &g_FrameContext[g_Surface->CurrentFrameIndex()];
 
   Update(ctx, time, dt);
 
@@ -939,7 +926,7 @@ void Render(float time, float dt)
   // transition the "g_FrameIndex" render target from the present state to the
   // render target state so the command list draws to it starting from here
   std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
-  preRenderBarriers[0] = ctx->renderTarget.Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  preRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   preRenderBarriers[1] =
       g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
   g_CommandList->ResourceBarrier(static_cast<UINT>(preRenderBarriers.size()), preRenderBarriers.data());
@@ -958,7 +945,7 @@ void Render(float time, float dt)
 
   // Clear the render target by using the ClearRenderTargetView command
   const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-  g_CommandList->ClearRenderTargetView(ctx->renderTarget.RtvDescriptorHandle(), clearColor, 0, nullptr);
+  g_CommandList->ClearRenderTargetView(renderTargetView->RtvDescriptorHandle(), clearColor, 0, nullptr);
 
   std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
   g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
@@ -1129,7 +1116,7 @@ void Render(float time, float dt)
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
-    auto rtvHandle = ctx->renderTarget.RtvDescriptorHandle();
+    auto rtvHandle = renderTargetView->RtvDescriptorHandle();
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
@@ -1154,7 +1141,7 @@ void Render(float time, float dt)
   // present state
   std::array<D3D12_RESOURCE_BARRIER, 2> postRenderBarriers;
   postRenderBarriers[0] =
-      ctx->renderTarget.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+      renderTarget->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   postRenderBarriers[1] =
       g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
@@ -1173,7 +1160,7 @@ void Render(float time, float dt)
   std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
   g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
 
-  Present(ctx);
+  g_Surface->Present();
 }
 
 void Cleanup()
@@ -1182,22 +1169,7 @@ void Cleanup()
   ImGui_ImplWin32_Shutdown();
   ImGui::DestroyContext();
 
-  // wait for the gpu to finish all frames
-  for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    // TODO: Method from FrameContext
-    auto ctx = &g_FrameContext[i];
-
-    CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ctx->fenceValue));
-    WaitForFrame(ctx);
-  }
-
-  // get swapchain out of full screen before exiting
-  BOOL fs = false;
-  CHECK_HR(g_SwapChain->GetFullscreenState(&fs, NULL));
-
-  if (fs) g_SwapChain->SetFullscreenState(false, NULL);
-
-  WaitGPUIdle();
+  g_Surface->WaitForAllFrames();
 
   for (auto& [k, tex] : g_Textures) {
     g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
@@ -1250,9 +1222,7 @@ void Cleanup()
 
   g_ShadowBuffer.Reset();
 
-  CloseHandle(g_FenceEvent);
   g_CommandList.Reset();
-  // g_CommandQueue.Reset();
 
   g_SrvUavDescriptorHeap.Reset();
   g_RtvDescriptorHeap.Reset();
@@ -1262,17 +1232,6 @@ void Cleanup()
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
   }
-
-  // PrintStatsString();
-
-  // g_Allocator.Reset();
-
-  // if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
-  //   assert(g_CpuAllocationCount.load() == 0);
-  // }
-
-  // g_Device.Reset();
-  g_SwapChain.Reset();
 }
 
 UINT GetWidth() { return g_Width; }
@@ -1346,54 +1305,6 @@ static void InitD3D()
     // it up for recording again so close it now
     g_CommandList->Close();
   }
-
-  // Create Synchronization objects
-  {
-    ID3D12Fence* fence = nullptr;
-    CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-    g_Fence.Attach(fence);
-
-    g_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    assert(g_FenceEvent);
-  }
-
-  // Create Swapchain
-  {
-    // this is to describe our display mode
-    DXGI_MODE_DESC backBufferDesc = {};
-    backBufferDesc.Width = g_Width;
-    backBufferDesc.Height = g_Height;
-    backBufferDesc.Format = RENDER_TARGET_FORMAT;
-
-    // Describe and create the swap chain.
-    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-    swapChainDesc.BufferCount = FRAME_BUFFER_COUNT;
-    swapChainDesc.BufferDesc = backBufferDesc;
-    // this says the pipeline will render to this swap chain
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    // dxgi will discard the buffer (data) after we call present
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    swapChainDesc.OutputWindow = Win32Application::GetHwnd();
-
-    swapChainDesc.SampleDesc.Count = 1;  // our multi-sampling description
-    swapChainDesc.SampleDesc.Quality = 0;
-
-    swapChainDesc.Windowed = true;  // set to true, then if in fullscreen must
-                                    // call SetFullScreenState with true for
-                                    // full screen to get uncapped fps
-
-    IDXGISwapChain* tempSwapChain;
-
-    // The queue will be flushed once the swap chain is created. Give it the
-    // swap chain description we created above and store the created swap chain
-    // in a temp IDXGISwapChain interface
-    CHECK_HR(IssouRHI::GetDXGIFactory()->CreateSwapChain(g_CommandQueue, &swapChainDesc,
-                                        &tempSwapChain));
-
-    g_SwapChain.Attach(static_cast<IDXGISwapChain3*>(tempSwapChain));
-
-    g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
-  }
 }
 
 static void InitFrameResources()
@@ -1413,18 +1324,6 @@ static void InitFrameResources()
     g_RtvDescriptorHeap.Attach(rtvDescriptorHeap);
 
     g_RtvDescHeapAlloc.Create(g_Device, g_RtvDescriptorHeap.Get());
-
-    // Create a RTV for each buffer (double buffering is two buffers, tripple buffering is 3).
-    for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      // store the n'th buffer in the swap chain in the n'th position of render target
-      ID3D12Resource* res = nullptr;
-      CHECK_HR(g_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
-      g_FrameContext[i].renderTarget.Attach(res);
-
-      g_FrameContext[i].renderTarget.AllocRtvDescriptor(g_RtvDescHeapAlloc);
-      g_Device->CreateRenderTargetView(g_FrameContext[i].renderTarget.Resource(), nullptr,
-                                       g_FrameContext[i].renderTarget.RtvDescriptorHandle());
-    }
   }
 
   // DSV
@@ -1972,49 +1871,6 @@ static void InitFrameResources()
                                                     std::format(L"Timestamp Readback Buffer {}", i), g_Allocator,
                                                     HeapType::Readback);
   }
-}
-
-static FrameContext* AcquireNextCtx()
-{
-  g_FrameIndex = g_SwapChain->GetCurrentBackBufferIndex();
-  auto nextCtx = &g_FrameContext[g_FrameIndex];
-
-  WaitForFrame(nextCtx);
-
-  return nextCtx;
-}
-
-static void Present(FrameContext* ctx)
-{
-  CHECK_HR(g_SwapChain->Present(PRESENT_SYNC_INTERVAL, 0));
-
-  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ++g_FenceValue));
-  ctx->fenceValue = g_FenceValue;
-}
-
-// wait until gpu is finished with command list
-static void WaitForFrame(FrameContext* ctx)
-{
-  // if the current fence value is still less than "fenceValue", then we
-  // know the GPU has not finished executing the command queue since it has
-  // not reached the "g_CommandQueue->Signal(fence, fenceValue)" command
-  if (g_Fence->GetCompletedValue() < ctx->fenceValue) {
-    // we have the fence create an event which is signaled once the
-    // fence's current value is "fenceValue"
-    CHECK_HR(g_Fence->SetEventOnCompletion(ctx->fenceValue, g_FenceEvent));
-
-    // We will wait until the fence has triggered the event that it's
-    // current value has reached "fenceValue". once it's value has reached
-    // "fenceValue", we know the command queue has finished executing
-    WaitForSingleObject(g_FenceEvent, INFINITE);
-  }
-}
-
-static void WaitGPUIdle()
-{
-  CHECK_HR(g_CommandQueue->Signal(g_Fence.Get(), ++g_FenceValue));
-  CHECK_HR(g_Fence->SetEventOnCompletion(g_FenceValue, g_FenceEvent));
-  WaitForSingleObject(g_FenceEvent, INFINITE);
 }
 
 // Helper function for resolving the full path of assets.

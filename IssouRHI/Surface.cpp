@@ -21,6 +21,12 @@ Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
   }
 }
 
+Surface::~Surface()
+{
+  // WaitForAllFrames();
+  CloseHandle(m_FenceEvent);
+}
+
 void Surface::Configure(SurfaceConfiguration& config)
 {
   CreateSwapChain(config);
@@ -75,7 +81,7 @@ void Surface::CreateTextures(SurfaceConfiguration& config)
   desc.format = config.format;
   desc.usage = TextureUsage::RenderAttachment;
 
-  for (int i = 0; i < config.bufferCount; i++) {
+  for (UINT i = 0; i < config.bufferCount; i++) {
     ID3D12Resource* res = nullptr;
     CHECK_HR(m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&res)));
 
@@ -92,10 +98,7 @@ std::shared_ptr<Texture> Surface::GetCurrentTexture()
   auto texture = m_Textures[m_FrameIndex];
 
   UINT64 fenceValue = m_FenceValues[m_FrameIndex];
-  if (m_Fence->GetCompletedValue() < fenceValue) {
-    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
-    WaitForSingleObject(m_FenceEvent, INFINITE);
-  }
+  WaitFor(fenceValue);
 
   return texture;
 }
@@ -106,6 +109,25 @@ void Surface::Present()
 
   CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), ++m_NextFenceValue));
   m_FenceValues[m_FrameIndex] = m_NextFenceValue;
+}
+
+void Surface::WaitForAllFrames()
+{
+  const UINT64 fenceValue = m_NextFenceValue++;
+  CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), fenceValue));
+  WaitFor(fenceValue);
+
+  for (auto& fv : m_FenceValues) {
+    fv = fenceValue;
+  }
+}
+
+void Surface::WaitFor(UINT64 fenceValue)
+{
+  if (m_Fence->GetCompletedValue() < fenceValue) {
+    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
+    WaitForSingleObject(m_FenceEvent, INFINITE);
+  }
 }
 
 }

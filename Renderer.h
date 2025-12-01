@@ -8,7 +8,7 @@ struct Model3D;
 namespace Renderer
 {
 void InitWindow(UINT width, UINT height, std::wstring name);
-void Init(std::shared_ptr<IssouRHI::Device> device /*, std::shared_ptr<IssouRHI::Surface> surface */);
+void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface);
 void LoadAssets();
 void Render(float, float);
 void Cleanup();

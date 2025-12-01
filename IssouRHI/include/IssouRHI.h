@@ -333,10 +333,15 @@ public:
   void Configure(SurfaceConfiguration& config);
   std::shared_ptr<Texture> GetCurrentTexture();
   void Present();
+  void WaitForAllFrames();
+
+  UINT CurrentFrameIndex() const { return m_FrameIndex; }
 
 private:
   void CreateSwapChain(SurfaceConfiguration& config);
   void CreateTextures(SurfaceConfiguration& config);
+
+  void WaitFor(UINT64 fenceValue);
 
   bool m_EnableVsync = false;
   bool m_Configured = false;

@@ -133,8 +133,10 @@ std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
   if (Usage() & TextureUsage::RenderAttachment) {
     if (IsDepthStencil(Format())) {
       auto dsvDesc = DsvDescriptor(desc);
+      device->CreateDepthStencilView(m_Resource.Get(), &dsvDesc, view->DsvDescriptorHandle());
     } else {
       auto rtvDesc = RtvDescriptor(desc);
+      device->CreateRenderTargetView(m_Resource.Get(), &rtvDesc, view->RtvDescriptorHandle());
     }
   }
 
@@ -334,9 +336,9 @@ TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), 
 
   if (m_Texture->Usage() & TextureUsage::RenderAttachment) {
     if (IsDepthStencil(m_Texture->Format())) {
-      m_Rtv = m_Texture->GetDevice()->AllocRtvDescriptor();
-    } else {
       m_Dsv = m_Texture->GetDevice()->AllocDsvDescriptor();
+    } else {
+      m_Rtv = m_Texture->GetDevice()->AllocRtvDescriptor();
     }
   }
 }
