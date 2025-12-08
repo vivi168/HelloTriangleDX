@@ -282,34 +282,79 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
   return tex;
 }
 
-  DescriptorAllocation Device::AllocSrvUavDescriptor()
-  {
-    return m_SrvUavDescriptorHeap.Alloc();
+std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
+{
+  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
+  if (desc.usage & BufferUsage::MapRead) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_READBACK;
+  } else if (desc.usage & BufferUsage::MapWrite) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
+  } else {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
   }
 
-  DescriptorAllocation Device::AllocRtvDescriptor()
-  {
-    return m_RtvDescriptorHeap.Alloc();
+  D3D12_RESOURCE_STATES initialResourceState = D3D12_RESOURCE_STATE_COMMON;
+  bool fixedResourceState = false;
+  if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
+    initialResourceState |= D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+  } else {
+    switch (allocDesc.HeapType) {
+      case D3D12_HEAP_TYPE_READBACK:
+        initialResourceState |= D3D12_RESOURCE_STATE_COPY_DEST;
+        fixedResourceState = true;
+        break;
+      // if we ever support D3D12_HEAP_TYPE_UPLOAD -> D3D12_RESOURCE_STATE_GENERIC_READ + fixedResourceState = true
+      default:
+        break;
+    }
   }
 
-  DescriptorAllocation Device::AllocDsvDescriptor()
-  {
-    return m_DepthStencilDescriptorHeap.Alloc();
+  auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(desc.size);
+  if (desc.usage & BufferUsage::Storage) {
+    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
   }
 
-  void Device::FreeSrvUavDescriptor(DescriptorAllocation alloc)
-  {
-    m_SrvUavDescriptorHeap.Free(alloc);
-  }
+  ID3D12Resource* resource;
+  D3D12MA::Allocation* allocation;
+  CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
+                                       IID_PPV_ARGS(&resource)));
 
-  void Device::FreeRtvDescriptor(DescriptorAllocation alloc)
-  {
-    m_RtvDescriptorHeap.Free(alloc);
-  }
+  auto buf = std::make_shared<Buffer>(this, desc);
 
-  void Device::FreeDsvDescriptor(DescriptorAllocation alloc)
-  {
-    m_DepthStencilDescriptorHeap.Free(alloc);
-  }
+  buf->Attach(resource, allocation);
+  buf->InitState(initialResourceState, fixedResourceState);
+  return buf;
+}
+
+// TODO: tomorrow, replace everything in Renderer.cpp by these...
+DescriptorAllocation Device::AllocSrvUavDescriptor()
+{
+  return m_SrvUavDescriptorHeap.Alloc();
+}
+
+DescriptorAllocation Device::AllocRtvDescriptor()
+{
+  return m_RtvDescriptorHeap.Alloc();
+}
+
+DescriptorAllocation Device::AllocDsvDescriptor()
+{
+  return m_DepthStencilDescriptorHeap.Alloc();
+}
+
+void Device::FreeSrvUavDescriptor(DescriptorAllocation alloc)
+{
+  m_SrvUavDescriptorHeap.Free(alloc);
+}
+
+void Device::FreeRtvDescriptor(DescriptorAllocation alloc)
+{
+  m_RtvDescriptorHeap.Free(alloc);
+}
+
+void Device::FreeDsvDescriptor(DescriptorAllocation alloc)
+{
+  m_DepthStencilDescriptorHeap.Free(alloc);
+}
 
 }  // namespace IssouRHI

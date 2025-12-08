@@ -100,6 +100,8 @@ enum class TextureAspect : uint32_t {
 };
 
 enum class TextureFormat : uint32_t {
+  BC5Unorm,
+  BC7Unorm,
   Depth32Float,
   R8Unorm,
   RG8Unorm,
@@ -114,6 +116,10 @@ enum class TextureFormat : uint32_t {
 inline DXGI_FORMAT DXGIFormat(TextureFormat format)
 {
   switch (format) {
+  case TextureFormat::BC5Unorm:
+    return DXGI_FORMAT_BC5_UNORM;
+  case TextureFormat::BC7Unorm:
+    return DXGI_FORMAT_BC7_UNORM;
   case TextureFormat::Depth32Float:
     return DXGI_FORMAT_D32_FLOAT;
   case TextureFormat::R8Unorm:
@@ -220,7 +226,7 @@ public:
   // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
-
+public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
@@ -255,7 +261,7 @@ class TextureView {
 public:
   TextureView(Texture* tex, TextureViewDesc& desc);
   ~TextureView();
-
+public: // D3D12 impl specific
   D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_Srv.cpuHandle; }
   D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_Uav.cpuHandle; }
   D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_Rtv.cpuHandle; }
@@ -275,8 +281,44 @@ private:
   DescriptorAllocation m_Dsv;
 };
 
-struct BufferDesc;
-class Buffer;
+enum class BufferUsage : uint32_t {
+  MapRead = 1 << 0,
+  MapWrite = 1 << 1,
+  CopySrc = 1 << 2,
+  CopyDst = 1 << 3,
+  Index = 1 << 4,
+  Vertex = 1 << 5,
+  Uniform = 1 << 6,
+  Storage = 1 << 7,
+  Indirect = 1 << 8,
+  QueryResolve = 1 << 9,
+  RayTracingAccelerationStructure = 1 << 10,
+};
+ISSOURHI_ENUM_CLASS_OP(BufferUsage)
+
+struct BufferDesc {
+  std::string label;
+  size_t size;
+  BufferUsage usage;
+  bool mappedAtCreation = false;
+};
+
+class Buffer {
+public:
+  Buffer(Device* device, BufferDesc& desc);
+  ~Buffer();
+public: // D3D12 impl specific
+  void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
+  void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
+private:
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
+  D3D12MA::Allocation* m_Allocation = nullptr;
+  Device* m_Device;
+  BufferDesc m_Desc;
+  bool m_Mapped = false;
+  D3D12_RESOURCE_STATES m_CurrentState = D3D12_RESOURCE_STATE_COMMON;
+  bool m_FixedResourceState = false;
+};
 
 class Device
 {
@@ -292,6 +334,7 @@ public:
   ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 
   std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
+  std::shared_ptr<Buffer> CreateBuffer(BufferDesc& desc);
 
   DescriptorAllocation AllocSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();

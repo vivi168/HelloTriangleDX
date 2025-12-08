@@ -114,6 +114,10 @@ struct GpuBuffer : GpuResource {
       bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     }
 
+    if (allocDesc.HeapType == D3D12_HEAP_TYPE_READBACK) {
+      InitialResourceState |= D3D12_RESOURCE_STATE_COPY_DEST;
+    }
+
     CreateResource(allocator, &allocDesc, &bufferDesc, InitialResourceState).SetName(name);
 
     if (memUsage == HeapType::Upload) {

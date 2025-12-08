@@ -40,6 +40,7 @@ set(THIRD_PARTY_SOURCES ${IMGUI_SOURCES} ${D3D12MA_SOURCES})
 # TODO: move to standalone library later
 set(ISSOURHI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/IssouRHI)
 set(ISSOURHI_SOURCES
+    ${ISSOURHI_DIR}/Buffer.cpp
     ${ISSOURHI_DIR}/DescriptorHeap.cpp
     ${ISSOURHI_DIR}/Device.cpp
     ${ISSOURHI_DIR}/Utils.cpp
