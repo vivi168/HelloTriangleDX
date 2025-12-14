@@ -226,6 +226,8 @@ public:
   // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
+
+  Device* GetDevice() const { return m_Device; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
@@ -240,20 +242,19 @@ public: // D3D12 impl specific
 
   TextureUsage Usage() const { return m_Desc.usage; }
   TextureFormat Format() const { return m_Desc.format; }
-
-  Device* GetDevice() const { return m_Device; }
 private:
+  bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
+
   std::unordered_map<TextureViewDesc, std::shared_ptr<TextureView>, TextureViewDesc::Hasher> m_Views;
 
+  Device* m_Device;
+  TextureDesc m_Desc;
+private:  // D3D12 impl specific
   void Map();
   void Unmap();
 
-  bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
-
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
-  Device* m_Device;
-  TextureDesc m_Desc;
   boolean m_Mapped = false;
 };
 
@@ -296,6 +297,13 @@ enum class BufferUsage : uint32_t {
 };
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
+struct BufferRange {
+  uint64_t offset = 0;
+  uint64_t size = 0;
+
+  bool operator==(const BufferRange& other) const { return offset == other.offset && size == other.size; }
+};
+
 struct BufferDesc {
   std::string label;
   size_t size;
@@ -309,13 +317,65 @@ public:
   ~Buffer();
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
+  // TODO: use enhanced barriers
   void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
+
+  void Copy(BufferRange range, const void* data);
+
+  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
+
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(BufferRange range, UINT byteStride);
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(BufferRange range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
+
+  UINT SrvDescriptorIndex();
+  UINT UavDescriptorIndex();
+
 private:
-  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
-  D3D12MA::Allocation* m_Allocation = nullptr;
   Device* m_Device;
   BufferDesc m_Desc;
+
+private: // D3D12 impl specific
+  void Map();
+  void Unmap();
+
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
+  D3D12MA::Allocation* m_Allocation = nullptr;
   bool m_Mapped = false;
+
+  struct ViewKey {
+    BufferRange range;
+    UINT byteStride;
+    Buffer* counter;
+    UINT64 counterOffsetInBytes;
+
+    bool operator==(const ViewKey& other) const
+    {
+      return range == other.range && byteStride == other.byteStride && counter == other.counter &&
+             counterOffsetInBytes == other.counterOffsetInBytes;
+    }
+
+    struct Hasher {
+      size_t operator()(const ViewKey& vk) const
+      {
+        size_t hash = 0;
+
+        HashCombine(hash, vk.range.offset);
+        HashCombine(hash, vk.range.size);
+        HashCombine(hash, vk.byteStride);
+        HashCombine(hash, reinterpret_cast<std::uintptr_t>(vk.counter));
+        HashCombine(hash, vk.counterOffsetInBytes);
+
+        return hash;
+      }
+    };
+  };
+
+  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs;
+  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs;
+
+  // TODO: use enhanced barriers
   D3D12_RESOURCE_STATES m_CurrentState = D3D12_RESOURCE_STATE_COMMON;
   bool m_FixedResourceState = false;
 };
