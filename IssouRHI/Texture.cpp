@@ -306,8 +306,6 @@ D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(TextureViewDesc& desc) cons
   return dsvDesc;
 }
 
-inline constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
-
 void Texture::Map()
 {
   assert(!m_Mapped);

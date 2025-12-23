@@ -320,17 +320,20 @@ public: // D3D12 impl specific
   // TODO: use enhanced barriers
   void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
 
-  void Copy(BufferRange range, const void* data);
+  void Copy(BufferRange& range, const void* data);
+  void Clear(BufferRange& range);
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(BufferRange range, UINT byteStride);
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(BufferRange range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(BufferRange& range, UINT byteStride);
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(BufferRange& range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
 
   UINT SrvDescriptorIndex();
   UINT UavDescriptorIndex();
+
+  ID3D12Resource* Resource() const { return m_Resource.Get(); };
 
 private:
   Device* m_Device;
@@ -342,13 +345,14 @@ private: // D3D12 impl specific
 
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
+  void* m_Address = nullptr;
   bool m_Mapped = false;
 
   struct ViewKey {
     BufferRange range;
     UINT byteStride;
-    Buffer* counter;
-    UINT64 counterOffsetInBytes;
+    Buffer* counter = nullptr;
+    UINT64 counterOffsetInBytes = 0;
 
     bool operator==(const ViewKey& other) const
     {
@@ -372,8 +376,8 @@ private: // D3D12 impl specific
     };
   };
 
-  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs;
-  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs;
+  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
+  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 
   // TODO: use enhanced barriers
   D3D12_RESOURCE_STATES m_CurrentState = D3D12_RESOURCE_STATE_COMMON;

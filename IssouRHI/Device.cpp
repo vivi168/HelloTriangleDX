@@ -326,7 +326,6 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
   return buf;
 }
 
-// TODO: tomorrow, replace everything in Renderer.cpp by these...
 DescriptorAllocation Device::AllocSrvUavDescriptor()
 {
   return m_SrvUavDescriptorHeap.Alloc();

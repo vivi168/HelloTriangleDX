@@ -4,6 +4,8 @@
 
 #include <cassert>
 
+inline constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
+
 // FIXME: duplicated with stdafx.h
 #define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x
