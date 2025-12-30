@@ -171,8 +171,8 @@ Device::Device(const GPUSelection& gpuSelection)
                                   D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
     m_RtvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, NUM_DESCRIPTORS_PER_HEAP,
                                D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-    m_DepthStencilDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP,
-                                        D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_DsvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP,
+                               D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
   }
 }
 
@@ -260,6 +260,22 @@ void Device::PrintAdapterInformation()
   }
 }
 
+static std::wstring StringToWstring(std::string_view s)
+{
+  size_t len = s.length();
+
+  if (len == 0) return std::wstring();
+
+  int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, nullptr, 0);
+  assert(size > 0);
+
+  std::wstring ws(size, 0);
+  int res = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, ws.data(), size);
+  assert(res > 0);
+
+  return ws;
+}
+
 std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 {
   auto tex = std::make_shared<Texture>(this, desc);
@@ -273,10 +289,24 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 
   D3D12_RESOURCE_DESC textureDesc = Texture::D3D12ResourceDesc(desc);
 
+  D3D12_CLEAR_VALUE zero{};
+  zero.Format = textureDesc.Format;
+  D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr;
+  if (textureDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
+    pOptimizedClearValue = &zero;
+  }
+  D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON;
+  if (textureDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) {
+    zero.DepthStencil.Depth = 1.0f;
+    zero.DepthStencil.Stencil = 0;
+    InitialResourceState |= D3D12_RESOURCE_STATE_DEPTH_WRITE;
+  }
+
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
-  CHECK_HR(m_Allocator->CreateResource(&allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation,
+  CHECK_HR(m_Allocator->CreateResource(&allocDesc, &textureDesc, InitialResourceState, pOptimizedClearValue, &allocation,
                                        IID_PPV_ARGS(&resource)));
+  resource->SetName(StringToWstring(desc.label).c_str());
 
   tex->Attach(resource, allocation);
   return tex;
@@ -318,6 +348,7 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
   D3D12MA::Allocation* allocation;
   CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
                                        IID_PPV_ARGS(&resource)));
+  resource->SetName(StringToWstring(desc.label).c_str());
 
   auto buf = std::make_shared<Buffer>(this, desc);
 
@@ -338,7 +369,7 @@ DescriptorAllocation Device::AllocRtvDescriptor()
 
 DescriptorAllocation Device::AllocDsvDescriptor()
 {
-  return m_DepthStencilDescriptorHeap.Alloc();
+  return m_DsvDescriptorHeap.Alloc();
 }
 
 void Device::FreeSrvUavDescriptor(DescriptorAllocation alloc)
@@ -353,7 +384,7 @@ void Device::FreeRtvDescriptor(DescriptorAllocation alloc)
 
 void Device::FreeDsvDescriptor(DescriptorAllocation alloc)
 {
-  m_DepthStencilDescriptorHeap.Free(alloc);
+  m_DsvDescriptorHeap.Free(alloc);
 }
 
 }  // namespace IssouRHI

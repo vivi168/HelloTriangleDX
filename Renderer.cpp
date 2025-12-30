@@ -3,7 +3,6 @@
 #include "Renderer.h"
 #include "RendererHelper.h"
 
-#include "DescriptorHeapListAllocator.h"
 #include "GpuBuffer.h"
 
 #include "shaders/Shared.h"
@@ -441,6 +440,7 @@ static std::wstring g_AssetsPath;
 // Pipeline objects
 static ID3D12Device5* g_Device;
 static D3D12MA::Allocator* g_Allocator;
+static IssouRHI::Device* g_RhiDevice;
 static IssouRHI::Surface* g_Surface;
 
 // swapchain used to switch between render targets
@@ -451,15 +451,8 @@ static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
 // Resources
-static ComPtr<ID3D12DescriptorHeap> g_SrvUavDescriptorHeap;
-static DescriptorHeapListAllocator g_SrvUavDescHeapAlloc;
-
-static ComPtr<ID3D12DescriptorHeap> g_RtvDescriptorHeap;
-static DescriptorHeapListAllocator g_RtvDescHeapAlloc;
-
-static GpuBuffer g_DepthStencilBuffer;
-static ComPtr<ID3D12DescriptorHeap> g_DepthStencilDescriptorHeap;
-
+static std::shared_ptr<IssouRHI::Texture> g_DepthStencilBuffer;
+// TODO: RHI class for this
 static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
 
 // PSO
@@ -476,29 +469,22 @@ static GpuBuffer g_HitGroupShaderTable;
 static GpuBuffer g_DrawMeshCommands;      // written by compute shader
 static GpuBuffer g_UAVCounterReset;
 
-static Texture g_VisibilityBuffer;
-static Texture g_ShadowBuffer;
+static std::shared_ptr<IssouRHI::Texture> g_VisibilityBuffer;
+static std::shared_ptr<IssouRHI::Texture> g_ShadowBuffer;
 
 struct GBuffer {
-  Texture worldPosition;
-  Texture worldNormal;
-  Texture baseColor;
+  std::shared_ptr<IssouRHI::Texture> worldPosition;
+  std::shared_ptr<IssouRHI::Texture> worldNormal;
+  std::shared_ptr<IssouRHI::Texture> baseColor;
 
   FillGBufferPerDispatchConstants PerDispatchConstants(UINT visBufferDescId)
   {
     return {
         .VisibilityBufferId = visBufferDescId,
-        .WorldPositionId = worldPosition.UavDescriptorIndex(),
-        .WorldNormalId = worldNormal.UavDescriptorIndex(),
-        .BaseColorId = baseColor.UavDescriptorIndex(),
+        .WorldPositionId = worldPosition->CreateView()->UavDescriptorAlloc().index,
+        .WorldNormalId = worldNormal->CreateView()->UavDescriptorAlloc().index,
+        .BaseColorId = baseColor->CreateView()->UavDescriptorAlloc().index,
     };
-  }
-
-  void Reset()
-  {
-    worldPosition.Reset();
-    worldNormal.Reset();
-    baseColor.Reset();
   }
 };
 
@@ -506,7 +492,7 @@ static GBuffer g_GBuffer;
 
 static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
-static std::unordered_map<std::wstring, std::shared_ptr<Texture>> g_Textures;
+static std::unordered_map<std::wstring, std::shared_ptr<IssouRHI::Texture>> g_Textures;
 static Scene g_Scene;
 
 static std::atomic<size_t> g_CpuAllocationCount{0};
@@ -523,6 +509,7 @@ void InitWindow(UINT width, UINT height, std::wstring name)
 
 void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface)
 {
+  g_RhiDevice = device.get();  // FIXME: TMP raw ptr!
   g_Surface = surface.get(); // FIXME: TMP raw ptr!
   g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
@@ -695,7 +682,7 @@ void LoadAssets()
     g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
                                     g_Allocator);
 
-    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device, g_SrvUavDescHeapAlloc);
+    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
 
     CHECK_HR(commandAllocator->Reset());
     CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
@@ -873,22 +860,22 @@ static void Update(FrameContext* ctx, float time, float dt)
 
     if (ImGui::BeginTabBar("GBufferTabs")) {
       if (ImGui::BeginTabItem("Normal")) {
-        ImGui::Image((ImTextureID)g_GBuffer.worldNormal.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.worldNormal->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Position")) {
-        ImGui::Image((ImTextureID)g_GBuffer.worldPosition.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.worldPosition->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Base Color")) {
-        ImGui::Image((ImTextureID)g_GBuffer.baseColor.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.baseColor->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Shadow")) {
-        ImGui::Image((ImTextureID)g_ShadowBuffer.SrvDescriptorGpuHandle().ptr, imgSize);
+        ImGui::Image((ImTextureID)g_ShadowBuffer->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
         ImGui::EndTabItem();
       }
 
@@ -928,26 +915,26 @@ void Render(float time, float dt)
   std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
   preRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   preRenderBarriers[1] =
-      g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+      g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
   g_CommandList->ResourceBarrier(static_cast<UINT>(preRenderBarriers.size()), preRenderBarriers.data());
 
   // here we again get the handle to our current render target view so we can
   // set it as the render target in the output merger stage of the pipeline
   D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+      g_DepthStencilBuffer->CreateView()->DsvDescriptorAlloc().cpuHandle;
 
   g_CommandList->ClearDepthStencilView(
-      g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+      dsvHandle,
       D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
   static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
-  g_CommandList->ClearRenderTargetView(g_VisibilityBuffer.RtvDescriptorHandle(), visBufferClearColor, 0, nullptr);
+  g_CommandList->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
   const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-  g_CommandList->ClearRenderTargetView(renderTargetView->RtvDescriptorHandle(), clearColor, 0, nullptr);
+  g_CommandList->ClearRenderTargetView(renderTargetView->RtvDescriptorAlloc().cpuHandle, clearColor, 0, nullptr);
 
-  std::array descriptorHeaps{g_SrvUavDescriptorHeap.Get()};
+  std::array descriptorHeaps{g_RhiDevice->SrvUavDescriptorHeap()};
   g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
@@ -1019,7 +1006,7 @@ void Render(float time, float dt)
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
 
-    auto rtvHandle = g_VisibilityBuffer.RtvDescriptorHandle();
+    auto rtvHandle = g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle;
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
@@ -1037,7 +1024,7 @@ void Render(float time, float dt)
                                    0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
     auto after =
-        g_VisibilityBuffer.Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &after);
 
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
@@ -1048,14 +1035,14 @@ void Render(float time, float dt)
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
 
     std::array<D3D12_RESOURCE_BARRIER, 3> before;
-    before[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    before[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    before[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    before[0] = g_GBuffer.worldPosition->Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    before[1] = g_GBuffer.worldNormal->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    before[2] = g_GBuffer.baseColor->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
-    auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer.SrvDescriptorIndex());
+    auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->SrvDescriptorAlloc().index);
     UINT n = SizeOfInUint(c);
     g_CommandList->SetComputeRoot32BitConstants(RootParameter::PerDrawConstants, n, &c, 0);
 
@@ -1065,9 +1052,9 @@ void Render(float time, float dt)
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
 
     std::array<D3D12_RESOURCE_BARRIER, 3> after;
-    after[0] = g_GBuffer.worldPosition.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    after[1] = g_GBuffer.worldNormal.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    after[2] = g_GBuffer.baseColor.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    after[0] = g_GBuffer.worldPosition->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    after[1] = g_GBuffer.worldNormal->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    after[2] = g_GBuffer.baseColor->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
 
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
@@ -1076,14 +1063,14 @@ void Render(float time, float dt)
   // Ray trace shadows
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
-    auto before = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    auto before = g_ShadowBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &before);
 
     g_CommandList->SetPipelineState1(g_DxrStateObject.Get());
 
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
-                                               g_GBuffer.worldPosition.SrvDescriptorIndex(), 0);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.UavDescriptorIndex(), 1);
+                                               g_GBuffer.worldPosition->CreateView()->SrvDescriptorAlloc().index, 0);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer->CreateView()->UavDescriptorAlloc().index, 1);
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 2);
 
     {
@@ -1107,7 +1094,7 @@ void Render(float time, float dt)
       g_CommandList->DispatchRays(&dispatchDesc);
     }
 
-    auto after = g_ShadowBuffer.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    auto after = g_ShadowBuffer->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &after);
   }
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
@@ -1116,14 +1103,14 @@ void Render(float time, float dt)
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
-    auto rtvHandle = renderTargetView->RtvDescriptorHandle();
+    auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
 
     g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants,
-                                                g_GBuffer.baseColor.SrvDescriptorIndex(), 0);
-    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer.SrvDescriptorIndex(),
+                                                g_GBuffer.baseColor->CreateView()->SrvDescriptorAlloc().index, 0);
+    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer->CreateView()->SrvDescriptorAlloc().index,
                                                 1);
 
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1171,10 +1158,10 @@ void Cleanup()
 
   g_Surface->WaitForAllFrames();
 
-  for (auto& [k, tex] : g_Textures) {
-    g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
-    tex->Reset();
-  }
+  // for (auto& [k, tex] : g_Textures) {
+  //   g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
+  //   tex->Reset();
+  // }
 
   {
     g_MeshStore.m_VertexPositions.Reset();
@@ -1217,17 +1204,7 @@ void Cleanup()
   g_MissShaderTable.Reset();
   g_HitGroupShaderTable.Reset();
 
-  g_VisibilityBuffer.Reset();
-  g_GBuffer.Reset();
-
-  g_ShadowBuffer.Reset();
-
   g_CommandList.Reset();
-
-  g_SrvUavDescriptorHeap.Reset();
-  g_RtvDescriptorHeap.Reset();
-  g_DepthStencilBuffer.Reset();
-  g_DepthStencilDescriptorHeap.Reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
@@ -1314,65 +1291,17 @@ static void InitFrameResources()
   GetAssetsPath(assetsPath, _countof(assetsPath));
   g_AssetsPath = assetsPath;
 
-  // RTV
-  {
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                                           .NumDescriptors = FRAME_BUFFER_COUNT + 1,  // g_VisibilityBuffer
-                                           .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE};
-    ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
-    CHECK_HR(g_Device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap)));
-    g_RtvDescriptorHeap.Attach(rtvDescriptorHeap);
-
-    g_RtvDescHeapAlloc.Create(g_Device, g_RtvDescriptorHeap.Get());
-  }
-
   // DSV
   {
-    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-    dsvHeapDesc.NumDescriptors = 1;
-    dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    CHECK_HR(g_Device->CreateDescriptorHeap(
-        &dsvHeapDesc, IID_PPV_ARGS(&g_DepthStencilDescriptorHeap)));
-
-    D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
-    depthOptimizedClearValue.Format = DEPTH_STENCIL_FORMAT;
-    depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
-    depthOptimizedClearValue.DepthStencil.Stencil = 0;
-
-    D3D12MA::CALLOCATION_DESC depthStencilAllocDesc =
-        D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-
-    D3D12_RESOURCE_DESC depthStencilResourceDesc =
-        CD3DX12_RESOURCE_DESC::Tex2D(DEPTH_STENCIL_FORMAT, g_Width, g_Height);
-    depthStencilResourceDesc.MipLevels = 1;
-    depthStencilResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-    g_DepthStencilBuffer.CreateResource(
-        g_Allocator, &depthStencilAllocDesc, &depthStencilResourceDesc,
-        D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthOptimizedClearValue);
-
-    g_DepthStencilBuffer.SetName(L"Depth Stencil Buffer");
-
-    D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
-    depthStencilDesc.Format = DEPTH_STENCIL_FORMAT;
-    depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
-    g_Device->CreateDepthStencilView(
-        g_DepthStencilBuffer.Resource(), &depthStencilDesc,
-        g_DepthStencilDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-  }
-
-  // CBV_SRV_UAV descriptor heap
-  {
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{
-        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        .NumDescriptors = NUM_DESCRIPTORS_PER_HEAP,
-        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+    IssouRHI::TextureDesc desc{
+      .label = "Depth Stencil Buffer",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::Depth32Float,
+      .usage = IssouRHI::TextureUsage::RenderAttachment,
     };
-    CHECK_HR(g_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&g_SrvUavDescriptorHeap)));
-
-    g_SrvUavDescHeapAlloc.Create(g_Device, g_SrvUavDescriptorHeap.Get());
+    g_DepthStencilBuffer = g_RhiDevice->CreateTexture(desc);
   }
 
   // Query heap
@@ -1394,16 +1323,21 @@ static void InitFrameResources()
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_SrvUavDescriptorHeap.Get();
+  initInfo.SrvDescriptorHeap = g_RhiDevice->SrvUavDescriptorHeap();
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
-        g_SrvUavDescHeapAlloc.Alloc(outCpuHandle, outGpuHandle);
+        IssouRHI::DescriptorAllocation alloc = g_RhiDevice->AllocSrvUavDescriptor();
+        *outCpuHandle = alloc.cpuHandle;
+        *outGpuHandle = alloc.gpuHandle;
       };
   initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
                                     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
                                     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
-    return g_SrvUavDescHeapAlloc.Free(cpuHandle, gpuHandle);
+    IssouRHI::DescriptorAllocation alloc{};
+    alloc.cpuHandle = cpuHandle;
+    alloc.gpuHandle = gpuHandle;
+    g_RhiDevice->FreeSrvUavDescriptor(alloc);
   };
   ImGui_ImplDX12_Init(&initInfo);
 
@@ -1682,15 +1616,15 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexPositions
           .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc)
-          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap)
+          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Normals buffer
     {
       g_MeshStore.m_VertexNormals
           .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
       // TODO: we also need a UAV because we need to transform normals during skinning
     }
 
@@ -1698,7 +1632,7 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexTangents
           .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
       // TODO: we also need a UAV because we need to transform tangents during skinning
     }
 
@@ -1706,49 +1640,49 @@ static void InitFrameResources()
     {
       g_MeshStore.m_VertexUVs
           .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Blend weights/indices buffer
     {
       g_MeshStore.m_VertexBlendWeightsAndIndices
           .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Vertex indices
     {
       g_MeshStore.m_VertexIndices
           .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Meshlets buffer
     {
       g_MeshStore.m_Meshlets
           .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Meshlet unique vertex indices buffer
     {
       g_MeshStore.m_MeshletUniqueIndices
           .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
       g_MeshStore.m_MeshletPrimitives
           .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Materials buffer
     {
       g_MeshStore.m_Materials
           .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Instances buffer
@@ -1756,7 +1690,7 @@ static void InitFrameResources()
       g_MeshStore.m_Instances[i]
           .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator,
                  HeapType::Upload)
-          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Bone Matrices buffer
@@ -1764,7 +1698,7 @@ static void InitFrameResources()
       g_MeshStore.m_BoneMatrices[i]
           .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator,
                  HeapType::Upload)
-          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device, g_SrvUavDescHeapAlloc);
+          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
     }
 
     // Draw Meshlets commands
@@ -1772,8 +1706,8 @@ static void InitFrameResources()
       g_DrawMeshCommands
           .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
                  L"Draw Meshlets command buffer", g_Allocator, HeapType::Default, true)
-          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device, g_SrvUavDescHeapAlloc)
-          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device, g_SrvUavDescHeapAlloc,
+          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap)
+          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap,
                      g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
     }
 
@@ -1789,69 +1723,62 @@ static void InitFrameResources()
 
   // Vis Buffer output
   {
-    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-
-    D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(VISIBILITY_BUFFER_FORMAT, g_Width, g_Height);
-    textureDesc.MipLevels = 1;
-    textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-
-    D3D12_CLEAR_VALUE clear{.Format = textureDesc.Format, .Color = {0.0f, 0.0f, 0.0f, 0.0f}};
-    g_VisibilityBuffer.CreateResource(g_Allocator, &allocDesc, &textureDesc, D3D12_RESOURCE_STATE_COMMON, &clear);
-    g_VisibilityBuffer.SetName(L"Visibility Buffer");
-
-    // descriptor
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = textureDesc.Format,
-                                            .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
-                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                            .Texture2D = {
-                                                .MipLevels = textureDesc.MipLevels,
-                                            }};
-    g_VisibilityBuffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-    g_Device->CreateShaderResourceView(g_VisibilityBuffer.Resource(), &srvDesc,
-                                       g_VisibilityBuffer.SrvDescriptorHandle());
-
-    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{
-        .Format = textureDesc.Format,
-        .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
-        .Texture2D = {},
+    IssouRHI::TextureDesc desc{
+      .label = "Visibility Buffer",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::R32Uint,
+      .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding
     };
-    g_VisibilityBuffer.AllocRtvDescriptor(g_RtvDescHeapAlloc);
-    g_Device->CreateRenderTargetView(g_VisibilityBuffer.Resource(), &rtvDesc, g_VisibilityBuffer.RtvDescriptorHandle());
+    g_VisibilityBuffer = g_RhiDevice->CreateTexture(desc);
   }
 
   // G-Buffer output
   {
-    D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_DEFAULT};
-
-    auto InitGBuffer = [&](auto& buffer, DXGI_FORMAT format, const WCHAR* name) {
-      D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(format, g_Width, g_Height);
-      textureDesc.MipLevels = 1;
-      textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-      buffer.CreateResource(g_Allocator, &allocDesc, &textureDesc);
-      buffer.SetName(name);
-
-      // descriptor
-      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = format,
-                                              .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
-                                              .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                              .Texture2D = {.MipLevels = textureDesc.MipLevels}};
-      D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{
-          .Format = format, .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D, .Texture2D = {}};
-
-      buffer.AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateShaderResourceView(buffer.Resource(), &srvDesc, buffer.SrvDescriptorHandle());
-
-      buffer.AllocUavDescriptor(g_SrvUavDescHeapAlloc);
-      g_Device->CreateUnorderedAccessView(buffer.Resource(), nullptr, &uavDesc, buffer.UavDescriptorHandle());
+    IssouRHI::TextureDesc desc{
+      .label = "G-Buffer world position",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::RGBA32Float,
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
     };
-
-    InitGBuffer(g_GBuffer.worldPosition, GBUFFER_WORLD_POSITION_FORMAT, L"G-Buffer world position");
-    InitGBuffer(g_GBuffer.worldNormal, GBUFFER_WORLD_NORMAL_FORMAT, L"G-Buffer world normal");
-    InitGBuffer(g_GBuffer.baseColor, GBUFFER_BASE_COLOR_FORMAT, L"G-Buffer base color");
-
-    // Shadow buffer output
-    InitGBuffer(g_ShadowBuffer, SHADOW_BUFFER_FORMAT, L"Shadow buffer");
+    g_GBuffer.worldPosition = g_RhiDevice->CreateTexture(desc);
+  }
+  {
+    IssouRHI::TextureDesc desc{
+      .label = "G-Buffer world normal",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::RGB10A2Unorm,
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+    };
+    g_GBuffer.worldNormal = g_RhiDevice->CreateTexture(desc);
+  }
+  {
+    IssouRHI::TextureDesc desc{
+      .label = "G-Buffer base color",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::RGBA8Unorm,
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+    };
+    g_GBuffer.baseColor = g_RhiDevice->CreateTexture(desc);
+  }
+  // Shadow buffer output
+  {
+    IssouRHI::TextureDesc desc{
+      .label = "Shadow buffer",
+      .size = {.width = g_Width, .height = g_Height},
+      .mipLevelCount = 1,
+      .dimension = IssouRHI::TextureDimension::Texture2D,
+      .format = IssouRHI::TextureFormat::R8Unorm,
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+    };
+    g_ShadowBuffer = g_RhiDevice->CreateTexture(desc);
   }
 
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
@@ -2003,45 +1930,56 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 static UINT CreateTexture(std::filesystem::path filename)
 {
   if (auto it = g_Textures.find(filename); it != g_Textures.end()) {
-    return it->second->SrvDescriptorIndex();
+    return it->second->CreateView()->SrvDescriptorAlloc().index;
   }
-
-  auto tex = std::make_shared<Texture>(); // unique_ptr?
 
   TexMetadata metadata;
   ScratchImage image;
 
   LoadFromDDSFile(filename.wstring().c_str(), DDS_FLAGS_NONE, &metadata, image);
 
-  // TODO: handle multiple mips level + handle 3d textures
-  // ref: DirectXTex\DirectXTexD3D12.cpp#PrepareUpload
-  D3D12_RESOURCE_DESC textureDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(metadata.format, metadata.width, static_cast<UINT>(metadata.height),
-                                   static_cast<WORD>(metadata.arraySize), static_cast<WORD>(metadata.mipLevels));
-
-  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{D3D12_HEAP_TYPE_GPU_UPLOAD};
-  tex->CreateResource(g_Allocator, &allocDesc, &textureDesc);
-  tex->Map();
+  auto texDimension = [dim = metadata.dimension]() {
+    switch (dim) {
+      case TEX_DIMENSION_TEXTURE1D:
+        return IssouRHI::TextureDimension::Texture1D;
+      case TEX_DIMENSION_TEXTURE2D:
+        return IssouRHI::TextureDimension::Texture2D;
+      case TEX_DIMENSION_TEXTURE3D:
+        return IssouRHI::TextureDimension::Texture3D;
+    }
+  };
+  auto texFormat = [format = metadata.format]() {
+    switch (format) {
+      case DXGI_FORMAT_BC5_UNORM:
+        return IssouRHI::TextureFormat::BC5Unorm;
+      case DXGI_FORMAT_BC7_UNORM:
+        return IssouRHI::TextureFormat::BC7Unorm;
+      default:
+        // don't support anything else for now
+        std::unreachable();
+    }
+  };
+  IssouRHI::TextureDesc textureDesc{
+      .label = filename.string().c_str(),
+      .size = {
+        .width = static_cast<uint32_t>(metadata.width),
+        .height = static_cast<uint32_t>(metadata.height),
+        .depth = static_cast<uint32_t>(metadata.arraySize),
+      },
+      .mipLevelCount = static_cast<uint32_t>(metadata.mipLevels),
+      .dimension = texDimension(),
+      .format = texFormat(),
+      .usage = IssouRHI::TextureUsage::CopyDst | IssouRHI::TextureUsage::TextureBinding
+  };
+  auto tex = g_RhiDevice->CreateTexture(textureDesc);
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
   CHECK_HR(PrepareUpload(g_Device, image.GetImages(), image.GetImageCount(), metadata, subresources));
 
   tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()));
 
-  tex->Unmap();
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Format = textureDesc.Format;
-  srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Texture2D.MipLevels = textureDesc.MipLevels;
-
-  tex->AllocSrvDescriptor(g_SrvUavDescHeapAlloc);
-  tex->SetName(L"Texture: " + filename.wstring() + L" " + std::to_wstring(tex->SrvDescriptorIndex()));
-  g_Device->CreateShaderResourceView(tex->Resource(), &srvDesc, tex->SrvDescriptorHandle());
-
   g_Textures[filename] = tex;
 
-  return tex->SrvDescriptorIndex();
+  return tex->CreateView()->SrvDescriptorAlloc().index;
 }
 }  // namespace Renderer

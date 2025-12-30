@@ -81,10 +81,8 @@ set(SOURCES
 set(HEADERS
     Camera.h
     Collider.h
-    DescriptorHeapListAllocator.h
     Game.h
     GpuBuffer.h
-    HeapDescriptor.h
     Input.h
     Mesh.h
     Renderer.h

@@ -28,8 +28,9 @@ void Buffer::InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedRes
   m_FixedResourceState = fixedResourceState;
 }
 
-void Buffer::Copy(BufferRange& range, const void* data)
+void Buffer::Copy(BufferRange range, const void* data)
 {
+  assert(m_Desc.usage & BufferUsage::MapWrite);
   if (!m_Mapped) {
     Map();
   }
@@ -37,13 +38,28 @@ void Buffer::Copy(BufferRange& range, const void* data)
   memcpy((BYTE*)m_Address + range.offset, data, range.size);
 }
 
-void Buffer::Clear(BufferRange& range)
+void Buffer::Clear(BufferRange range)
 {
+  assert(m_Desc.usage & BufferUsage::MapWrite);
   if (!m_Mapped) {
     Map();
   }
 
   ZeroMemory((BYTE*)m_Address + range.offset, range.size);
+}
+
+void Buffer::Read(BufferRange range, void* outData)
+{
+  assert(!m_Mapped);
+  assert(m_Desc.usage & BufferUsage::MapRead);
+
+  void* data = nullptr;
+  D3D12_RANGE readRange{.Begin = range.offset, .End = range.offset + range.size};
+  m_Resource->Map(0, &readRange, &data);
+
+  memcpy(outData, data, range.size);
+
+  m_Resource->Unmap(0, nullptr);
 }
 
 void Buffer::Map()
@@ -81,13 +97,13 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(BufferRange& range, UINT by
   return srvDesc;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Buffer::SrvDescriptorHandle(BufferRange& range, UINT byteStride)
+DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStride)
 {
   ViewKey k{.range = range, .byteStride = byteStride};
   auto& alloc = m_Srvs[k];
 
   if (alloc) {
-    return alloc.cpuHandle;
+    return alloc;
   }
 
   alloc = m_Device->AllocSrvUavDescriptor();
@@ -95,7 +111,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE Buffer::SrvDescriptorHandle(BufferRange& range, UINT
   auto srvDesc = SrvDescriptor(range, byteStride);
   m_Device->GetNativeDevice()->CreateShaderResourceView(Resource(), &srvDesc, alloc.cpuHandle);
 
-  return alloc.cpuHandle;
+  return alloc;
 }
 
 static D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(BufferRange& range, UINT byteStride, UINT64 counterOffsetInBytes)
@@ -111,16 +127,16 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(BufferRange& range, UINT b
   return uavDesc;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Buffer::UavDescriptorHandle(BufferRange& range,
-                                                        UINT byteStride,
-                                                        Buffer* counter,
-                                                        UINT64 counterOffsetInBytes)
+DescriptorAllocation Buffer::UavDescriptorAlloc(BufferRange range,
+                                                UINT byteStride,
+                                                Buffer* counter,
+                                                UINT64 counterOffsetInBytes)
 {
   ViewKey k{.range = range, .byteStride = byteStride, .counter = counter, .counterOffsetInBytes = counterOffsetInBytes};
   auto& alloc = m_Uavs[k];
 
   if (alloc) {
-    return alloc.cpuHandle;
+    return alloc;
   }
 
   alloc = m_Device->AllocSrvUavDescriptor();
@@ -129,6 +145,6 @@ D3D12_CPU_DESCRIPTOR_HANDLE Buffer::UavDescriptorHandle(BufferRange& range,
   m_Device->GetNativeDevice()->CreateUnorderedAccessView(Resource(), counter ? counter->Resource() : nullptr, &uavDesc,
                                                          alloc.cpuHandle);
 
-  return alloc.cpuHandle;
+  return alloc;
 }
 }  // namespace IssouRHI

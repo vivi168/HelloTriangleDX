@@ -1,8 +1,5 @@
 #pragma once
 
-#include "DescriptorHeapListAllocator.h"
-#include "HeapDescriptor.h"
-
 namespace Renderer
 {
 inline constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
@@ -37,13 +34,13 @@ struct GpuResource {
     return CD3DX12_RESOURCE_BARRIER::Transition(m_Resource.Get(), stateBefore, stateAfter);
   }
 
-  virtual void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) { m_SrvDescriptor.Alloc(allocator); }
+  virtual void AllocSrvDescriptor(IssouRHI::DescriptorHeap& heap) { m_SrvDescriptor = heap.Alloc(); }
 
-  virtual void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) { m_UavDescriptor.Alloc(allocator); }
+  virtual void AllocUavDescriptor(IssouRHI::DescriptorHeap& heap) { m_UavDescriptor = heap.Alloc(); }
 
-  UINT SrvDescriptorIndex() const { return m_SrvDescriptor.Index(); }
+  UINT SrvDescriptorIndex() const { return m_SrvDescriptor.index; }
 
-  UINT UavDescriptorIndex() const { return m_UavDescriptor.Index(); }
+  UINT UavDescriptorIndex() const { return m_UavDescriptor.index; }
 
   GpuResource& SetName(std::wstring name)
   {
@@ -79,8 +76,8 @@ struct GpuResource {
 
 protected:
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
-  HeapDescriptor m_SrvDescriptor;
-  HeapDescriptor m_UavDescriptor;
+  IssouRHI::DescriptorAllocation m_SrvDescriptor;
+  IssouRHI::DescriptorAllocation m_UavDescriptor;
   D3D12MA::Allocation* m_Allocation = nullptr;
   D3D12_RESOURCE_STATES m_CurrentState;
   std::wstring m_ResourceName;
@@ -132,7 +129,7 @@ struct GpuBuffer : GpuResource {
   GpuBuffer& CreateSrv(UINT numElements,
                        UINT structureByteStride,
                        ID3D12Device* device,
-                       DescriptorHeapListAllocator& allocator)
+                       IssouRHI::DescriptorHeap& heap)
   {
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                             .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
@@ -144,19 +141,19 @@ struct GpuBuffer : GpuResource {
                                                 .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
                                             }};
 
-    AllocSrvDescriptor(allocator);
+    AllocSrvDescriptor(heap);
     device->CreateShaderResourceView(Resource(), &srvDesc, SrvDescriptorHandle());
 
     return *this;
   }
 
-  GpuBuffer& CreateAccelStructSrv(ID3D12Device* device, DescriptorHeapListAllocator& allocator)
+  GpuBuffer& CreateAccelStructSrv(ID3D12Device* device, IssouRHI::DescriptorHeap& heap)
   {
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
                                             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                             .RaytracingAccelerationStructure = {.Location = GpuAddress()}};
 
-    AllocSrvDescriptor(allocator);
+    AllocSrvDescriptor(heap);
     device->CreateShaderResourceView(nullptr, &srvDesc, SrvDescriptorHandle());
 
     return *this;
@@ -165,7 +162,7 @@ struct GpuBuffer : GpuResource {
   GpuBuffer& CreateUav(size_t numElements,
                        size_t structureByteStride,
                        ID3D12Device* device,
-                       DescriptorHeapListAllocator& allocator,
+                       IssouRHI::DescriptorHeap& heap,
                        ID3D12Resource* pCounterResource = nullptr,
                        UINT counterOffsetInBytes = 0)
   {
@@ -177,7 +174,7 @@ struct GpuBuffer : GpuResource {
                                                         .CounterOffsetInBytes = counterOffsetInBytes,
                                                         .Flags = D3D12_BUFFER_UAV_FLAG_NONE}};
 
-    AllocUavDescriptor(allocator);
+    AllocUavDescriptor(heap);
     device->CreateUnorderedAccessView(Resource(), pCounterResource, &uavDesc, UavDescriptorHandle());
 
     return *this;
@@ -226,9 +223,9 @@ struct GpuBuffer : GpuResource {
   size_t Size() const { return m_Size; }
 
 private:
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.CpuHandle(); }
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.cpuHandle; }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.CpuHandle(); }
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.cpuHandle; }
 
   void* m_Address = nullptr;
   size_t m_Size;
@@ -247,27 +244,17 @@ struct TextureDesc {
 };
 
 struct Texture : GpuResource {
-  void AllocSrvDescriptor(DescriptorHeapListAllocator& allocator) override
-  {
-    m_SrvDescriptor.AllocWithGpuHandle(allocator);
-  }
+  void AllocRtvDescriptor(IssouRHI::DescriptorHeap& heap) { m_RtvDescriptor = heap.Alloc(); }
 
-  void AllocUavDescriptor(DescriptorHeapListAllocator& allocator) override
-  {
-    m_UavDescriptor.AllocWithGpuHandle(allocator);
-  }
+  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.cpuHandle; }
 
-  void AllocRtvDescriptor(DescriptorHeapListAllocator& allocator) { m_RtvDescriptor.Alloc(allocator); }
+  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.cpuHandle; }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_SrvDescriptor.CpuHandle(); }
+  D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return m_SrvDescriptor.gpuHandle; }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_UavDescriptor.CpuHandle(); }
+  D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return m_UavDescriptor.gpuHandle; }
 
-  D3D12_GPU_DESCRIPTOR_HANDLE SrvDescriptorGpuHandle() const { return m_SrvDescriptor.GpuHandle(); }
-
-  D3D12_GPU_DESCRIPTOR_HANDLE UavDescriptorGpuHandle() const { return m_UavDescriptor.GpuHandle(); }
-
-  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_RtvDescriptor.CpuHandle(); }
+  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_RtvDescriptor.cpuHandle; }
 
   void Attach(ID3D12Resource* other) { m_Resource.Attach(other); }
 
@@ -294,7 +281,7 @@ struct Texture : GpuResource {
   }
 
 private:
-  HeapDescriptor m_RtvDescriptor;
+  IssouRHI::DescriptorAllocation m_RtvDescriptor;
 };
 
 }  // namespace Renderer

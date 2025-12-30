@@ -107,6 +107,12 @@ std::shared_ptr<TextureView> Texture::CreateView()
   TextureViewDesc desc{};
   desc.format = Format();
   desc.dimension = ViewDimension(m_Desc.dimension);
+  desc.range = {
+    .baseMipLevel = 0,
+    .mipLevelCount = m_Desc.mipLevelCount,
+    .baseArrayLayer = 0,
+    .arrayLayerCount = m_Desc.size.depth,
+  };
 
   return CreateView(desc);
 }
@@ -122,21 +128,21 @@ std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
 
   if (Usage() & TextureUsage::TextureBinding) {
     auto srvDesc = SrvDescriptor(desc);
-    device->CreateShaderResourceView(m_Resource.Get(), &srvDesc, view->SrvDescriptorHandle());
+    device->CreateShaderResourceView(m_Resource.Get(), &srvDesc, view->SrvDescriptorAlloc().cpuHandle);
   }
 
   if (Usage() & TextureUsage::StorageBinding) {
     auto uavDesc = UavDescriptor(desc);
-    device->CreateUnorderedAccessView(m_Resource.Get(), nullptr, &uavDesc, view->UavDescriptorHandle());
+    device->CreateUnorderedAccessView(m_Resource.Get(), nullptr, &uavDesc, view->UavDescriptorAlloc().cpuHandle);
   }
 
   if (Usage() & TextureUsage::RenderAttachment) {
     if (IsDepthStencil(Format())) {
       auto dsvDesc = DsvDescriptor(desc);
-      device->CreateDepthStencilView(m_Resource.Get(), &dsvDesc, view->DsvDescriptorHandle());
+      device->CreateDepthStencilView(m_Resource.Get(), &dsvDesc, view->DsvDescriptorAlloc().cpuHandle);
     } else {
       auto rtvDesc = RtvDescriptor(desc);
-      device->CreateRenderTargetView(m_Resource.Get(), &rtvDesc, view->RtvDescriptorHandle());
+      device->CreateRenderTargetView(m_Resource.Get(), &rtvDesc, view->RtvDescriptorAlloc().cpuHandle);
     }
   }
 
@@ -158,14 +164,14 @@ void Texture::Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firs
 {
   assert(Usage() & TextureUsage::CopyDst);
 
-  if (!m_Mapped) {
-    Map();
-  }
+  Map();
 
   for (UINT i = 0; i < numSubresources; ++i) {
     m_Resource->WriteToSubresource(firstSubresource + i, nullptr, data[i].pData, static_cast<UINT>(data[i].RowPitch),
                                    static_cast<UINT>(data[i].SlicePitch));
   }
+
+  Unmap();
 }
 
 D3D12_RESOURCE_BARRIER Texture::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)

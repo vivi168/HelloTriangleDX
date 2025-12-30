@@ -57,6 +57,8 @@ public:
   DescriptorAllocation Alloc();
   void Free(DescriptorAllocation alloc);
 
+  // FIXME: TMP
+  ID3D12DescriptorHeap* Get() const { return m_Heap.Get(); }
 private:
   Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_Heap;
 
@@ -85,11 +87,12 @@ enum class TextureViewDimension : uint32_t {
 };
 
 enum class TextureUsage : uint32_t {
-  CopySrc = 1 << 0,
-  CopyDst = 1 << 1,
-  TextureBinding = 1 << 2,
-  StorageBinding = 1 << 3,
-  RenderAttachment = 1 << 4,
+  None = 1 << 0,
+  CopySrc = 1 << 1,
+  CopyDst = 1 << 2,
+  TextureBinding = 1 << 3,
+  StorageBinding = 1 << 4,
+  RenderAttachment = 1 << 5,
 };
 ISSOURHI_ENUM_CLASS_OP(TextureUsage)
 
@@ -228,6 +231,8 @@ public:
   std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
 
   Device* GetDevice() const { return m_Device; }
+  TextureUsage Usage() const { return m_Desc.usage; }
+  TextureFormat Format() const { return m_Desc.format; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
@@ -239,9 +244,6 @@ public: // D3D12 impl specific
   D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
   D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(TextureViewDesc& desc) const;
   D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(TextureViewDesc& desc) const;
-
-  TextureUsage Usage() const { return m_Desc.usage; }
-  TextureFormat Format() const { return m_Desc.format; }
 private:
   bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
 
@@ -263,15 +265,10 @@ public:
   TextureView(Texture* tex, TextureViewDesc& desc);
   ~TextureView();
 public: // D3D12 impl specific
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle() const { return m_Srv.cpuHandle; }
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle() const { return m_Uav.cpuHandle; }
-  D3D12_CPU_DESCRIPTOR_HANDLE RtvDescriptorHandle() const { return m_Rtv.cpuHandle; }
-  D3D12_CPU_DESCRIPTOR_HANDLE DsvDescriptorHandle() const { return m_Dsv.cpuHandle; }
-
-  UINT SrvDescriptorIndex() const { return m_Srv.index; }
-  UINT UavDescriptorIndex() const { return m_Uav.index; }
-  UINT RtvDescriptorIndex() const { return m_Rtv.index; }
-  UINT DsvDescriptorIndex() const { return m_Dsv.index; }
+  DescriptorAllocation SrvDescriptorAlloc() const { return m_Srv; }
+  DescriptorAllocation UavDescriptorAlloc() const { return m_Uav; }
+  DescriptorAllocation RtvDescriptorAlloc() const { return m_Rtv; }
+  DescriptorAllocation DsvDescriptorAlloc() const { return m_Dsv; }
 
 private:
   Texture* m_Texture;
@@ -283,17 +280,18 @@ private:
 };
 
 enum class BufferUsage : uint32_t {
-  MapRead = 1 << 0,
-  MapWrite = 1 << 1,
-  CopySrc = 1 << 2,
-  CopyDst = 1 << 3,
-  Index = 1 << 4,
-  Vertex = 1 << 5,
-  Uniform = 1 << 6,
-  Storage = 1 << 7,
-  Indirect = 1 << 8,
-  QueryResolve = 1 << 9,
-  RayTracingAccelerationStructure = 1 << 10,
+  None = 1 << 0,
+  MapRead = 1 << 1,
+  MapWrite = 1 << 2,
+  CopySrc = 1 << 3,
+  CopyDst = 1 << 4,
+  Index = 1 << 5,
+  Vertex = 1 << 6,
+  Uniform = 1 << 7,
+  Storage = 1 << 8,
+  Indirect = 1 << 9,
+  QueryResolve = 1 << 10,
+  RayTracingAccelerationStructure = 1 << 11,
 };
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
@@ -308,30 +306,29 @@ struct BufferDesc {
   std::string label;
   size_t size;
   BufferUsage usage;
-  bool mappedAtCreation = false;
 };
 
 class Buffer {
 public:
   Buffer(Device* device, BufferDesc& desc);
   ~Buffer();
+
+  size_t Size() const { return m_Desc.size; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
   // TODO: use enhanced barriers
   void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
 
-  void Copy(BufferRange& range, const void* data);
-  void Clear(BufferRange& range);
+  void Copy(BufferRange range, const void* data);
+  void Clear(BufferRange range);
+  void Read(BufferRange range, void* outData);
 
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 
-  D3D12_CPU_DESCRIPTOR_HANDLE SrvDescriptorHandle(BufferRange& range, UINT byteStride);
-  D3D12_CPU_DESCRIPTOR_HANDLE UavDescriptorHandle(BufferRange& range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
-
-  UINT SrvDescriptorIndex();
-  UINT UavDescriptorIndex();
+  DescriptorAllocation SrvDescriptorAlloc(BufferRange range, UINT byteStride);
+  DescriptorAllocation UavDescriptorAlloc(BufferRange range, UINT byteStride, Buffer* counter = nullptr, UINT64 counterOffsetInBytes = 0);
 
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
 
@@ -408,6 +405,14 @@ public:
   void FreeRtvDescriptor(DescriptorAllocation alloc);
   void FreeDsvDescriptor(DescriptorAllocation alloc);
 
+  // FIXME: temporarily make these public until we sort out Renderer.cpp
+  DescriptorHeap m_SrvUavDescriptorHeap;
+  DescriptorHeap m_RtvDescriptorHeap;
+  DescriptorHeap m_DsvDescriptorHeap;
+
+  ID3D12DescriptorHeap* SrvUavDescriptorHeap() const { return m_SrvUavDescriptorHeap.Get(); }
+  ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
+  ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
   Microsoft::WRL::ComPtr<IDXGIFactory4> m_Factory;
@@ -417,10 +422,6 @@ private:
   D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
 
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: our own Queue class here
-
-  DescriptorHeap m_SrvUavDescriptorHeap;
-  DescriptorHeap m_RtvDescriptorHeap;
-  DescriptorHeap m_DepthStencilDescriptorHeap;
 };
 
 struct SurfaceConfiguration {
