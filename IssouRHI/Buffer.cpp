@@ -99,6 +99,8 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(BufferRange& range, UINT by
 
 DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStride)
 {
+  range.size = std::min(range.size, Size());
+
   ViewKey k{.range = range, .byteStride = byteStride};
   auto& alloc = m_Srvs[k];
 
@@ -132,6 +134,8 @@ DescriptorAllocation Buffer::UavDescriptorAlloc(BufferRange range,
                                                 Buffer* counter,
                                                 UINT64 counterOffsetInBytes)
 {
+  range.size = std::min(range.size, Size());
+
   ViewKey k{.range = range, .byteStride = byteStride, .counter = counter, .counterOffsetInBytes = counterOffsetInBytes};
   auto& alloc = m_Uavs[k];
 

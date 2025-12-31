@@ -296,15 +296,16 @@ enum class BufferUsage : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
 struct BufferRange {
-  uint64_t offset = 0;
-  uint64_t size = 0;
+  uint64_t offset ;
+  uint64_t size ;
 
   bool operator==(const BufferRange& other) const { return offset == other.offset && size == other.size; }
 };
+inline constexpr BufferRange BufferFullRange = {0, ~0ull};
 
 struct BufferDesc {
   std::string label;
-  size_t size;
+  uint64_t size;
   BufferUsage usage;
 };
 
@@ -313,7 +314,7 @@ public:
   Buffer(Device* device, BufferDesc& desc);
   ~Buffer();
 
-  size_t Size() const { return m_Desc.size; }
+  uint64_t Size() const { return m_Desc.size; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
   // TODO: use enhanced barriers

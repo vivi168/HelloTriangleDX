@@ -206,7 +206,7 @@ struct MeshStore {
   {
     // TODO: should ensure it is mapped
     UINT offset = m_CurrentOffsets.positionsBuffer;
-    m_VertexPositions.Copy(offset, data, size);
+    m_VertexPositions->Copy({offset, size}, data);
     m_CurrentOffsets.positionsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -223,7 +223,7 @@ struct MeshStore {
   UINT CopyNormals(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.normalsBuffer;
-    m_VertexNormals.Copy(offset, data, size);
+    m_VertexNormals->Copy({offset, size}, data);
     m_CurrentOffsets.normalsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -240,7 +240,7 @@ struct MeshStore {
   UINT CopyTangents(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.tangentsBuffer;
-    m_VertexTangents.Copy(offset, data, size);
+    m_VertexTangents->Copy({offset, size}, data);
     m_CurrentOffsets.tangentsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -257,7 +257,7 @@ struct MeshStore {
   UINT CopyUVs(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.uvsBuffer;
-    m_VertexUVs.Copy(offset, data, size);
+    m_VertexUVs->Copy({offset, size}, data);
     m_CurrentOffsets.uvsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -266,7 +266,7 @@ struct MeshStore {
   UINT CopyBWI(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.bwiBuffer;
-    m_VertexBlendWeightsAndIndices.Copy(offset, data, size);
+    m_VertexBlendWeightsAndIndices->Copy({offset, size}, data);
     m_CurrentOffsets.bwiBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -275,7 +275,7 @@ struct MeshStore {
   UINT CopyIndices(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.indexBuffer;
-    m_VertexIndices.Copy(offset, data, size);
+    m_VertexIndices->Copy({offset, size}, data);
     m_CurrentOffsets.indexBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -286,7 +286,7 @@ struct MeshStore {
   UINT CopyMeshlets(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.meshletsBuffer;
-    m_Meshlets.Copy(offset, data, size);
+    m_Meshlets->Copy({offset, size}, data);
     m_CurrentOffsets.meshletsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -295,7 +295,7 @@ struct MeshStore {
   UINT CopyMeshletUniqueIndices(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.uniqueIndicesBuffer;
-    m_MeshletUniqueIndices.Copy(offset, data, size);
+    m_MeshletUniqueIndices->Copy({offset, size}, data);
     m_CurrentOffsets.uniqueIndicesBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -304,7 +304,7 @@ struct MeshStore {
   UINT CopyMeshletPrimitives(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.primitivesBuffer;
-    m_MeshletPrimitives.Copy(offset, data, size);
+    m_MeshletPrimitives->Copy({offset, size}, data);
     m_CurrentOffsets.primitivesBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -315,7 +315,7 @@ struct MeshStore {
   UINT CopyMaterial(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.materialsBuffer;
-    m_Materials.Copy(offset, data, size);
+    m_Materials->Copy({offset, size}, data);
     m_CurrentOffsets.materialsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -331,7 +331,7 @@ struct MeshStore {
 
   void UpdateInstances(const void* data, size_t size, UINT offset, UINT frameIndex)
   {
-    m_Instances[frameIndex].Copy(offset, data, size);
+    m_Instances[frameIndex]->Copy({offset, size}, data);
   }
 
   UINT ReserveBoneMatrices(size_t size)
@@ -344,55 +344,194 @@ struct MeshStore {
 
   void UpdateBoneMatrices(const void* data, size_t size, UINT offset, UINT frameIndex)
   {
-    m_BoneMatrices[frameIndex].Copy(offset, data, size);
+    m_BoneMatrices[frameIndex]->Copy({offset, size}, data);
   }
 
+  // TODO: this won't be necessary here once we have bindGroups / pass descriptor
   BuffersDescriptorIndices BuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions.SrvDescriptorIndex(),
-        .vertexNormalsBufferId = m_VertexNormals.SrvDescriptorIndex(),
-        .vertexTangentsBufferId = m_VertexTangents.SrvDescriptorIndex(),
-        .vertexUVsBufferId = m_VertexUVs.SrvDescriptorIndex(),
+        .vertexPositionsBufferId = m_VertexPositions->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
+        .vertexNormalsBufferId = m_VertexNormals->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
+        .vertexTangentsBufferId = m_VertexTangents->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4)).index,
+        .vertexUVsBufferId = m_VertexUVs->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT2)).index,
 
-        .meshletsBufferId = m_Meshlets.SrvDescriptorIndex(),
-        .meshletVertIndicesBufferId = m_MeshletUniqueIndices.SrvDescriptorIndex(),
-        .meshletsPrimitivesBufferId = m_MeshletPrimitives.SrvDescriptorIndex(),
+        .meshletsBufferId = m_Meshlets->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshletData)).index,
+        .meshletVertIndicesBufferId = m_MeshletUniqueIndices->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(UINT)).index,
+        .meshletsPrimitivesBufferId = m_MeshletPrimitives->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshletTriangle)).index,
 
-        .materialsBufferId = m_Materials.SrvDescriptorIndex(),
-        .instancesBufferId = m_Instances[frameIndex].SrvDescriptorIndex(),
+        .materialsBufferId = m_Materials->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(Material::m_GpuData)).index,
+        .instancesBufferId = m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshInstance::data)).index,
     };
   }
 
+  // TODO: this won't be necessary here once we have bindGroups / pass descriptor
   SkinningBuffersDescriptorIndices SkinningBuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions.UavDescriptorIndex(),
-        .vertexNormalsBufferId = m_VertexNormals.UavDescriptorIndex(),
-        .vertexTangentsBufferId = m_VertexTangents.UavDescriptorIndex(),
-        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices.SrvDescriptorIndex(),
-        .boneMatricesBufferId = m_BoneMatrices[frameIndex].SrvDescriptorIndex(),
+        .vertexPositionsBufferId = m_VertexPositions->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
+        .vertexNormalsBufferId = m_VertexNormals->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
+        .vertexTangentsBufferId = m_VertexTangents->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4)).index,
+        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMUINT2)).index,
+        .boneMatricesBufferId = m_BoneMatrices[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4X4)).index,
     };
   }
 
-  UINT InstancesBufferId(UINT frameIndex) const { return m_Instances[frameIndex].SrvDescriptorIndex(); }
+  // TODO: this won't be necessary here once we have bindGroups / pass descriptor
+  UINT InstancesBufferId(UINT frameIndex) const
+  {
+    return m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshInstance::data)).index;
+  }
 
-  GpuBuffer m_VertexPositions;
-  GpuBuffer m_VertexNormals;
-  GpuBuffer m_VertexTangents;
-  GpuBuffer m_VertexUVs;
-  GpuBuffer m_VertexBlendWeightsAndIndices;
+  void Init(IssouRHI::Device* device)
+  {
+    // TODO: compute worst case scenario from the scene.
+    // wait, everyone has more than 8GB VRAM in 2026, right? right?
+    static constexpr size_t numVertices = 5'000'000;
+    static constexpr size_t numIndices = 10'000'000;
+    static constexpr size_t numPrimitives = 7'000'000;
+    static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
+    static constexpr size_t numMeshlets = 100'000;
+    static constexpr size_t numMaterials = 5000;
+    static constexpr size_t numMatrices = 3000;
 
-  GpuBuffer m_VertexIndices; // needed for BLAS
+    // Positions buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Positions Store",
+        .size = numVertices * sizeof(XMFLOAT3),
+        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+      };
+      m_VertexPositions = device->CreateBuffer(desc);
+    }
 
-  GpuBuffer m_Meshlets;
-  GpuBuffer m_MeshletUniqueIndices;
-  GpuBuffer m_MeshletPrimitives;
+    // Normals buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Normals Store",
+        .size = numVertices * sizeof(XMFLOAT3),
+        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+      };
+      m_VertexNormals = device->CreateBuffer(desc);
+    }
 
-  GpuBuffer m_Materials;
-  GpuBuffer m_Instances[FRAME_BUFFER_COUNT];  // updated by CPU
+    // Tangents buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Tangents Store",
+        .size = numVertices * sizeof(XMFLOAT4),
+        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+      };
+      m_VertexTangents = device->CreateBuffer(desc);
+    }
 
-  GpuBuffer m_BoneMatrices[FRAME_BUFFER_COUNT];  // updated by CPU
+    // UVs buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "UVs Store",
+        .size = numVertices * sizeof(XMFLOAT2),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_VertexUVs = device->CreateBuffer(desc);
+    }
+
+    // Blend weights/indices buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Blend weights/indices Store",
+        .size = numVertices * sizeof(XMUINT2),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_VertexBlendWeightsAndIndices = device->CreateBuffer(desc);
+    }
+
+    // Vertex indices
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Vertex indices Store",
+        .size = numIndices * sizeof(UINT),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_VertexIndices = device->CreateBuffer(desc);
+    }
+
+    // Meshlets buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Meshlets Store",
+        .size = numMeshlets * sizeof(MeshletData),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_Meshlets = device->CreateBuffer(desc);
+    }
+
+    // Meshlet unique vertex indices buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Meshlets Store",
+        .size = numIndices * sizeof(UINT),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_MeshletUniqueIndices = device->CreateBuffer(desc);
+    }
+
+    // Meshlet primitives buffer (packed 10|10|10|2)
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Primitives Store",
+        .size = numPrimitives * sizeof(MeshletTriangle),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_MeshletPrimitives = device->CreateBuffer(desc);
+    }
+
+    // Materials buffer
+    {
+      IssouRHI::BufferDesc desc{
+        .label = "Materials Store",
+        .size = numMaterials * sizeof(Material::m_GpuData),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_Materials = device->CreateBuffer(desc);
+    }
+
+    // Instances buffer
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      IssouRHI::BufferDesc desc{
+        .label = std::format("Instances Store {}", i),
+        .size = numInstances * sizeof(MeshInstance::data),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_Instances[i] = device->CreateBuffer(desc);
+    }
+
+    // Bone Matrices buffer
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      IssouRHI::BufferDesc desc{
+        .label = std::format("Bone Matrices Store {}", i),
+        .size = numMatrices * sizeof(XMFLOAT4X4),
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      m_BoneMatrices[i] = device->CreateBuffer(desc);
+    }
+  }
+
+  std::shared_ptr<IssouRHI::Buffer> m_VertexPositions;
+  std::shared_ptr<IssouRHI::Buffer> m_VertexNormals;
+  std::shared_ptr<IssouRHI::Buffer> m_VertexTangents;
+  std::shared_ptr<IssouRHI::Buffer> m_VertexUVs;
+  std::shared_ptr<IssouRHI::Buffer> m_VertexBlendWeightsAndIndices;
+
+  std::shared_ptr<IssouRHI::Buffer> m_VertexIndices; // needed for BLAS
+
+  std::shared_ptr<IssouRHI::Buffer> m_Meshlets;
+  std::shared_ptr<IssouRHI::Buffer> m_MeshletUniqueIndices;
+  std::shared_ptr<IssouRHI::Buffer> m_MeshletPrimitives;
+
+  std::shared_ptr<IssouRHI::Buffer> m_Materials;
+  std::shared_ptr<IssouRHI::Buffer> m_Instances[FRAME_BUFFER_COUNT];  // updated by CPU
+
+  std::shared_ptr<IssouRHI::Buffer> m_BoneMatrices[FRAME_BUFFER_COUNT];  // updated by CPU
 
   struct {
     // vertex data
@@ -585,9 +724,9 @@ void LoadAssets()
               .VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT,
               .IndexCount = mesh->header.numIndices,
               .VertexCount = mesh->header.numVerts,
-              .IndexBuffer = g_MeshStore.m_VertexIndices.GpuAddress(mi->indexBufferOffset),
+              .IndexBuffer = g_MeshStore.m_VertexIndices->GpuAddress() + mi->indexBufferOffset,
               .VertexBuffer = {
-                  .StartAddress = g_MeshStore.m_VertexPositions.GpuAddress(mi->data.firstPosition * sizeof(XMFLOAT3)),
+                  .StartAddress = g_MeshStore.m_VertexPositions->GpuAddress() + mi->data.firstPosition * sizeof(XMFLOAT3),
                   .StrideInBytes = sizeof(XMFLOAT3),
               }}};
 
@@ -952,7 +1091,7 @@ void Render(float time, float dt)
     g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
                                                 SizeOfInUint(SkinningBuffersDescriptorIndices),
                                                 &ctx->skinningBuffersDescriptorsIndices, 0);
-    auto b0 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+    auto b0 = g_MeshStore.m_VertexPositions->Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &b0);
 
@@ -964,7 +1103,7 @@ void Render(float time, float dt)
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
 
-    auto b1 = g_MeshStore.m_VertexPositions.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+    auto b1 = g_MeshStore.m_VertexPositions->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     g_CommandList->ResourceBarrier(1, &b1);
   }
@@ -1157,24 +1296,6 @@ void Cleanup()
   ImGui::DestroyContext();
 
   g_Surface->WaitForAllFrames();
-
-  {
-    g_MeshStore.m_VertexPositions.Reset();
-    g_MeshStore.m_VertexNormals.Reset();
-    g_MeshStore.m_VertexTangents.Reset();
-    g_MeshStore.m_VertexUVs.Reset();
-    g_MeshStore.m_VertexBlendWeightsAndIndices.Reset();
-    g_MeshStore.m_VertexIndices.Reset();
-    g_MeshStore.m_Meshlets.Reset();
-    g_MeshStore.m_MeshletUniqueIndices.Reset();
-    g_MeshStore.m_MeshletPrimitives.Reset();
-    g_MeshStore.m_Materials.Reset();
-
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      g_MeshStore.m_Instances[i].Reset();
-      g_MeshStore.m_BoneMatrices[i].Reset();
-    }
-  }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::SkinningCS].Reset();
@@ -1592,129 +1713,30 @@ static void InitFrameResources()
     }
   }
 
-  // MeshStore: TODO: make an instance method / DRY
+  // MeshStore
+  g_MeshStore.Init(g_RhiDevice);
+
+  // Draw Meshlets commands
   {
-    // TODO: compute worst case scenario from the scene.
-    // wait, everyone has more than 8GB VRAM in 2025, right? right?
-    static constexpr size_t numVertices = 5'000'000;
-    static constexpr size_t numIndices = 10'000'000;
-    static constexpr size_t numPrimitives = 7'000'000;
-    static constexpr size_t numInstances = MESH_INSTANCE_COUNT;
-    static constexpr size_t numMeshlets = 100'000;
-    static constexpr size_t numMaterials = 5000;
-    static constexpr size_t numMatrices = 3000;
+    IssouRHI::BufferDesc desc{
+      .label = "Draw Meshlets command buffer",
+      .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
+      .usage = IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
+    };
+    g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
+  }
 
-    // Positions buffer
-    {
-      g_MeshStore.m_VertexPositions
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Positions Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap)
-          .CreateUav(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
+  // Buffer containg just a UINT (0) used to reset UAV counter.
+  {
+    size_t bufSiz = sizeof(UINT);
 
-    // Normals buffer
-    {
-      g_MeshStore.m_VertexNormals
-          .Alloc(numVertices * sizeof(XMFLOAT3), L"Normals Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT3), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-      // TODO: we also need a UAV because we need to transform normals during skinning
-    }
-
-    // Tangents buffer
-    {
-      g_MeshStore.m_VertexTangents
-          .Alloc(numVertices * sizeof(XMFLOAT4), L"Tangents Store", g_Allocator, HeapType::Upload, true)
-          .CreateSrv(numVertices, sizeof(XMFLOAT4), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-      // TODO: we also need a UAV because we need to transform tangents during skinning
-    }
-
-    // UVs buffer
-    {
-      g_MeshStore.m_VertexUVs
-          .Alloc(numVertices * sizeof(XMFLOAT2), L"UVs Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMFLOAT2), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Blend weights/indices buffer
-    {
-      g_MeshStore.m_VertexBlendWeightsAndIndices
-          .Alloc(numVertices * sizeof(XMUINT2), L"Blend weights/indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numVertices, sizeof(XMUINT2), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Vertex indices
-    {
-      g_MeshStore.m_VertexIndices
-          .Alloc(numIndices * sizeof(UINT), L"Vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Meshlets buffer
-    {
-      g_MeshStore.m_Meshlets
-          .Alloc(numMeshlets * sizeof(MeshletData), L"Meshlets Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMeshlets, sizeof(MeshletData), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Meshlet unique vertex indices buffer
-    {
-      g_MeshStore.m_MeshletUniqueIndices
-          .Alloc(numIndices * sizeof(UINT), L"Unique vertex indices Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numIndices, sizeof(UINT), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Meshlet primitives buffer (packed 10|10|10|2)
-    {
-      g_MeshStore.m_MeshletPrimitives
-          .Alloc(numPrimitives * sizeof(MeshletTriangle), L"Primitives Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numPrimitives, sizeof(MeshletTriangle), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Materials buffer
-    {
-      g_MeshStore.m_Materials
-          .Alloc(numMaterials * sizeof(Material::m_GpuData), L"Materials Store", g_Allocator, HeapType::Upload)
-          .CreateSrv(numMaterials, sizeof(Material::m_GpuData), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Instances buffer
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      g_MeshStore.m_Instances[i]
-          .Alloc(numInstances * sizeof(MeshInstance::data), std::format(L"Instances Store {}", i), g_Allocator,
-                 HeapType::Upload)
-          .CreateSrv(numInstances, sizeof(MeshInstance::data), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Bone Matrices buffer
-    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      g_MeshStore.m_BoneMatrices[i]
-          .Alloc(numMatrices * sizeof(XMFLOAT4X4), std::format(L"Bone Matrices Store {}", i), g_Allocator,
-                 HeapType::Upload)
-          .CreateSrv(numMatrices, sizeof(XMFLOAT4X4), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
-    }
-
-    // Draw Meshlets commands
-    {
-      IssouRHI::BufferDesc desc{
-        .label = "Draw Meshlets command buffer",
-        .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
-        .usage = IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
-      };
-      g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
-    }
-
-    // Buffer containg just a UINT (0) used to reset UAV counter.
-    {
-      size_t bufSiz = sizeof(UINT);
-
-      IssouRHI::BufferDesc desc{
-        .label = "UAV Reset counter",
-        .size = bufSiz,
-        .usage = IssouRHI::BufferUsage::MapWrite,
-      };
-      g_UAVCounterReset = g_RhiDevice->CreateBuffer(desc);
-      g_UAVCounterReset->Clear({0, bufSiz});
-    }
+    IssouRHI::BufferDesc desc{
+      .label = "UAV Reset counter",
+      .size = bufSiz,
+      .usage = IssouRHI::BufferUsage::MapWrite,
+    };
+    g_UAVCounterReset = g_RhiDevice->CreateBuffer(desc);
+    g_UAVCounterReset->Clear({0, bufSiz});
   }
 
   // Vis Buffer output
@@ -1784,7 +1806,7 @@ static void InitFrameResources()
     ctx->skinningBuffersDescriptorsIndices = g_MeshStore.SkinningBuffersDescriptorIndices(static_cast<UINT>(i));
     ctx->cullingBuffersDescriptorsIndices = {
         .InstancesBufferId = g_MeshStore.InstancesBufferId(static_cast<UINT>(i)),
-        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc({0, MESH_INSTANCE_COUNT*sizeof(DrawMeshCommand)}, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
+        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
     };
   }
 
