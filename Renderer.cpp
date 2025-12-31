@@ -466,8 +466,8 @@ static GpuBuffer g_RayGenShaderTable;
 static GpuBuffer g_MissShaderTable;
 static GpuBuffer g_HitGroupShaderTable;
 
-static GpuBuffer g_DrawMeshCommands;      // written by compute shader
-static GpuBuffer g_UAVCounterReset;
+static std::shared_ptr<IssouRHI::Buffer> g_DrawMeshCommands;      // written by compute shader
+static std::shared_ptr<IssouRHI::Buffer> g_UAVCounterReset;
 
 static std::shared_ptr<IssouRHI::Texture> g_VisibilityBuffer;
 static std::shared_ptr<IssouRHI::Texture> g_ShadowBuffer;
@@ -987,16 +987,16 @@ void Render(float time, float dt)
 
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.numMeshInstances, 0);
 
-    g_CommandList->CopyBufferRegion(g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
-                                    g_UAVCounterReset.Resource(), 0, sizeof(UINT));
+    g_CommandList->CopyBufferRegion(g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
+                                    g_UAVCounterReset->Resource(), 0, sizeof(UINT));
 
-    auto before = g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    auto before = g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     g_CommandList->ResourceBarrier(1, &before);
 
     g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
 
     auto after =
-        g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
     g_CommandList->ResourceBarrier(1, &after);
 
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
@@ -1020,8 +1020,8 @@ void Render(float time, float dt)
                                                  &ctx->buffersDescriptorsIndices,
                                                  0);
 
-    g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands.Resource(),
-                                   0, g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+    g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
+                                   0, g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
     auto after =
         g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -1130,7 +1130,7 @@ void Render(float time, float dt)
   postRenderBarriers[0] =
       renderTarget->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   postRenderBarriers[1] =
-      g_DrawMeshCommands.Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
+      g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
   g_CommandList->ResourceBarrier(static_cast<UINT>(postRenderBarriers.size()), postRenderBarriers.data());
 
@@ -1158,11 +1158,6 @@ void Cleanup()
 
   g_Surface->WaitForAllFrames();
 
-  // for (auto& [k, tex] : g_Textures) {
-  //   g_SrvUavDescHeapAlloc.Free(tex->SrvDescriptorIndex());
-  //   tex->Reset();
-  // }
-
   {
     g_MeshStore.m_VertexPositions.Reset();
     g_MeshStore.m_VertexNormals.Reset();
@@ -1188,9 +1183,6 @@ void Cleanup()
   g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
-
-  g_DrawMeshCommands.Reset();
-  g_UAVCounterReset.Reset();
 
   g_Scene.rtInstanceDescBuffer.Reset();
   for (auto &as : g_Scene.blasBuffers) {
@@ -1703,21 +1695,25 @@ static void InitFrameResources()
 
     // Draw Meshlets commands
     {
-      g_DrawMeshCommands
-          .Alloc(DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter
-                 L"Draw Meshlets command buffer", g_Allocator, HeapType::Default, true)
-          .CreateSrv(numInstances, sizeof(DrawMeshCommand), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap)
-          .CreateUav(numInstances, sizeof(DrawMeshCommand), g_Device, g_RhiDevice->m_SrvUavDescriptorHeap,
-                     g_DrawMeshCommands.Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+      IssouRHI::BufferDesc desc{
+        .label = "Draw Meshlets command buffer",
+        .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
+        .usage = IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
+      };
+      g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
     }
 
     // Buffer containg just a UINT (0) used to reset UAV counter.
     {
       size_t bufSiz = sizeof(UINT);
 
-      g_UAVCounterReset.Alloc(bufSiz, L"UAV Reset counter", g_Allocator, HeapType::Upload)
-          .Clear(bufSiz)
-          .Unmap();
+      IssouRHI::BufferDesc desc{
+        .label = "UAV Reset counter",
+        .size = bufSiz,
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      g_UAVCounterReset = g_RhiDevice->CreateBuffer(desc);
+      g_UAVCounterReset->Clear({0, bufSiz});
     }
   }
 
@@ -1788,7 +1784,7 @@ static void InitFrameResources()
     ctx->skinningBuffersDescriptorsIndices = g_MeshStore.SkinningBuffersDescriptorIndices(static_cast<UINT>(i));
     ctx->cullingBuffersDescriptorsIndices = {
         .InstancesBufferId = g_MeshStore.InstancesBufferId(static_cast<UINT>(i)),
-        .DrawMeshCommandsBufferId = g_DrawMeshCommands.UavDescriptorIndex(),
+        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc({0, MESH_INSTANCE_COUNT*sizeof(DrawMeshCommand)}, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
     };
   }
 
