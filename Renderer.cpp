@@ -114,6 +114,12 @@ struct AccelerationStructure {
     return srv.index;
   }
 
+  void Reset()
+  {
+    resultData.reset();
+    scratch.reset();
+  }
+
   IssouRHI::DescriptorAllocation srv;
 };
 
@@ -215,6 +221,7 @@ struct FrameContext {
   ComPtr<ID3D12CommandAllocator> commandAllocator;
 
   void Reset() {
+    timestampReadBackBuffer.reset();
     commandAllocator.Reset();
   }
 };
@@ -643,6 +650,13 @@ struct GBuffer {
         .WorldNormalId = worldNormal->CreateView()->UavDescriptorAlloc().index,
         .BaseColorId = baseColor->CreateView()->UavDescriptorAlloc().index,
     };
+  }
+
+  void Reset()
+  {
+    worldPosition.reset();
+    worldNormal.reset();
+    baseColor.reset();
   }
 };
 
@@ -1313,6 +1327,30 @@ void Cleanup()
 
   g_Surface->WaitForAllFrames();
 
+  // TODO: rewrite as a class so we have RAII and can forego calling Reset() manually...
+
+  for (auto& [k, tex] : g_Textures) {
+    tex.reset();
+  }
+
+  {
+    g_MeshStore.m_VertexPositions.reset();
+    g_MeshStore.m_VertexNormals.reset();
+    g_MeshStore.m_VertexTangents.reset();
+    g_MeshStore.m_VertexUVs.reset();
+    g_MeshStore.m_VertexBlendWeightsAndIndices.reset();
+    g_MeshStore.m_VertexIndices.reset();
+    g_MeshStore.m_Meshlets.reset();
+    g_MeshStore.m_MeshletUniqueIndices.reset();
+    g_MeshStore.m_MeshletPrimitives.reset();
+    g_MeshStore.m_Materials.reset();
+
+    for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+      g_MeshStore.m_Instances[i].reset();
+      g_MeshStore.m_BoneMatrices[i].reset();
+    }
+  }
+
   g_PipelineStateObjects[PSO::BasicMS].Reset();
   g_PipelineStateObjects[PSO::SkinningCS].Reset();
   g_PipelineStateObjects[PSO::InstanceCullingCS].Reset();
@@ -1321,9 +1359,29 @@ void Cleanup()
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
+  g_DrawMeshCommands.reset();
+  g_UAVCounterReset.reset();
+
+  g_Scene.rtInstanceDescBuffer.reset();
+  for (auto &as : g_Scene.blasBuffers) {
+    as.Reset();
+  }
+  g_Scene.tlasBuffer.Reset();
+
   g_DxrStateObject.Reset();
 
+  g_RayGenShaderTable.reset();
+  g_MissShaderTable.reset();
+  g_HitGroupShaderTable.reset();
+
+  g_VisibilityBuffer.reset();
+  g_GBuffer.Reset();
+
+  g_ShadowBuffer.reset();
+
   g_CommandList.Reset();
+
+  g_DepthStencilBuffer.reset();
 
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
