@@ -14,6 +14,13 @@ Buffer::~Buffer()
   for (auto& [_, alloc] : m_Uavs) {
     m_Device->FreeSrvUavDescriptor(alloc);
   }
+
+  Unmap();
+
+  if (m_Allocation) {
+    m_Allocation->Release();
+    m_Allocation = nullptr;
+  }
 }
 
 void Buffer::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
@@ -39,9 +46,10 @@ BufferRange Buffer::ClampBufferRange(BufferRange range)
 void Buffer::Copy(BufferRange range, const void* data)
 {
   assert(m_Desc.usage & BufferUsage::MapWrite);
-  if (!m_Mapped) {
-    Map();
-  }
+
+  range = ClampBufferRange(range);
+
+  Map();
 
   memcpy((BYTE*)m_Address + range.offset, data, range.size);
 }
@@ -49,41 +57,49 @@ void Buffer::Copy(BufferRange range, const void* data)
 void Buffer::Clear(BufferRange range)
 {
   assert(m_Desc.usage & BufferUsage::MapWrite);
-  if (!m_Mapped) {
-    Map();
-  }
+
+  range = ClampBufferRange(range);
+
+  Map();
 
   ZeroMemory((BYTE*)m_Address + range.offset, range.size);
 }
 
 void Buffer::Read(BufferRange range, void* outData)
 {
-  assert(!m_Mapped);
   assert(m_Desc.usage & BufferUsage::MapRead);
 
-  void* data = nullptr;
-  D3D12_RANGE readRange{.Begin = range.offset, .End = range.offset + range.size};
-  m_Resource->Map(0, &readRange, &data);
+  range = ClampBufferRange(range);
 
-  memcpy(outData, data, range.size);
+  Map();
 
-  m_Resource->Unmap(0, nullptr);
+  // TODO: callback version without memcpy?
+  memcpy(outData, (BYTE*)m_Address + range.offset, range.size);
 }
 
 void Buffer::Map()
 {
-  assert(!m_Mapped);
+  if (m_Address != nullptr) return;
 
-  CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, &m_Address));
-  m_Mapped = true;
+  D3D12_RANGE empty = {0, 0};
+  D3D12_RANGE full = {0, Size()};
+  D3D12_RANGE* range = nullptr;
+  if (m_Desc.usage & BufferUsage::MapWrite) {
+    range = &empty;
+  } else if (m_Desc.usage & BufferUsage::MapRead) {
+    range = &full;
+  } else {
+    std::unreachable();
+  }
+
+  CHECK_HR(m_Resource->Map(0, range, &m_Address));
 }
 
 void Buffer::Unmap()
 {
-  assert(m_Mapped);
+  if (m_Address == nullptr) return;
 
   m_Resource->Unmap(0, nullptr);
-  m_Mapped = false;
 }
 
 D3D12_RESOURCE_BARRIER Buffer::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)

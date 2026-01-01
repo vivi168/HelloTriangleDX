@@ -314,6 +314,8 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 
 std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
 {
+  assert(!((desc.usage & BufferUsage::MapRead) && (desc.usage & BufferUsage::MapWrite)));
+
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
   if (desc.usage & BufferUsage::MapRead) {
     allocDesc.HeapType = D3D12_HEAP_TYPE_READBACK;

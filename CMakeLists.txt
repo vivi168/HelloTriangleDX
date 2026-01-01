@@ -82,7 +82,6 @@ set(HEADERS
     Camera.h
     Collider.h
     Game.h
-    GpuBuffer.h
     Input.h
     Mesh.h
     Renderer.h

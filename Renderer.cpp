@@ -3,8 +3,6 @@
 #include "Renderer.h"
 #include "RendererHelper.h"
 
-#include "GpuBuffer.h"
-
 #include "shaders/Shared.h"
 
 #include "Win32Application.h"
@@ -213,11 +211,10 @@ struct FrameContext {
 
   static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
-  GpuBuffer timestampReadBackBuffer;
+  std::shared_ptr<IssouRHI::Buffer> timestampReadBackBuffer;
   ComPtr<ID3D12CommandAllocator> commandAllocator;
 
   void Reset() {
-    timestampReadBackBuffer.Reset();
     commandAllocator.Reset();
   }
 };
@@ -480,7 +477,7 @@ struct MeshStore {
     // Meshlets buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Meshlets Store",
+        .label = "Meshlets buffer",
         .size = numMeshlets * sizeof(MeshletData),
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
@@ -490,7 +487,7 @@ struct MeshStore {
     // Meshlet unique vertex indices buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Meshlets Store",
+        .label = "Meshlets indices buffer",
         .size = numIndices * sizeof(UINT),
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
@@ -985,8 +982,8 @@ static void Update(FrameContext* ctx, float time, float dt)
   {
     ImGui::Begin("Timestamps");
 
-    UINT64* timestamps = nullptr;
-    ctx->timestampReadBackBuffer.Map(nullptr, (void**)&timestamps);
+    UINT64 timestamps[Timestamp::Count];
+    ctx->timestampReadBackBuffer->Read(IssouRHI::FullBufferRange, timestamps);
 
     UINT64 frequency;
     g_CommandQueue->GetTimestampFrequency(&frequency);
@@ -1006,8 +1003,6 @@ static void Update(FrameContext* ctx, float time, float dt)
     ImGui::Text("Shadows RT: %.4f ms", GetTime(Timestamp::ShadowsBegin));
     ImGui::Text("Final Compose: %.4f ms", GetTime(Timestamp::FinalComposeBegin));
     ImGui::Text("Total: %.4f ms", GetTime(Timestamp::TotalBegin));
-
-    ctx->timestampReadBackBuffer.Unmap();
 
     ImGui::End();
   }
@@ -1297,7 +1292,7 @@ void Render(float time, float dt)
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
 
   g_CommandList->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
-                                  ctx->timestampReadBackBuffer.Resource(), 0);
+                                  ctx->timestampReadBackBuffer->Resource(), 0);
 
   CHECK_HR(g_CommandList->Close());
 
@@ -1836,9 +1831,12 @@ static void InitFrameResources()
 
   // timestamp readback buffer
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
-    g_FrameContext[i].timestampReadBackBuffer.Alloc(sizeof(UINT64) * Timestamp::Count,
-                                                    std::format(L"Timestamp Readback Buffer {}", i), g_Allocator,
-                                                    HeapType::Readback);
+    IssouRHI::BufferDesc desc{
+      .label = std::format("Timestamp Readback Buffer {}", i),
+      .size = sizeof(UINT64) * Timestamp::Count,
+      .usage = IssouRHI::BufferUsage::MapRead,
+    };
+    g_FrameContext[i].timestampReadBackBuffer = g_RhiDevice->CreateBuffer(desc);
   }
 }
 

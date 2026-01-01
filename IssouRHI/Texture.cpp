@@ -82,8 +82,6 @@ Texture::Texture(Device* device, TextureDesc& desc) : m_Device(device), m_Desc(d
 
 Texture::~Texture()
 {
-  if (m_Mapped) Unmap();
-
   if (m_Allocation) {
     m_Allocation->Release();
     m_Allocation = nullptr;
@@ -164,14 +162,14 @@ void Texture::Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firs
 {
   assert(Usage() & TextureUsage::CopyDst);
 
-  Map();
+  CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, nullptr));
 
   for (UINT i = 0; i < numSubresources; ++i) {
     m_Resource->WriteToSubresource(firstSubresource + i, nullptr, data[i].pData, static_cast<UINT>(data[i].RowPitch),
                                    static_cast<UINT>(data[i].SlicePitch));
   }
 
-  Unmap();
+  m_Resource->Unmap(0, nullptr);
 }
 
 D3D12_RESOURCE_BARRIER Texture::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
@@ -310,22 +308,6 @@ D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(TextureViewDesc& desc) cons
   }
 
   return dsvDesc;
-}
-
-void Texture::Map()
-{
-  assert(!m_Mapped);
-
-  CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, nullptr));
-  m_Mapped = true;
-}
-
-void Texture::Unmap()
-{
-  assert(m_Mapped);
-
-  m_Resource->Unmap(0, nullptr);
-  m_Mapped = false;
 }
 
 TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc)

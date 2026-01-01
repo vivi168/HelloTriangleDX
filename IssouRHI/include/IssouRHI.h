@@ -252,12 +252,8 @@ private:
   Device* m_Device;
   TextureDesc m_Desc;
 private:  // D3D12 impl specific
-  void Map();
-  void Unmap();
-
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
-  boolean m_Mapped = false;
 };
 
 class TextureView {
@@ -346,7 +342,6 @@ private: // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
   void* m_Address = nullptr;
-  bool m_Mapped = false;
 
   struct ViewKey {
     BufferRange range;
