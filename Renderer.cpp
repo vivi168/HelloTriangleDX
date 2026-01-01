@@ -79,22 +79,44 @@ struct DrawMeshCommand {
 static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommand);
 static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
+// TODO: RHI implementation
 struct AccelerationStructure {
-  GpuBuffer resultData;
-  GpuBuffer scratch;
+  std::shared_ptr<IssouRHI::Buffer> resultData;
+  std::shared_ptr<IssouRHI::Buffer> scratch;
 
-  void AllocBuffers(size_t resultDataSize, size_t scratchSize, D3D12MA::Allocator* allocator)
+  // FIXME: quick TMP hack, create a AccelerationStructure class on rhi side
+  void AllocBuffers(size_t resultDataSize, size_t scratchSize, IssouRHI::Device* device)
   {
-    scratch.Alloc(scratchSize, L"Acceleration structure Scratch Resource", allocator, HeapType::Default, true);
-    resultData.Alloc(resultDataSize, L"Acceleration structure Result Resource", allocator, HeapType::Default, true,
-                     D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+    IssouRHI::BufferDesc scratchDesc{
+      .label = "Acceleration structure Scratch Resource",
+      .size = scratchSize,
+      .usage = IssouRHI::BufferUsage::Storage,
+    };
+    scratch = device->CreateBuffer(scratchDesc);
+
+    IssouRHI::BufferDesc resultDesc{
+      .label = "Acceleration structure Result Resource",
+      .size = resultDataSize,
+      .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
+    };
+    resultData = device->CreateBuffer(resultDesc);
   }
 
-  void Reset()
-  {
-    resultData.Reset();
-    scratch.Reset();
+  // FIXME: quick TMP hack, create a AccelerationStructure class on rhi side
+  UINT ResultDataSrvDescriptorIndex(IssouRHI::Device* device) {
+    if (srv) return srv.index;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
+                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                                            .RaytracingAccelerationStructure = {.Location = resultData->GpuAddress()}};
+
+    srv = device->AllocSrvUavDescriptor();
+    device->GetNativeDevice()->CreateShaderResourceView(nullptr, &srvDesc, srv.cpuHandle);
+
+    return srv.index;
   }
+
+  IssouRHI::DescriptorAllocation srv;
 };
 
 struct SkinnedMeshInstance;
@@ -601,9 +623,9 @@ static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
 static ComPtr<ID3D12StateObject> g_DxrStateObject;
-static GpuBuffer g_RayGenShaderTable;
-static GpuBuffer g_MissShaderTable;
-static GpuBuffer g_HitGroupShaderTable;
+static std::shared_ptr<IssouRHI::Buffer> g_RayGenShaderTable;
+static std::shared_ptr<IssouRHI::Buffer> g_MissShaderTable;
+static std::shared_ptr<IssouRHI::Buffer> g_HitGroupShaderTable;
 
 static std::shared_ptr<IssouRHI::Buffer> g_DrawMeshCommands;      // written by compute shader
 static std::shared_ptr<IssouRHI::Buffer> g_UAVCounterReset;
@@ -740,12 +762,11 @@ void LoadAssets()
       g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
       assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
-      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
-                                          g_Allocator);
+      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_RhiDevice);
 
       // assign blas buffer address to each instances of this mesh
       for (auto& inst : g_Scene.meshInstanceMap[mesh->name]) {
-        inst->blasBufferAddress = g_Scene.blasBuffers[i].resultData.GpuAddress();
+        inst->blasBufferAddress = g_Scene.blasBuffers[i].resultData->GpuAddress();
       }
     }
 
@@ -754,9 +775,9 @@ void LoadAssets()
 
     for (size_t i = 0; i < numMeshes; i++) {
       D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
-          .DestAccelerationStructureData = g_Scene.blasBuffers[i].resultData.GpuAddress(),
+          .DestAccelerationStructureData = g_Scene.blasBuffers[i].resultData->GpuAddress(),
           .Inputs = bottomLevelInputs[i],
-          .ScratchAccelerationStructureData = g_Scene.blasBuffers[i].scratch.GpuAddress(),
+          .ScratchAccelerationStructureData = g_Scene.blasBuffers[i].scratch->GpuAddress(),
       };
 
       commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
@@ -821,18 +842,15 @@ void LoadAssets()
     assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
     // Allocate buffer for scene tlas
-    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes,
-                                    g_Allocator);
-
-    g_Scene.tlasBuffer.resultData.CreateAccelStructSrv(g_Device, g_RhiDevice->m_SrvUavDescriptorHeap);
+    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_RhiDevice);
 
     CHECK_HR(commandAllocator->Reset());
     CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
-        .DestAccelerationStructureData = g_Scene.tlasBuffer.resultData.GpuAddress(),
+        .DestAccelerationStructureData = g_Scene.tlasBuffer.resultData->GpuAddress(),
         .Inputs = topLevelInputs,
-        .ScratchAccelerationStructureData = g_Scene.tlasBuffer.scratch.GpuAddress(),
+        .ScratchAccelerationStructureData = g_Scene.tlasBuffer.scratch->GpuAddress(),
     };
 
     commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
@@ -1213,21 +1231,21 @@ void Render(float time, float dt)
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
                                                g_GBuffer.worldPosition->CreateView()->SrvDescriptorAlloc().index, 0);
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer->CreateView()->UavDescriptorAlloc().index, 1);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.resultData.SrvDescriptorIndex(), 2);
+    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
 
     {
       D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
       // Since each shader table has only one shader record, the stride is same as the size.
-      dispatchDesc.HitGroupTable.StartAddress = g_HitGroupShaderTable.GpuAddress();
-      dispatchDesc.HitGroupTable.SizeInBytes = g_HitGroupShaderTable.Size();
-      dispatchDesc.HitGroupTable.StrideInBytes = g_HitGroupShaderTable.Size();
+      dispatchDesc.HitGroupTable.StartAddress = g_HitGroupShaderTable->GpuAddress();
+      dispatchDesc.HitGroupTable.SizeInBytes = g_HitGroupShaderTable->Size();
+      dispatchDesc.HitGroupTable.StrideInBytes = g_HitGroupShaderTable->Size();
 
-      dispatchDesc.MissShaderTable.StartAddress = g_MissShaderTable.GpuAddress();
-      dispatchDesc.MissShaderTable.SizeInBytes = g_MissShaderTable.Size();
-      dispatchDesc.MissShaderTable.StrideInBytes = g_MissShaderTable.Size();
+      dispatchDesc.MissShaderTable.StartAddress = g_MissShaderTable->GpuAddress();
+      dispatchDesc.MissShaderTable.SizeInBytes = g_MissShaderTable->Size();
+      dispatchDesc.MissShaderTable.StrideInBytes = g_MissShaderTable->Size();
 
-      dispatchDesc.RayGenerationShaderRecord.StartAddress = g_RayGenShaderTable.GpuAddress();
-      dispatchDesc.RayGenerationShaderRecord.SizeInBytes = g_RayGenShaderTable.Size();
+      dispatchDesc.RayGenerationShaderRecord.StartAddress = g_RayGenShaderTable->GpuAddress();
+      dispatchDesc.RayGenerationShaderRecord.SizeInBytes = g_RayGenShaderTable->Size();
 
       dispatchDesc.Width = g_Width;
       dispatchDesc.Height = g_Height;
@@ -1308,16 +1326,7 @@ void Cleanup()
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
-  for (auto &as : g_Scene.blasBuffers) {
-    as.Reset();
-  }
-  g_Scene.tlasBuffer.Reset();
-
   g_DxrStateObject.Reset();
-
-  g_RayGenShaderTable.Reset();
-  g_MissShaderTable.Reset();
-  g_HitGroupShaderTable.Reset();
 
   g_CommandList.Reset();
 
@@ -1685,6 +1694,7 @@ static void InitFrameResources()
     CHECK_HR(g_Device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&g_DxrStateObject)));
 
     // Shader Table
+    // TODO: ShaderTable class in RHI
     ComPtr<ID3D12StateObjectProperties> stateObjectProperties;
     CHECK_HR(g_DxrStateObject.As(&stateObjectProperties));
 
@@ -1693,25 +1703,37 @@ static void InitFrameResources()
     {
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(RaygenShaderName);
       UINT numShaderRecords = 1;
-      g_RayGenShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"RayGen Shader Table", g_Allocator, HeapType::Upload)
-          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+      IssouRHI::BufferDesc desc{
+        .label = "RayGen Shader Table",
+        .size = numShaderRecords * shaderIdentifierSize,
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      g_RayGenShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_RayGenShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
     {
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(MissShaderName);
       UINT numShaderRecords = 1;
-      g_MissShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"Miss Shader Table", g_Allocator, HeapType::Upload)
-          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+      IssouRHI::BufferDesc desc{
+        .label = "Miss Shader Table",
+        .size = numShaderRecords * shaderIdentifierSize,
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      g_MissShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_MissShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
     {
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(HitGroupName);
       UINT numShaderRecords = 1;
-      g_HitGroupShaderTable
-          .Alloc(numShaderRecords * shaderIdentifierSize, L"HitGroup Shader Table", g_Allocator, HeapType::Upload)
-          .Copy(0, shaderIdentifier, shaderIdentifierSize);
+      IssouRHI::BufferDesc desc{
+        .label = "HitGroup Shader Table",
+        .size = numShaderRecords * shaderIdentifierSize,
+        .usage = IssouRHI::BufferUsage::MapWrite,
+      };
+      g_HitGroupShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_HitGroupShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
     }
   }
 
