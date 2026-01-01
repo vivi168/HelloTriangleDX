@@ -169,7 +169,7 @@ struct Scene {
   std::vector<AccelerationStructure> blasBuffers;
   AccelerationStructure tlasBuffer;
   std::vector<D3D12_RAYTRACING_INSTANCE_DESC> rtInstanceDescriptors;
-  GpuBuffer rtInstanceDescBuffer;
+  std::shared_ptr<IssouRHI::Buffer> rtInstanceDescBuffer;
 
   Camera* camera;
 };
@@ -351,17 +351,17 @@ struct MeshStore {
   BuffersDescriptorIndices BuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
-        .vertexNormalsBufferId = m_VertexNormals->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
-        .vertexTangentsBufferId = m_VertexTangents->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4)).index,
-        .vertexUVsBufferId = m_VertexUVs->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT2)).index,
+        .vertexPositionsBufferId = m_VertexPositions->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
+        .vertexNormalsBufferId = m_VertexNormals->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
+        .vertexTangentsBufferId = m_VertexTangents->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4)).index,
+        .vertexUVsBufferId = m_VertexUVs->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT2)).index,
 
-        .meshletsBufferId = m_Meshlets->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshletData)).index,
-        .meshletVertIndicesBufferId = m_MeshletUniqueIndices->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(UINT)).index,
-        .meshletsPrimitivesBufferId = m_MeshletPrimitives->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshletTriangle)).index,
+        .meshletsBufferId = m_Meshlets->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshletData)).index,
+        .meshletVertIndicesBufferId = m_MeshletUniqueIndices->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(UINT)).index,
+        .meshletsPrimitivesBufferId = m_MeshletPrimitives->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshletTriangle)).index,
 
-        .materialsBufferId = m_Materials->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(Material::m_GpuData)).index,
-        .instancesBufferId = m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshInstance::data)).index,
+        .materialsBufferId = m_Materials->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(Material::m_GpuData)).index,
+        .instancesBufferId = m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshInstance::data)).index,
     };
   }
 
@@ -369,18 +369,18 @@ struct MeshStore {
   SkinningBuffersDescriptorIndices SkinningBuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
-        .vertexNormalsBufferId = m_VertexNormals->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT3)).index,
-        .vertexTangentsBufferId = m_VertexTangents->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4)).index,
-        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMUINT2)).index,
-        .boneMatricesBufferId = m_BoneMatrices[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(XMFLOAT4X4)).index,
+        .vertexPositionsBufferId = m_VertexPositions->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
+        .vertexNormalsBufferId = m_VertexNormals->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
+        .vertexTangentsBufferId = m_VertexTangents->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4)).index,
+        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMUINT2)).index,
+        .boneMatricesBufferId = m_BoneMatrices[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4X4)).index,
     };
   }
 
   // TODO: this won't be necessary here once we have bindGroups / pass descriptor
   UINT InstancesBufferId(UINT frameIndex) const
   {
-    return m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(MeshInstance::data)).index;
+    return m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshInstance::data)).index;
   }
 
   void Init(IssouRHI::Device* device)
@@ -797,10 +797,13 @@ void LoadAssets()
 
   // RT instance descriptors buffer
   {
-    size_t bufSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size();
-
-    g_Scene.rtInstanceDescBuffer.Alloc(bufSize, L"RT Instance Desc Buffer", g_Allocator, HeapType::Upload)
-        .Copy(0, g_Scene.rtInstanceDescriptors.data(), bufSize);
+    IssouRHI::BufferDesc desc{
+      .label = "RT Instance Desc Buffer",
+      .size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size(),
+      .usage = IssouRHI::BufferUsage::MapWrite,
+    };
+    g_Scene.rtInstanceDescBuffer = g_RhiDevice->CreateBuffer(desc);
+    g_Scene.rtInstanceDescBuffer->Copy(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
   }
 
   // TLAS creation
@@ -810,7 +813,7 @@ void LoadAssets()
         .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
         .NumDescs = static_cast<UINT>(g_Scene.rtInstanceDescriptors.size()),
         .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
-        .InstanceDescs = g_Scene.rtInstanceDescBuffer.GpuAddress(),
+        .InstanceDescs = g_Scene.rtInstanceDescBuffer->GpuAddress(),
     };
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
@@ -1305,7 +1308,6 @@ void Cleanup()
   g_RootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
-  g_Scene.rtInstanceDescBuffer.Reset();
   for (auto &as : g_Scene.blasBuffers) {
     as.Reset();
   }
@@ -1806,7 +1808,7 @@ static void InitFrameResources()
     ctx->skinningBuffersDescriptorsIndices = g_MeshStore.SkinningBuffersDescriptorIndices(static_cast<UINT>(i));
     ctx->cullingBuffersDescriptorsIndices = {
         .InstancesBufferId = g_MeshStore.InstancesBufferId(static_cast<UINT>(i)),
-        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc(IssouRHI::BufferFullRange, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
+        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
     };
   }
 

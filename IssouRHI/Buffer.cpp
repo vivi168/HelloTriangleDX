@@ -28,6 +28,14 @@ void Buffer::InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedRes
   m_FixedResourceState = fixedResourceState;
 }
 
+BufferRange Buffer::ClampBufferRange(BufferRange range)
+{
+  range.offset = std::min(range.offset, Size());
+  range.size = std::min(range.size, Size() - range.offset);
+
+  return range;
+}
+
 void Buffer::Copy(BufferRange range, const void* data)
 {
   assert(m_Desc.usage & BufferUsage::MapWrite);
@@ -99,7 +107,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(BufferRange& range, UINT by
 
 DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStride)
 {
-  range.size = std::min(range.size, Size());
+  range = ClampBufferRange(range);
 
   ViewKey k{.range = range, .byteStride = byteStride};
   auto& alloc = m_Srvs[k];
@@ -134,7 +142,7 @@ DescriptorAllocation Buffer::UavDescriptorAlloc(BufferRange range,
                                                 Buffer* counter,
                                                 UINT64 counterOffsetInBytes)
 {
-  range.size = std::min(range.size, Size());
+  range = ClampBufferRange(range);
 
   ViewKey k{.range = range, .byteStride = byteStride, .counter = counter, .counterOffsetInBytes = counterOffsetInBytes};
   auto& alloc = m_Uavs[k];

@@ -301,7 +301,7 @@ struct BufferRange {
 
   bool operator==(const BufferRange& other) const { return offset == other.offset && size == other.size; }
 };
-inline constexpr BufferRange BufferFullRange = {0, ~0ull};
+inline constexpr BufferRange FullBufferRange = {0, std::numeric_limits<uint64_t>::max()};
 
 struct BufferDesc {
   std::string label;
@@ -336,6 +336,8 @@ public: // D3D12 impl specific
 private:
   Device* m_Device;
   BufferDesc m_Desc;
+
+  BufferRange ClampBufferRange(BufferRange range);
 
 private: // D3D12 impl specific
   void Map();
