@@ -158,7 +158,7 @@ void Texture::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
   }
 }
 
-void Texture::Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource)
+void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource)
 {
   assert(Usage() & TextureUsage::CopyDst);
 

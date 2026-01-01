@@ -43,7 +43,7 @@ BufferRange Buffer::ClampBufferRange(BufferRange range)
   return range;
 }
 
-void Buffer::Copy(BufferRange range, const void* data)
+void Buffer::Write(BufferRange range, const void* data)
 {
   assert(m_Desc.usage & BufferUsage::MapWrite);
 

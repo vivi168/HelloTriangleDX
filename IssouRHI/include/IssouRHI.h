@@ -235,7 +235,7 @@ public:
   TextureFormat Format() const { return m_Desc.format; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
-  void Copy(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
+  void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
   // TODO: abstraction over this (automatic barrier placement) + handle from passes + use enhanced barriers
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
@@ -316,7 +316,7 @@ public: // D3D12 impl specific
   // TODO: use enhanced barriers
   void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
 
-  void Copy(BufferRange range, const void* data);
+  void Write(BufferRange range, const void* data);
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);
 
@@ -403,11 +403,6 @@ public:
   void FreeRtvDescriptor(DescriptorAllocation alloc);
   void FreeDsvDescriptor(DescriptorAllocation alloc);
 
-  // FIXME: temporarily make these public until we sort out Renderer.cpp
-  DescriptorHeap m_SrvUavDescriptorHeap;
-  DescriptorHeap m_RtvDescriptorHeap;
-  DescriptorHeap m_DsvDescriptorHeap;
-
   ID3D12DescriptorHeap* SrvUavDescriptorHeap() const { return m_SrvUavDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
@@ -420,6 +415,10 @@ private:
   D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
 
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: our own Queue class here
+
+  DescriptorHeap m_SrvUavDescriptorHeap;
+  DescriptorHeap m_RtvDescriptorHeap;
+  DescriptorHeap m_DsvDescriptorHeap;
 };
 
 struct SurfaceConfiguration {

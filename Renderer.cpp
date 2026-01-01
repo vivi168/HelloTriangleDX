@@ -228,11 +228,11 @@ struct FrameContext {
 
 struct MeshStore {
   // Vertex data
-  UINT CopyPositions(const void* data, size_t size)
+  UINT WritePositions(const void* data, size_t size)
   {
     // TODO: should ensure it is mapped
     UINT offset = m_CurrentOffsets.positionsBuffer;
-    m_VertexPositions->Copy({offset, size}, data);
+    m_VertexPositions->Write({offset, size}, data);
     m_CurrentOffsets.positionsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -246,10 +246,10 @@ struct MeshStore {
     return offset;
   }
 
-  UINT CopyNormals(const void* data, size_t size)
+  UINT WriteNormals(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.normalsBuffer;
-    m_VertexNormals->Copy({offset, size}, data);
+    m_VertexNormals->Write({offset, size}, data);
     m_CurrentOffsets.normalsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -263,10 +263,10 @@ struct MeshStore {
     return offset;
   }
 
-  UINT CopyTangents(const void* data, size_t size)
+  UINT WriteTangents(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.tangentsBuffer;
-    m_VertexTangents->Copy({offset, size}, data);
+    m_VertexTangents->Write({offset, size}, data);
     m_CurrentOffsets.tangentsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -280,28 +280,28 @@ struct MeshStore {
     return offset;
   }
 
-  UINT CopyUVs(const void* data, size_t size)
+  UINT WriteUVs(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.uvsBuffer;
-    m_VertexUVs->Copy({offset, size}, data);
+    m_VertexUVs->Write({offset, size}, data);
     m_CurrentOffsets.uvsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
 
-  UINT CopyBWI(const void* data, size_t size)
+  UINT WriteBWI(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.bwiBuffer;
-    m_VertexBlendWeightsAndIndices->Copy({offset, size}, data);
+    m_VertexBlendWeightsAndIndices->Write({offset, size}, data);
     m_CurrentOffsets.bwiBuffer += static_cast<UINT>(size);
 
     return offset;
   }
 
-  UINT CopyIndices(const void* data, size_t size)
+  UINT WriteIndices(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.indexBuffer;
-    m_VertexIndices->Copy({offset, size}, data);
+    m_VertexIndices->Write({offset, size}, data);
     m_CurrentOffsets.indexBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -309,28 +309,28 @@ struct MeshStore {
 
   // Meshlet data
 
-  UINT CopyMeshlets(const void* data, size_t size)
+  UINT WriteMeshlets(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.meshletsBuffer;
-    m_Meshlets->Copy({offset, size}, data);
+    m_Meshlets->Write({offset, size}, data);
     m_CurrentOffsets.meshletsBuffer += static_cast<UINT>(size);
 
     return offset;
   }
 
-  UINT CopyMeshletUniqueIndices(const void* data, size_t size)
+  UINT WriteMeshletUniqueIndices(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.uniqueIndicesBuffer;
-    m_MeshletUniqueIndices->Copy({offset, size}, data);
+    m_MeshletUniqueIndices->Write({offset, size}, data);
     m_CurrentOffsets.uniqueIndicesBuffer += static_cast<UINT>(size);
 
     return offset;
   }
 
-  UINT CopyMeshletPrimitives(const void* data, size_t size)
+  UINT WriteMeshletPrimitives(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.primitivesBuffer;
-    m_MeshletPrimitives->Copy({offset, size}, data);
+    m_MeshletPrimitives->Write({offset, size}, data);
     m_CurrentOffsets.primitivesBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -338,10 +338,10 @@ struct MeshStore {
 
   // meta data
 
-  UINT CopyMaterial(const void* data, size_t size)
+  UINT WriteMaterial(const void* data, size_t size)
   {
     UINT offset = m_CurrentOffsets.materialsBuffer;
-    m_Materials->Copy({offset, size}, data);
+    m_Materials->Write({offset, size}, data);
     m_CurrentOffsets.materialsBuffer += static_cast<UINT>(size);
 
     return offset;
@@ -357,7 +357,7 @@ struct MeshStore {
 
   void UpdateInstances(const void* data, size_t size, UINT offset, UINT frameIndex)
   {
-    m_Instances[frameIndex]->Copy({offset, size}, data);
+    m_Instances[frameIndex]->Write({offset, size}, data);
   }
 
   UINT ReserveBoneMatrices(size_t size)
@@ -370,7 +370,7 @@ struct MeshStore {
 
   void UpdateBoneMatrices(const void* data, size_t size, UINT offset, UINT frameIndex)
   {
-    m_BoneMatrices[frameIndex]->Copy({offset, size}, data);
+    m_BoneMatrices[frameIndex]->Write({offset, size}, data);
   }
 
   // TODO: this won't be necessary here once we have bindGroups / pass descriptor
@@ -835,7 +835,7 @@ void LoadAssets()
       .usage = IssouRHI::BufferUsage::MapWrite,
     };
     g_Scene.rtInstanceDescBuffer = g_RhiDevice->CreateBuffer(desc);
-    g_Scene.rtInstanceDescBuffer->Copy(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
+    g_Scene.rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
   }
 
   // TLAS creation
@@ -1432,7 +1432,7 @@ UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
   std::filesystem::path normalMapPath = baseDir / line;
   material->m_GpuData.normalMapId = CreateTexture(normalMapPath);
 
-  material->m_MaterialBufferOffset = g_MeshStore.CopyMaterial(&material->m_GpuData, sizeof(material->m_GpuData));
+  material->m_MaterialBufferOffset = g_MeshStore.WriteMaterial(&material->m_GpuData, sizeof(material->m_GpuData));
 
   g_MaterialMap[materialPath] = material;
 
@@ -1762,7 +1762,7 @@ static void InitFrameResources()
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_RayGenShaderTable = g_RhiDevice->CreateBuffer(desc);
-      g_RayGenShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
+      g_RayGenShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
     {
@@ -1774,7 +1774,7 @@ static void InitFrameResources()
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_MissShaderTable = g_RhiDevice->CreateBuffer(desc);
-      g_MissShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
+      g_MissShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
     {
@@ -1786,7 +1786,7 @@ static void InitFrameResources()
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_HitGroupShaderTable = g_RhiDevice->CreateBuffer(desc);
-      g_HitGroupShaderTable->Copy(IssouRHI::FullBufferRange, shaderIdentifier);
+      g_HitGroupShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
   }
 
@@ -1934,13 +1934,13 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
         auto smi = std::make_shared<SkinnedMeshInstance>();
         smi->offsets.basePositionsBuffer =
-            g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
+            g_MeshStore.WritePositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         smi->offsets.baseNormalsBuffer =
-            g_MeshStore.CopyNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+            g_MeshStore.WriteNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
         smi->offsets.baseTangentsBuffer =
-            g_MeshStore.CopyTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
+            g_MeshStore.WriteTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
         smi->offsets.blendWeightsAndIndicesBuffer =
-            g_MeshStore.CopyBWI(mesh->blendWeightsAndIndices.data(), mesh->BlendWeightsAndIndicesBufferSize()) /
+            g_MeshStore.WriteBWI(mesh->blendWeightsAndIndices.data(), mesh->BlendWeightsAndIndicesBufferSize()) /
             sizeof(XMUINT2);
 
         smi->numVertices = mesh->header.numVerts;
@@ -1956,24 +1956,24 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
         g_Scene.numBoneMatrices += smi->numBoneMatrices;
       } else { // if not skinned
         mi->data.firstPosition =
-            g_MeshStore.CopyPositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
+            g_MeshStore.WritePositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal =
-            g_MeshStore.CopyNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
+            g_MeshStore.WriteNormals(mesh->normals.data(), mesh->NormalsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstTangent =
-            g_MeshStore.CopyTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
+            g_MeshStore.WriteTangents(mesh->tangents.data(), mesh->TangentsBufferSize()) / sizeof(XMFLOAT4);
       }
 
-      mi->data.firstUV = g_MeshStore.CopyUVs(mesh->uvs.data(), mesh->UvsBufferSize()) / sizeof(XMFLOAT2);
-      mi->indexBufferOffset = g_MeshStore.CopyIndices(mesh->indices.data(), mesh->IndicesBufferSize());
+      mi->data.firstUV = g_MeshStore.WriteUVs(mesh->uvs.data(), mesh->UvsBufferSize()) / sizeof(XMFLOAT2);
+      mi->indexBufferOffset = g_MeshStore.WriteIndices(mesh->indices.data(), mesh->IndicesBufferSize());
 
       // meshlet data
       mi->data.firstMeshlet =
-          g_MeshStore.CopyMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
+          g_MeshStore.WriteMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
       mi->data.firstVertIndex =
-          g_MeshStore.CopyMeshletUniqueIndices(mesh->uniqueVertexIndices.data(), mesh->MeshletIndexBufferSize()) /
+          g_MeshStore.WriteMeshletUniqueIndices(mesh->uniqueVertexIndices.data(), mesh->MeshletIndexBufferSize()) /
           sizeof(UINT);
       mi->data.firstPrimitive =
-          g_MeshStore.CopyMeshletPrimitives(mesh->primitiveIndices.data(), mesh->MeshletPrimitiveBufferSize()) /
+          g_MeshStore.WriteMeshletPrimitives(mesh->primitiveIndices.data(), mesh->MeshletPrimitiveBufferSize()) /
           sizeof(UINT);
 
       if (!mesh->Skinned()) g_Scene.uniqueMeshInstances.push_back(mi); // TODO: only non skinned mesh for now
@@ -1985,7 +1985,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
       mi->data.firstUV = i->data.firstUV;
 
       mi->data.firstMeshlet =
-          g_MeshStore.CopyMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
+          g_MeshStore.WriteMeshlets(instanceMeshlets.data(), mesh->MeshletBufferSize()) / sizeof(MeshletData);
       mi->data.firstVertIndex = i->data.firstVertIndex;
       mi->data.firstPrimitive = i->data.firstPrimitive;
 
@@ -2074,7 +2074,7 @@ static UINT CreateTexture(std::filesystem::path filename)
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
   CHECK_HR(PrepareUpload(g_Device, image.GetImages(), image.GetImageCount(), metadata, subresources));
 
-  tex->Copy(subresources.data(), static_cast<UINT>(subresources.size()));
+  tex->WriteToSubresource(subresources.data(), static_cast<UINT>(subresources.size()));
 
   g_Textures[filename] = tex;
 
