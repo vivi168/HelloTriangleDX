@@ -359,6 +359,22 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
   return buf;
 }
 
+std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDesc& desc)
+{
+  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
+
+  D3D12_SHADER_BYTECODE computeShader = {desc.module->code.data(), desc.module->code.size()};
+
+  D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
+    .pRootSignature = ComputePipeline::GetRootSignature(GetNativeDevice()),
+    .CS = computeShader,
+  };
+
+  ID3D12PipelineState* pipelineStateObject;
+  CHECK_HR(m_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+  computePipeline->Attach(pipelineStateObject);
+}
+
 DescriptorAllocation Device::AllocSrvUavDescriptor()
 {
   return m_SrvUavDescriptorHeap.Alloc();

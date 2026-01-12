@@ -1798,7 +1798,7 @@ static void InitFrameResources()
     IssouRHI::BufferDesc desc{
       .label = "Draw Meshlets command buffer",
       .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
-      .usage = IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
+      .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
     };
     g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
   }

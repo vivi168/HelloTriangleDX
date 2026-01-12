@@ -43,6 +43,7 @@ set(ISSOURHI_SOURCES
     ${ISSOURHI_DIR}/Buffer.cpp
     ${ISSOURHI_DIR}/DescriptorHeap.cpp
     ${ISSOURHI_DIR}/Device.cpp
+    ${ISSOURHI_DIR}/Pipeline.cpp
     ${ISSOURHI_DIR}/Utils.cpp
     ${ISSOURHI_DIR}/Surface.cpp
     ${ISSOURHI_DIR}/Texture.cpp)

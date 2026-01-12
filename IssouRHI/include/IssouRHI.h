@@ -99,12 +99,12 @@ enum class TextureViewDimension : uint32_t {
 };
 
 enum class TextureUsage : uint32_t {
-  None = 1 << 0,
-  CopySrc = 1 << 1,
-  CopyDst = 1 << 2,
-  TextureBinding = 1 << 3,
-  StorageBinding = 1 << 4,
-  RenderAttachment = 1 << 5,
+  None = 0,
+  CopySrc = 1 << 0,
+  CopyDst = 1 << 1,
+  TextureBinding = 1 << 2,
+  StorageBinding = 1 << 3,
+  RenderAttachment = 1 << 4,
 };
 ISSOURHI_ENUM_CLASS_OP(TextureUsage)
 
@@ -288,18 +288,18 @@ private:
 };
 
 enum class BufferUsage : uint32_t {
-  None = 1 << 0,
-  MapRead = 1 << 1,
-  MapWrite = 1 << 2,
-  CopySrc = 1 << 3,
-  CopyDst = 1 << 4,
-  Index = 1 << 5,
-  Vertex = 1 << 6,
-  Uniform = 1 << 7,
-  Storage = 1 << 8,
-  Indirect = 1 << 9,
-  QueryResolve = 1 << 10,
-  RayTracingAccelerationStructure = 1 << 11,
+  None = 0,
+  MapRead = 1 << 0,
+  MapWrite = 1 << 1,
+  CopySrc = 1 << 2,
+  CopyDst = 1 << 3,
+  Index = 1 << 4,
+  Vertex = 1 << 5,
+  Uniform = 1 << 6,
+  Storage = 1 << 7,
+  Indirect = 1 << 8,
+  QueryResolve = 1 << 9,
+  RayTracingAccelerationStructure = 1 << 10,
 };
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
@@ -391,6 +391,50 @@ private: // D3D12 impl specific
   bool m_FixedResourceState = false;
 };
 
+enum class ShaderStage : uint32_t {
+  None = 0,
+  Vertex = 1 << 0,
+  Fragment = 1 << 1,
+  Compute = 1 << 2,
+  Mesh = 1 << 3,
+  Raytracing = 1 << 4
+};
+ISSOURHI_ENUM_CLASS_OP(ShaderStage)
+
+struct ShaderModule
+{
+  std::vector<uint8_t> code;
+};
+
+class PipelineBase
+{
+public:
+  virtual ~PipelineBase() = default;
+
+public:  // D3D12 impl specific
+  static ID3D12RootSignature* GetRootSignature(ID3D12Device* device);
+
+  void Attach(ID3D12PipelineState* pso);
+private:  // D3D12 impl specific
+  Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
+};
+
+struct ComputePipelineDesc
+{
+  std::string label;
+  ShaderModule* module;
+};
+
+class ComputePipeline : public PipelineBase
+{
+public:
+  ComputePipeline(Device* device, ComputePipelineDesc& desc);
+  ~ComputePipeline();
+private:
+  Device* m_Device;
+  ComputePipelineDesc m_Desc;
+};
+
 class Device
 {
 public:
@@ -406,6 +450,8 @@ public:
 
   std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
   std::shared_ptr<Buffer> CreateBuffer(BufferDesc& desc);
+
+  std::shared_ptr<ComputePipeline> CreateComputePipeline(ComputePipelineDesc& desc);
 
   DescriptorAllocation AllocSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
@@ -487,8 +533,8 @@ class RaytracingPass;
 struct RenderPipelineDesc;
 class RenderPipeline;
 
-struct ComputePipelineDesc;
-class ComputePipeline;
+struct MeshPipelineDesc;
+class MeshPipeline;
 
 struct RaytracingPipelineDesc;
 class RaytracingPipeline;
