@@ -1,23 +1,5 @@
 #pragma once
 
-#include <stdexcept>
-
-#include <cassert>
-
-inline constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
-
-// FIXME: duplicated with stdafx.h
-#define STRINGIZE(x) STRINGIZE2(x)
-#define STRINGIZE2(x) #x
-#define LINE_STRING STRINGIZE(__LINE__)
-#define CHECK_HR(expr)                                                             \
-  do {                                                                             \
-    if (FAILED(expr)) {                                                            \
-      assert(0 && #expr);                                                          \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr " )"); \
-    }                                                                              \
-  } while (false)
-
 const uint32_t VENDOR_ID_AMD = 0x1002;
 const uint32_t VENDOR_ID_NVIDIA = 0x10DE;
 const uint32_t VENDOR_ID_INTEL = 0x8086;

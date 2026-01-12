@@ -162,6 +162,7 @@ void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresour
 {
   assert(Usage() & TextureUsage::CopyDst);
 
+  constexpr D3D12_RANGE EMPTY_RANGE = {0, 0};
   CHECK_HR(m_Resource->Map(0, &EMPTY_RANGE, nullptr));
 
   for (UINT i = 0; i < numSubresources; ++i) {

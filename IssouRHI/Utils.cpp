@@ -1,7 +1,3 @@
-// CreateDXGIFactory -> enable debug
-// GetDXGIFactory -> return IDXGIFactory4 -> specific d3d12
-// selectAdapter ->
-
 #include "IssouRHI.h"
 
 using Microsoft::WRL::ComPtr;

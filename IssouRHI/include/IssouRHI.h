@@ -31,6 +31,18 @@
   constexpr e& operator &= (e& a, e b) { a = (e)(a & b); return a; } \
   constexpr e& operator |= (e& a, e b) { a = (e)(a | b); return a; }
 
+// FIXME: duplicated for now with stdafx.h
+#define STRINGIZE(x) STRINGIZE2(x)
+#define STRINGIZE2(x) #x
+#define LINE_STRING STRINGIZE(__LINE__)
+#define CHECK_HR(expr)                                                             \
+  do {                                                                             \
+    if (FAILED(expr)) {                                                            \
+      assert(0 && #expr);                                                          \
+      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr " )"); \
+    }                                                                              \
+  } while (false)
+
 namespace IssouRHI
 {
 struct GPUSelection {
