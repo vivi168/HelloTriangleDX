@@ -3,7 +3,7 @@
 
 namespace IssouRHI
 {
-ID3D12RootSignature* GetRootSignature(ID3D12Device* device)
+ID3D12RootSignature* PipelineBase::GetRootSignature(ID3D12Device* device)
 {
   // TODO: move this to device instead?
   static Microsoft::WRL::ComPtr<ID3D12RootSignature> s_RootSignature = [&]() {

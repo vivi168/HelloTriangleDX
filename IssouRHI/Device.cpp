@@ -373,6 +373,8 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDe
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
   computePipeline->Attach(pipelineStateObject);
+
+  return computePipeline;
 }
 
 DescriptorAllocation Device::AllocSrvUavDescriptor()
