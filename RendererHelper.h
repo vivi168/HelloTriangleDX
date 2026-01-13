@@ -1,23 +1,5 @@
 #pragma once
 
-inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
-{
-  if (path == nullptr) {
-    throw std::exception();
-  }
-
-  DWORD size = GetModuleFileName(nullptr, path, pathSize);
-  if (size == 0 || size == pathSize) {
-    // Method failed or path was truncated.
-    throw std::exception();
-  }
-
-  WCHAR* lastSlash = wcsrchr(path, L'\\');
-  if (lastSlash) {
-    *(lastSlash + 1) = L'\0';
-  }
-}
-
 inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
 {
   std::ifstream inFile(name, std::ios::in | std::ios::binary | std::ios::ate);

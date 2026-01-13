@@ -174,6 +174,37 @@ Device::Device(const GPUSelection& gpuSelection)
     m_DsvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP,
                                D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
   }
+
+  // Create root signature
+  {
+    // Root parameters
+    constexpr UINT RootParameterCount = 4;
+    constexpr UINT ConstantCount = 16;
+
+    CD3DX12_ROOT_PARAMETER rootParameters[RootParameterCount] = {};
+    for (UINT i = 0; i < RootParameterCount; i++) {
+      rootParameters[i].InitAsConstants(ConstantCount, i);
+    }
+
+    // Static sampler
+    constexpr UINT StaticSamplerCount = 2;
+    CD3DX12_STATIC_SAMPLER_DESC staticSamplers[StaticSamplerCount];
+    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
+    staticSamplers[1].Init(1, D3D12_FILTER_ANISOTROPIC);
+
+    // Root Signature
+    D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(RootParameterCount, rootParameters, StaticSamplerCount,
+                                                            staticSamplers, flags);
+
+    ID3DBlob* signatureBlobPtr;
+    CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlobPtr, nullptr));
+
+    ID3D12RootSignature* rootSignature = nullptr;
+    CHECK_HR(device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(),
+                                         IID_PPV_ARGS(&rootSignature)));
+    m_RootSignature.Attach(rootSignature);
+  }
 }
 
 Device::~Device()
@@ -361,19 +392,19 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
 
 std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDesc& desc)
 {
-  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
-
-  D3D12_SHADER_BYTECODE computeShader = {desc.module->code.data(), desc.module->code.size()};
+  D3D12_SHADER_BYTECODE computeShader = {desc.module->Data(), desc.module->Size()};
 
   D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-    .pRootSignature = ComputePipeline::GetRootSignature(GetNativeDevice()),
+    .pRootSignature = m_RootSignature.Get(),
     .CS = computeShader,
   };
 
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-  computePipeline->Attach(pipelineStateObject);
 
+  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
+
+  computePipeline->Attach(pipelineStateObject);
   return computePipeline;
 }
 

@@ -65,9 +65,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
     IssouRHI::PrintAdapterList();
     return (int)ExitCode::GPUList;
   }
-  
+
   auto device = std::make_shared<IssouRHI::Device>(g_CommandLineParameters.m_GPUSelection);
-  
+
   return Win32Application::Run(hInstance, nCmdShow, device);
 }
 

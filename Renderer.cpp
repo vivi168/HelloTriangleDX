@@ -1463,11 +1463,6 @@ static void InitD3D()
 
 static void InitFrameResources()
 {
-  // assets path
-  WCHAR assetsPath[512];
-  GetAssetsPath(assetsPath, _countof(assetsPath));
-  g_AssetsPath = assetsPath;
-
   // DSV
   {
     IssouRHI::TextureDesc desc{
@@ -1593,14 +1588,14 @@ static void InitFrameResources()
   // Mesh Shader Pipeline State for static objects
   {
     // Mesh Shader
-    auto amplificationShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.as.cso").c_str());
+    auto amplificationShaderBlob = ReadData(L"Meshlet.as.cso");
     D3D12_SHADER_BYTECODE amplificationShader = {amplificationShaderBlob.data(), amplificationShaderBlob.size()};
 
-    auto meshShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.ms.cso").c_str());
+    auto meshShaderBlob = ReadData(L"Meshlet.ms.cso");
     D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
                                         meshShaderBlob.size()};
 
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"Meshlet.ps.cso").c_str());
+    auto pixelShaderBlob = ReadData(L"Meshlet.ps.cso");
     D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
                                          pixelShaderBlob.size()};
 
@@ -1633,7 +1628,7 @@ static void InitFrameResources()
 
   // Compute skinning pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"Skinning.cs.cso").c_str());
+    auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1648,7 +1643,7 @@ static void InitFrameResources()
 
   // Compute culling pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"InstanceCulling.cs.cso").c_str());
+    auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1663,7 +1658,7 @@ static void InitFrameResources()
 
   // Fill G-Buffer pipeline
   {
-    auto computeShaderBlob = ReadData(GetAssetFullPath(L"FillGBuffer.cs.cso").c_str());
+    auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
@@ -1678,10 +1673,10 @@ static void InitFrameResources()
 
   // Final image composition VS/PS pipeline
   {
-    auto vertexShaderBlob = ReadData(GetAssetFullPath(L"FullScreenTriangle.vs.cso").c_str());
+    auto vertexShaderBlob = ReadData(L"FullScreenTriangle.vs.cso");
     D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(), vertexShaderBlob.size()};
 
-    auto pixelShaderBlob = ReadData(GetAssetFullPath(L"FinalCompose.ps.cso").c_str());
+    auto pixelShaderBlob = ReadData(L"FinalCompose.ps.cso");
     D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(), pixelShaderBlob.size()};
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -1713,7 +1708,7 @@ static void InitFrameResources()
     const wchar_t* AnyHitShaderName = L"ShadowAnyHit";
     const wchar_t* MissShaderName = L"ShadowMiss";
 
-    auto libBlob = ReadData(GetAssetFullPath(L"RayTracing.rt.cso").c_str());
+    auto libBlob = ReadData(L"RayTracing.rt.cso");
     D3D12_SHADER_BYTECODE libShader = {libBlob.data(), libBlob.size()};
 
     CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};
@@ -1896,12 +1891,6 @@ static void InitFrameResources()
     };
     g_FrameContext[i].timestampReadBackBuffer = g_RhiDevice->CreateBuffer(desc);
   }
-}
-
-// Helper function for resolving the full path of assets.
-static std::wstring GetAssetFullPath(LPCWSTR assetName)
-{
-  return g_AssetsPath + assetName;
 }
 
 // TODO: rewrite this mess

@@ -49,4 +49,18 @@ void PrintAdapterList()
   }
 }
 
+std::filesystem::path GetExecutableDirectory()
+{
+#if !defined(WINAPI_FAMILY) || (WINAPI_FAMILY == WINAPI_FAMILY_DESKTOP_APP)
+  wchar_t moduleName[_MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, moduleName, _MAX_PATH))
+      throw std::system_error(std::error_code(static_cast<int>(GetLastError()), std::system_category()),
+                              "GetModuleFileNameW");
+  return std::filesystem::path(moduleName).parent_path();
+#else
+  // TODO: sorry
+  return std::filesystem::current_path();
+#endif
+}
+
 }  // namespace IssouRHI

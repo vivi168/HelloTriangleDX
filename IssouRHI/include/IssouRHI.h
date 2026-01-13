@@ -9,6 +9,8 @@
 #include <wrl.h>
 
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,7 +54,7 @@ struct GPUSelection {
 
 Microsoft::WRL::ComPtr<IDXGIFactory4> GetDXGIFactory();
 void PrintAdapterList();
-
+std::filesystem::path GetExecutableDirectory();
 
 struct DescriptorAllocation {
   UINT index;
@@ -401,9 +403,37 @@ enum class ShaderStage : uint32_t {
 };
 ISSOURHI_ENUM_CLASS_OP(ShaderStage)
 
-struct ShaderModule
-{
-  std::vector<uint8_t> code;
+struct ShaderModule {
+  ShaderModule(std::filesystem::path file)
+  {
+    std::ifstream inFile(file, std::ios::in | std::ios::binary | std::ios::ate);
+
+    if (!inFile && file.is_relative()) {
+      inFile.open(GetExecutableDirectory() / file, std::ios::in | std::ios::binary | std::ios::ate);
+    }
+
+    if (!inFile) throw std::runtime_error("Read ShaderModule");
+
+    const std::streampos len = inFile.tellg();
+    if (!inFile) throw std::runtime_error("Read ShaderModule");
+
+    m_Code.resize(size_t(len));
+
+    inFile.seekg(0, std::ios::beg);
+    if (!inFile) throw std::runtime_error("Read ShaderModule");
+
+    inFile.read(reinterpret_cast<char*>(m_Code.data()), len);
+    if (!inFile) throw std::runtime_error("Read ShaderModule");
+
+    inFile.close();
+  }
+
+  const uint8_t* Data() const { return m_Code.data(); }
+
+  size_t Size() const { return m_Code.size(); }
+
+private:
+  std::vector<uint8_t> m_Code;
 };
 
 class PipelineBase
@@ -412,15 +442,13 @@ public:
   virtual ~PipelineBase() = default;
 
 public:  // D3D12 impl specific
-  static ID3D12RootSignature* GetRootSignature(ID3D12Device* device);
-
   void Attach(ID3D12PipelineState* pso);
+
 private:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
 };
 
-struct ComputePipelineDesc
-{
+struct ComputePipelineDesc {
   std::string label;
   ShaderModule* module;
 };
@@ -477,6 +505,8 @@ private:
   DescriptorHeap m_SrvUavDescriptorHeap;
   DescriptorHeap m_RtvDescriptorHeap;
   DescriptorHeap m_DsvDescriptorHeap;
+
+  Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
 };
 
 struct SurfaceConfiguration {
