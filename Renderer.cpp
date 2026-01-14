@@ -611,7 +611,7 @@ static IssouRHI::Surface* g_Surface;
 // swapchain used to switch between render targets
 // container for command lists
 static ID3D12CommandQueue* g_CommandQueue;
-static ComPtr<ID3D12GraphicsCommandList6> g_CommandList;
+static ComPtr<ID3D12GraphicsCommandList8> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
@@ -1079,12 +1079,26 @@ void Render(float time, float dt)
   // commands will be stored in the g_CommandAllocators)
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
 
-  // transition the "g_FrameIndex" render target from the present state to the
-  // render target state so the command list draws to it starting from here
-  std::array<D3D12_RESOURCE_BARRIER, 2> preRenderBarriers;
-  preRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  preRenderBarriers[1] =
-      g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  {
+    D3D12_TEXTURE_BARRIER BeginFrameBarriers[] = {
+        // A D3D12_BARRIER_SYNC_NONE SyncBefore value implies that the corresponding subresources are not accessed before the barrier in the same ExecuteCommandLists scope
+        // If a barrier SyncBefore is D3D12_BARRIER_SYNC_NONE, then AccessBefore MUST be D3D12_BARRIER_ACCESS_NO_ACCESS. In this case, there MUST have been no preceding barriers or accesses made to that resource in the same ExecuteCommandLists scope.
+        CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_NONE,             // SyncBefore
+                                D3D12_BARRIER_SYNC_RENDER_TARGET,    // SyncAfter
+                                D3D12_BARRIER_ACCESS_NO_ACCESS,      // AccessBefore
+                                D3D12_BARRIER_ACCESS_RENDER_TARGET,  // AccessAfter
+                                D3D12_BARRIER_LAYOUT_PRESENT,        // LayoutBefore
+                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,  // LayoutAfter
+                                renderTarget->Resource(),
+                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
+                                D3D12_TEXTURE_BARRIER_FLAG_NONE)};
+    D3D12_BARRIER_GROUP BeginFrameBarriersGroups[] = {CD3DX12_BARRIER_GROUP(_countof(BeginFrameBarriers), BeginFrameBarriers)};
+    g_CommandList->Barrier(_countof(BeginFrameBarriersGroups), BeginFrameBarriersGroups);
+  }
+
+  std::array<D3D12_RESOURCE_BARRIER, 1> preRenderBarriers;
+  // preRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  preRenderBarriers[0] = g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
   g_CommandList->ResourceBarrier(static_cast<UINT>(preRenderBarriers.size()), preRenderBarriers.data());
 
   // here we again get the handle to our current render target view so we can
@@ -1291,15 +1305,26 @@ void Render(float time, float dt)
   ImGui::Render();
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
 
-  // transition the "g_FrameIndex" render target from the render target state to
-  // the present state. If the debug layer is enabled, you will receive a
-  // warning if present is called on the render target when it's not in the
-  // present state
-  std::array<D3D12_RESOURCE_BARRIER, 2> postRenderBarriers;
-  postRenderBarriers[0] =
-      renderTarget->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-  postRenderBarriers[1] =
-      g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
+  {
+    D3D12_TEXTURE_BARRIER EndFrameBarriers[] = {
+        // A D3D12_BARRIER_SYNC_NONE SyncAfter value implies that the corresponding subresources are not accessed after the barrier in the same ExecuteCommandLists scope.
+        // If a barrier SyncAfter is D3D12_BARRIER_SYNC_NONE, then AccessAfter MUST be D3D12_BARRIER_ACCESS_NO_ACCESS. Afterward, there MUST be no subsequent barriers or accesses made to the associated resource in the same ExecuteCommandLists scope.
+        CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_RENDER_TARGET,    // SyncBefore
+                                D3D12_BARRIER_SYNC_NONE,             // SyncAfter
+                                D3D12_BARRIER_ACCESS_RENDER_TARGET,  // AccessBefore
+                                D3D12_BARRIER_ACCESS_NO_ACCESS,      // AccessAfter
+                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,  // LayoutBefore
+                                D3D12_BARRIER_LAYOUT_PRESENT,        // LayoutAfter
+                                renderTarget->Resource(),
+                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
+                                D3D12_TEXTURE_BARRIER_FLAG_NONE)};
+    D3D12_BARRIER_GROUP EndFrameBarrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(EndFrameBarriers), EndFrameBarriers)};
+    g_CommandList->Barrier(_countof(EndFrameBarrierGroups), EndFrameBarrierGroups);
+  }
+
+  std::array<D3D12_RESOURCE_BARRIER, 1> postRenderBarriers;
+  // postRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+  postRenderBarriers[0] = g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
 
   g_CommandList->ResourceBarrier(static_cast<UINT>(postRenderBarriers.size()), postRenderBarriers.data());
 

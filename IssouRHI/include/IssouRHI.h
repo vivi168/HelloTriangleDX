@@ -258,6 +258,8 @@ public: // D3D12 impl specific
   D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
   D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(TextureViewDesc& desc) const;
   D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(TextureViewDesc& desc) const;
+
+  ID3D12Resource* Resource() const { return m_Resource.Get(); };
 private:
   bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
 

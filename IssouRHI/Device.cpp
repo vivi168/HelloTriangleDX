@@ -120,6 +120,11 @@ Device::Device(const GPUSelection& gpuSelection)
   CHECK_HR(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7)));
   assert(options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1);
 
+  // Enhanced Barriers
+  D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
+  CHECK_HR(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12)));
+  assert(options12.EnhancedBarriersSupported);
+
   // GPU Upload Heap Supported
   D3D12_FEATURE_DATA_D3D12_OPTIONS16 options16 = {};
   CHECK_HR(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &options16, sizeof(options16)));
@@ -356,6 +361,7 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
     allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
   }
 
+  // TODO: D3D12_BARRIER_LAYOUT initialLayout instead (enhanced barrier)
   D3D12_RESOURCE_STATES initialResourceState = D3D12_RESOURCE_STATE_COMMON;
   bool fixedResourceState = false;
   if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
@@ -379,6 +385,7 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
+  // TODO CreateResource3
   CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
                                        IID_PPV_ARGS(&resource)));
   resource->SetName(StringToWstring(desc.label).c_str());
