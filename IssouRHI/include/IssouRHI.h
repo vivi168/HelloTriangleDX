@@ -174,6 +174,7 @@ struct TextureDesc {
   TextureDimension dimension = TextureDimension::Texture2D;
   TextureFormat format;
   TextureUsage usage;
+  bool enhanced = false; // TMP to introduce enhanced barrier progressively
 };
 
 inline void HashCombine(size_t& seed, const size_t value)

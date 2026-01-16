@@ -1057,6 +1057,8 @@ static void Update(FrameContext* ctx, float time, float dt)
 
 void Render(float time, float dt)
 {
+  static UINT64 g_FrameIndex = 0;
+
   auto renderTarget = g_Surface->GetCurrentTexture();
   auto renderTargetView = renderTarget->CreateView();
   auto ctx = &g_FrameContext[g_Surface->CurrentFrameIndex()];
@@ -1091,15 +1093,19 @@ void Render(float time, float dt)
                                 D3D12_BARRIER_LAYOUT_RENDER_TARGET,  // LayoutAfter
                                 renderTarget->Resource(),
                                 CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
+                                D3D12_TEXTURE_BARRIER_FLAG_NONE),
+        CD3DX12_TEXTURE_BARRIER(g_FrameIndex == 0 ? D3D12_BARRIER_SYNC_NONE : D3D12_BARRIER_SYNC_COMPUTE_SHADING,           // SyncBefore
+                                D3D12_BARRIER_SYNC_RENDER_TARGET,                                                           // SyncAfter
+                                g_FrameIndex == 0 ? D3D12_BARRIER_ACCESS_NO_ACCESS : D3D12_BARRIER_ACCESS_SHADER_RESOURCE,  // AccessBefore
+                                D3D12_BARRIER_ACCESS_RENDER_TARGET,                                                         // AccessAfter
+                                g_FrameIndex == 0 ? D3D12_BARRIER_LAYOUT_COMMON : D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,     // LayoutBefore
+                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,                                                         // LayoutAfter
+                                g_VisibilityBuffer->Resource(),
+                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
                                 D3D12_TEXTURE_BARRIER_FLAG_NONE)};
     D3D12_BARRIER_GROUP BeginFrameBarriersGroups[] = {CD3DX12_BARRIER_GROUP(_countof(BeginFrameBarriers), BeginFrameBarriers)};
     g_CommandList->Barrier(_countof(BeginFrameBarriersGroups), BeginFrameBarriersGroups);
   }
-
-  std::array<D3D12_RESOURCE_BARRIER, 1> preRenderBarriers;
-  // preRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  preRenderBarriers[0] = g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  g_CommandList->ResourceBarrier(static_cast<UINT>(preRenderBarriers.size()), preRenderBarriers.data());
 
   // here we again get the handle to our current render target view so we can
   // set it as the render target in the output merger stage of the pipeline
@@ -1206,17 +1212,26 @@ void Render(float time, float dt)
     g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
                                    0, g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
-    auto after =
-        g_VisibilityBuffer->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(1, &after);
-
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
   }
 
   // Record Fill G-Buffer from Visibility-Buffer commands
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
-
+    {
+      D3D12_TEXTURE_BARRIER after[] = {
+          CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_RENDER_TARGET,
+                                  D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                                  D3D12_BARRIER_ACCESS_RENDER_TARGET,
+                                  D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                                  D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+                                  D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
+                                  g_VisibilityBuffer->Resource(),
+                                  CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),
+                                  D3D12_TEXTURE_BARRIER_FLAG_NONE)};
+      D3D12_BARRIER_GROUP afterGroup[] = {CD3DX12_BARRIER_GROUP(_countof(after), after)};
+      g_CommandList->Barrier(_countof(afterGroup), afterGroup);
+    }
     std::array<D3D12_RESOURCE_BARRIER, 3> before;
     before[0] = g_GBuffer.worldPosition->Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     before[1] = g_GBuffer.worldNormal->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1342,6 +1357,8 @@ void Render(float time, float dt)
   g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
 
   g_Surface->Present();
+
+  g_FrameIndex++;
 }
 
 void Cleanup()
@@ -1844,7 +1861,8 @@ static void InitFrameResources()
       .mipLevelCount = 1,
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::R32Uint,
-      .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding
+      .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding,
+      .enhanced = true,
     };
     g_VisibilityBuffer = g_RhiDevice->CreateTexture(desc);
   }
