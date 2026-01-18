@@ -41,6 +41,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stack>
 #include <stdexcept>

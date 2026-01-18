@@ -78,7 +78,13 @@ D3D12_RESOURCE_DESC Texture::D3D12ResourceDesc(TextureDesc& desc)
   return D3D12_RESOURCE_DESC{};
 }
 
-Texture::Texture(Device* device, TextureDesc& desc) : m_Device(device), m_Desc(desc) {}
+Texture::Texture(Device* device, TextureDesc& desc) : m_Device(device), m_Desc(desc)
+{
+  m_CurrentStageAccessLayout.stage = D3D12_BARRIER_SYNC_NONE;
+  m_CurrentStageAccessLayout.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
+  // TODO: sync/reuse somehow with CreateTexture#initialLayout
+  m_CurrentStageAccessLayout.layout = D3D12_BARRIER_LAYOUT_COMMON;
+}
 
 Texture::~Texture()
 {
@@ -173,9 +179,28 @@ void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresour
   m_Resource->Unmap(0, nullptr);
 }
 
-D3D12_RESOURCE_BARRIER Texture::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
+std::optional<D3D12_TEXTURE_BARRIER> Texture::Transition(StageAccessLayout to)
 {
-  return CD3DX12_RESOURCE_BARRIER::Transition(m_Resource.Get(), stateBefore, stateAfter);
+  // mutex?
+  bool accessLayoutChanged = m_CurrentStageAccessLayout.access != to.access || m_CurrentStageAccessLayout.layout != to.layout;
+  bool storageBarrier = m_CurrentStageAccessLayout.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+
+  if (!accessLayoutChanged && !storageBarrier)
+    return std::nullopt;
+
+  auto barrier = CD3DX12_TEXTURE_BARRIER(m_CurrentStageAccessLayout.stage,
+                                         to.stage,
+                                         m_CurrentStageAccessLayout.access,
+                                         to.access,
+                                         m_CurrentStageAccessLayout.layout,
+                                         to.layout,
+                                         Resource(),
+                                         CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // TODO
+                                         D3D12_TEXTURE_BARRIER_FLAG_NONE);
+  // TODO: should probably update AFTER cmdList->Barrier has been called with the above barrier...
+  // leave that responsability to the future command list class ?
+  m_CurrentStageAccessLayout = to;
+  return barrier;
 }
 
 D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) const

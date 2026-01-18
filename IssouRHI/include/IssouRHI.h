@@ -11,6 +11,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -83,6 +84,19 @@ private:
   std::deque<UINT> m_FreeIndices;
 
   // TODO: mutex
+};
+
+struct StageAccessLayout {
+  // TODO: implement our own enums...
+  D3D12_BARRIER_SYNC stage;
+  D3D12_BARRIER_ACCESS access;
+  D3D12_BARRIER_LAYOUT layout;
+};
+
+struct StageAccess {
+  // TODO: implement our own enums...
+  D3D12_BARRIER_SYNC stage;
+  D3D12_BARRIER_ACCESS access;
 };
 
 enum class TextureDimension : uint32_t {
@@ -252,8 +266,8 @@ public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
-  // TODO: abstraction over this (automatic barrier placement) + handle from passes + use enhanced barriers
-  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
+  // TODO: implement our own struct...
+  std::optional<D3D12_TEXTURE_BARRIER> Transition(StageAccessLayout to);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(TextureViewDesc& desc) const;
   D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
@@ -271,6 +285,8 @@ private:
 private:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
+
+  StageAccessLayout m_CurrentStageAccessLayout;
 };
 
 class TextureView {

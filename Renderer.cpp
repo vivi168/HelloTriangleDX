@@ -1055,6 +1055,31 @@ static void Update(FrameContext* ctx, float time, float dt)
   }
 }
 
+// TODO: move this to the RHI
+struct TextureTransition {
+  IssouRHI::Texture* texture;
+  IssouRHI::StageAccessLayout transition;
+};
+
+// TODO: these should be part of the command buffer class
+// when recording commands, we can deduce required StageAccessLayout
+// from binding (eg resource->CreateView()->Uav() and from the command type ?
+static std::array<D3D12_TEXTURE_BARRIER, 32> g_TextureBarriers{};
+
+static size_t BuildBarriers(std::span<TextureTransition> transitions, std::span<D3D12_TEXTURE_BARRIER> barriers)
+{
+  size_t nb = 0;
+
+  for (auto &transition : transitions) {
+    auto barrier = transition.texture->Transition(transition.transition);
+    if (barrier) {
+      barriers[nb++] = barrier.value();
+    }
+  }
+
+  return nb;
+}
+
 void Render(float time, float dt)
 {
   static UINT64 g_FrameIndex = 0;
@@ -1082,29 +1107,17 @@ void Render(float time, float dt)
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
 
   {
-    D3D12_TEXTURE_BARRIER BeginFrameBarriers[] = {
-        // A D3D12_BARRIER_SYNC_NONE SyncBefore value implies that the corresponding subresources are not accessed before the barrier in the same ExecuteCommandLists scope
-        // If a barrier SyncBefore is D3D12_BARRIER_SYNC_NONE, then AccessBefore MUST be D3D12_BARRIER_ACCESS_NO_ACCESS. In this case, there MUST have been no preceding barriers or accesses made to that resource in the same ExecuteCommandLists scope.
-        CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_NONE,             // SyncBefore
-                                D3D12_BARRIER_SYNC_RENDER_TARGET,    // SyncAfter
-                                D3D12_BARRIER_ACCESS_NO_ACCESS,      // AccessBefore
-                                D3D12_BARRIER_ACCESS_RENDER_TARGET,  // AccessAfter
-                                D3D12_BARRIER_LAYOUT_PRESENT,        // LayoutBefore
-                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,  // LayoutAfter
-                                renderTarget->Resource(),
-                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
-                                D3D12_TEXTURE_BARRIER_FLAG_NONE),
-        CD3DX12_TEXTURE_BARRIER(g_FrameIndex == 0 ? D3D12_BARRIER_SYNC_NONE : D3D12_BARRIER_SYNC_COMPUTE_SHADING,           // SyncBefore
-                                D3D12_BARRIER_SYNC_RENDER_TARGET,                                                           // SyncAfter
-                                g_FrameIndex == 0 ? D3D12_BARRIER_ACCESS_NO_ACCESS : D3D12_BARRIER_ACCESS_SHADER_RESOURCE,  // AccessBefore
-                                D3D12_BARRIER_ACCESS_RENDER_TARGET,                                                         // AccessAfter
-                                g_FrameIndex == 0 ? D3D12_BARRIER_LAYOUT_COMMON : D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,     // LayoutBefore
-                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,                                                         // LayoutAfter
-                                g_VisibilityBuffer->Resource(),
-                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
-                                D3D12_TEXTURE_BARRIER_FLAG_NONE)};
-    D3D12_BARRIER_GROUP BeginFrameBarriersGroups[] = {CD3DX12_BARRIER_GROUP(_countof(BeginFrameBarriers), BeginFrameBarriers)};
-    g_CommandList->Barrier(_countof(BeginFrameBarriersGroups), BeginFrameBarriersGroups);
+    std::array transitions{
+        TextureTransition{renderTarget.get(), {D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_LAYOUT_RENDER_TARGET}},
+        TextureTransition{g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_LAYOUT_RENDER_TARGET}},
+    };
+
+    auto nb = BuildBarriers(transitions, g_TextureBarriers);
+
+    if (nb > 0) {
+      D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
+      g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+    }
   }
 
   // here we again get the handle to our current render target view so we can
@@ -1219,25 +1232,20 @@ void Render(float time, float dt)
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     {
-      D3D12_TEXTURE_BARRIER after[] = {
-          CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_RENDER_TARGET,
-                                  D3D12_BARRIER_SYNC_COMPUTE_SHADING,
-                                  D3D12_BARRIER_ACCESS_RENDER_TARGET,
-                                  D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
-                                  D3D12_BARRIER_LAYOUT_RENDER_TARGET,
-                                  D3D12_BARRIER_LAYOUT_SHADER_RESOURCE,
-                                  g_VisibilityBuffer->Resource(),
-                                  CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),
-                                  D3D12_TEXTURE_BARRIER_FLAG_NONE)};
-      D3D12_BARRIER_GROUP afterGroup[] = {CD3DX12_BARRIER_GROUP(_countof(after), after)};
-      g_CommandList->Barrier(_countof(afterGroup), afterGroup);
-    }
-    std::array<D3D12_RESOURCE_BARRIER, 3> before;
-    before[0] = g_GBuffer.worldPosition->Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    before[1] = g_GBuffer.worldNormal->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    before[2] = g_GBuffer.baseColor->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_CommandList->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
+      std::array transitions{
+          TextureTransition{g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+          TextureTransition{g_GBuffer.worldPosition.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}},
+          TextureTransition{g_GBuffer.worldNormal.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}},
+          TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}},
+      };
 
+      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+
+      if (nb > 0) {
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->SrvDescriptorAlloc().index);
@@ -1249,20 +1257,25 @@ void Render(float time, float dt)
 
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
 
-    std::array<D3D12_RESOURCE_BARRIER, 3> after;
-    after[0] = g_GBuffer.worldPosition->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    after[1] = g_GBuffer.worldNormal->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    after[2] = g_GBuffer.baseColor->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
-
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
   }
 
   // Ray trace shadows
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
-    auto before = g_ShadowBuffer->Transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_CommandList->ResourceBarrier(1, &before);
+    {
+      std::array transitions{
+          TextureTransition{g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_RAYTRACING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}},
+          TextureTransition{g_GBuffer.worldPosition.get(), {D3D12_BARRIER_SYNC_RAYTRACING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+      };
+
+      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+
+      if (nb > 0) {
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
 
     g_CommandList->SetPipelineState1(g_DxrStateObject.Get());
 
@@ -1291,14 +1304,24 @@ void Render(float time, float dt)
 
       g_CommandList->DispatchRays(&dispatchDesc);
     }
-
-    auto after = g_ShadowBuffer->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(1, &after);
   }
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
 
   // Record Full screen triangle pass - Compose final image commands
   {
+    {
+      std::array transitions{
+          TextureTransition{g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+          TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+      };
+
+      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+
+      if (nb > 0) {
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
     auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
@@ -1321,20 +1344,16 @@ void Render(float time, float dt)
   ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
 
   {
-    D3D12_TEXTURE_BARRIER EndFrameBarriers[] = {
-        // A D3D12_BARRIER_SYNC_NONE SyncAfter value implies that the corresponding subresources are not accessed after the barrier in the same ExecuteCommandLists scope.
-        // If a barrier SyncAfter is D3D12_BARRIER_SYNC_NONE, then AccessAfter MUST be D3D12_BARRIER_ACCESS_NO_ACCESS. Afterward, there MUST be no subsequent barriers or accesses made to the associated resource in the same ExecuteCommandLists scope.
-        CD3DX12_TEXTURE_BARRIER(D3D12_BARRIER_SYNC_RENDER_TARGET,    // SyncBefore
-                                D3D12_BARRIER_SYNC_NONE,             // SyncAfter
-                                D3D12_BARRIER_ACCESS_RENDER_TARGET,  // AccessBefore
-                                D3D12_BARRIER_ACCESS_NO_ACCESS,      // AccessAfter
-                                D3D12_BARRIER_LAYOUT_RENDER_TARGET,  // LayoutBefore
-                                D3D12_BARRIER_LAYOUT_PRESENT,        // LayoutAfter
-                                renderTarget->Resource(),
-                                CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // All subresources
-                                D3D12_TEXTURE_BARRIER_FLAG_NONE)};
-    D3D12_BARRIER_GROUP EndFrameBarrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(EndFrameBarriers), EndFrameBarriers)};
-    g_CommandList->Barrier(_countof(EndFrameBarrierGroups), EndFrameBarrierGroups);
+    std::array transitions{
+        TextureTransition{renderTarget.get(), {D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_LAYOUT_PRESENT}},
+    };
+
+    auto nb = BuildBarriers(transitions, g_TextureBarriers);
+
+    if (nb > 0) {
+      D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
+      g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+    }
   }
 
   std::array<D3D12_RESOURCE_BARRIER, 1> postRenderBarriers;
@@ -1875,7 +1894,8 @@ static void InitFrameResources()
       .mipLevelCount = 1,
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGBA32Float,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+      .enhanced = true
     };
     g_GBuffer.worldPosition = g_RhiDevice->CreateTexture(desc);
   }
@@ -1886,7 +1906,8 @@ static void InitFrameResources()
       .mipLevelCount = 1,
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGB10A2Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+      .enhanced = true
     };
     g_GBuffer.worldNormal = g_RhiDevice->CreateTexture(desc);
   }
@@ -1897,7 +1918,8 @@ static void InitFrameResources()
       .mipLevelCount = 1,
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGBA8Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+      .enhanced = true
     };
     g_GBuffer.baseColor = g_RhiDevice->CreateTexture(desc);
   }
@@ -1909,7 +1931,8 @@ static void InitFrameResources()
       .mipLevelCount = 1,
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::R8Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding
+      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+      .enhanced = true,
     };
     g_ShadowBuffer = g_RhiDevice->CreateTexture(desc);
   }
