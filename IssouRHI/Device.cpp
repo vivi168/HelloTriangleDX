@@ -323,39 +323,28 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
     allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
   }
 
-  D3D12_RESOURCE_DESC textureDesc = Texture::D3D12ResourceDesc(desc);
-  D3D12_RESOURCE_DESC1 textureDesc1 = CD3DX12_RESOURCE_DESC1(textureDesc);
+  D3D12_RESOURCE_DESC1 textureDesc = Texture::D3D12ResourceDesc(desc);
 
   D3D12_CLEAR_VALUE zero{};
   zero.Format = textureDesc.Format;
+
   D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr;
   if (textureDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
     pOptimizedClearValue = &zero;
   }
-  D3D12_RESOURCE_STATES InitialResourceState = D3D12_RESOURCE_STATE_COMMON;
+
   D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_COMMON;
   if (textureDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) {
     zero.DepthStencil.Depth = 1.0f;
     zero.DepthStencil.Stencil = 0;
-    InitialResourceState |= D3D12_RESOURCE_STATE_DEPTH_WRITE;
     initialLayout = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
   }
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
-  if (desc.enhanced)
-    CHECK_HR(m_Allocator->CreateResource3(
-        &allocDesc,
-        &textureDesc1,
-        initialLayout,
-        pOptimizedClearValue,
-        0,
-        nullptr,
-        &allocation,
-        IID_PPV_ARGS(&resource)));
-  else
-    CHECK_HR(m_Allocator->CreateResource(&allocDesc, &textureDesc, InitialResourceState, pOptimizedClearValue, &allocation,
-                                         IID_PPV_ARGS(&resource)));
+  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &textureDesc, initialLayout, pOptimizedClearValue, 0, nullptr,
+                                        &allocation, IID_PPV_ARGS(&resource)));
+
   resource->SetName(StringToWstring(desc.label).c_str());
 
   tex->Attach(resource, allocation);

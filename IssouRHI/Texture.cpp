@@ -46,18 +46,18 @@ static uint32_t PlaneSlice(TextureAspect aspect)
   }
 }
 
-D3D12_RESOURCE_DESC Texture::D3D12ResourceDesc(TextureDesc& desc)
+D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(TextureDesc& desc)
 {
   switch (desc.dimension) {
     case TextureDimension::Texture1D:
-      return CD3DX12_RESOURCE_DESC::Tex1D(
+      return CD3DX12_RESOURCE_DESC1::Tex1D(
         DXGIFormat(desc.format),
         static_cast<UINT64>(desc.size.width),
         static_cast<UINT16>(desc.size.height),
         static_cast<UINT16>(desc.mipLevelCount),
         D3D12ResourceFlags(desc.usage, desc.format));
     case TextureDimension::Texture2D:
-      return CD3DX12_RESOURCE_DESC::Tex2D(
+      return CD3DX12_RESOURCE_DESC1::Tex2D(
         DXGIFormat(desc.format),
         static_cast<UINT64>(desc.size.width),
         static_cast<UINT16>(desc.size.height),
@@ -67,7 +67,7 @@ D3D12_RESOURCE_DESC Texture::D3D12ResourceDesc(TextureDesc& desc)
         0,
         D3D12ResourceFlags(desc.usage, desc.format));
     case TextureDimension::Texture3D:
-      return CD3DX12_RESOURCE_DESC::Tex3D(
+      return CD3DX12_RESOURCE_DESC1::Tex3D(
         DXGIFormat(desc.format),
         static_cast<UINT64>(desc.size.width),
         static_cast<UINT16>(desc.size.height),
@@ -75,7 +75,7 @@ D3D12_RESOURCE_DESC Texture::D3D12ResourceDesc(TextureDesc& desc)
         static_cast<UINT16>(desc.mipLevelCount),
         D3D12ResourceFlags(desc.usage, desc.format));
   }
-  return D3D12_RESOURCE_DESC{};
+  return D3D12_RESOURCE_DESC1{};
 }
 
 Texture::Texture(Device* device, TextureDesc& desc) : m_Device(device), m_Desc(desc)

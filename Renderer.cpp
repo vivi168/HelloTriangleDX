@@ -1881,7 +1881,6 @@ static void InitFrameResources()
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::R32Uint,
       .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding,
-      .enhanced = true,
     };
     g_VisibilityBuffer = g_RhiDevice->CreateTexture(desc);
   }
@@ -1895,7 +1894,6 @@ static void InitFrameResources()
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGBA32Float,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
-      .enhanced = true
     };
     g_GBuffer.worldPosition = g_RhiDevice->CreateTexture(desc);
   }
@@ -1907,7 +1905,6 @@ static void InitFrameResources()
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGB10A2Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
-      .enhanced = true
     };
     g_GBuffer.worldNormal = g_RhiDevice->CreateTexture(desc);
   }
@@ -1919,7 +1916,6 @@ static void InitFrameResources()
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::RGBA8Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
-      .enhanced = true
     };
     g_GBuffer.baseColor = g_RhiDevice->CreateTexture(desc);
   }
@@ -1932,7 +1928,6 @@ static void InitFrameResources()
       .dimension = IssouRHI::TextureDimension::Texture2D,
       .format = IssouRHI::TextureFormat::R8Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
-      .enhanced = true,
     };
     g_ShadowBuffer = g_RhiDevice->CreateTexture(desc);
   }
@@ -2122,7 +2117,7 @@ static UINT CreateTexture(std::filesystem::path filename)
       .mipLevelCount = static_cast<uint32_t>(metadata.mipLevels),
       .dimension = texDimension(),
       .format = texFormat(),
-      .usage = IssouRHI::TextureUsage::CopyDst | IssouRHI::TextureUsage::TextureBinding
+      .usage = IssouRHI::TextureUsage::CopyDst | IssouRHI::TextureUsage::TextureBinding,
   };
   auto tex = g_RhiDevice->CreateTexture(textureDesc);
 

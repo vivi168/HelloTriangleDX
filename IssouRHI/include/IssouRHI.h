@@ -188,7 +188,6 @@ struct TextureDesc {
   TextureDimension dimension = TextureDimension::Texture2D;
   TextureFormat format;
   TextureUsage usage;
-  bool enhanced = false; // TMP to introduce enhanced barrier progressively
 };
 
 inline void HashCombine(size_t& seed, const size_t value)
@@ -250,7 +249,7 @@ class TextureView;
 
 class Texture {
 public:
-  static D3D12_RESOURCE_DESC D3D12ResourceDesc(TextureDesc& desc);
+  static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(TextureDesc& desc);
 
   Texture(Device* device, TextureDesc& desc);
   ~Texture();
@@ -300,7 +299,7 @@ public: // D3D12 impl specific
   DescriptorAllocation DsvDescriptorAlloc() const { return m_Dsv; }
 
 private:
-  Texture* m_Texture;
+  Texture* m_Texture; // should it be owning? weak ref?
   TextureViewDesc m_Desc;
   DescriptorAllocation m_Srv;
   DescriptorAllocation m_Uav;
