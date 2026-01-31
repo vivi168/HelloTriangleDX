@@ -314,8 +314,6 @@ static std::wstring StringToWstring(std::string_view s)
 
 std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 {
-  auto tex = std::make_shared<Texture>(this, desc);
-
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
   if (desc.usage & TextureUsage::CopyDst) {
     allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
@@ -347,7 +345,9 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
 
   resource->SetName(StringToWstring(desc.label).c_str());
 
+  auto tex = std::make_shared<Texture>(this, desc);
   tex->Attach(resource, allocation);
+
   return tex;
 }
 
@@ -364,44 +364,23 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
     allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
   }
 
-  D3D12_RESOURCE_STATES initialResourceState = D3D12_RESOURCE_STATE_COMMON;
-  if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
-    initialResourceState |= D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
-  } else {
-    switch (allocDesc.HeapType) {
-      case D3D12_HEAP_TYPE_READBACK:
-        initialResourceState |= D3D12_RESOURCE_STATE_COPY_DEST;
-        break;
-      // if we ever support D3D12_HEAP_TYPE_UPLOAD -> D3D12_RESOURCE_STATE_GENERIC_READ + fixedResourceState = true
-      default:
-        break;
-    }
-  }
-
-  auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(desc.size);
+  auto bufferDesc = CD3DX12_RESOURCE_DESC1::Buffer(desc.size);
   if (desc.usage & BufferUsage::Storage) {
     bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
   }
   if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
     bufferDesc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
   }
-  auto bufferDesc1 = CD3DX12_RESOURCE_DESC1(bufferDesc);
-
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
-  // TODO CreateResource3
-  if (desc.enhanced)
-    CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
-                                          &allocation, IID_PPV_ARGS(&resource)));
-  else
-    CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
-                                        IID_PPV_ARGS(&resource)));
+  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
+                                        &allocation, IID_PPV_ARGS(&resource)));
   resource->SetName(StringToWstring(desc.label).c_str());
 
   auto buf = std::make_shared<Buffer>(this, desc);
-
   buf->Attach(resource, allocation);
+
   return buf;
 }
 

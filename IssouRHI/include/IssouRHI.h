@@ -335,7 +335,6 @@ struct BufferDesc {
   std::string label;
   uint64_t size;
   BufferUsage usage;
-  bool enhanced = false;
 };
 
 class Buffer {
@@ -353,7 +352,6 @@ public: // D3D12 impl specific
 
   // TODO: implement our own struct...
   std::optional<CD3DX12_BUFFER_BARRIER> Transition(StageAccess to);
-  D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 

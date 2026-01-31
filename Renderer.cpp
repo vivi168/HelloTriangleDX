@@ -89,7 +89,6 @@ struct AccelerationStructure {
       .label = "Acceleration structure Scratch Resource",
       .size = scratchSize,
       .usage = IssouRHI::BufferUsage::Storage,
-      .enhanced = true,
     };
     scratch = device->CreateBuffer(scratchDesc);
 
@@ -97,7 +96,6 @@ struct AccelerationStructure {
       .label = "Acceleration structure Result Resource",
       .size = resultDataSize,
       .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
-      .enhanced = true,
     };
     resultData = device->CreateBuffer(resultDesc);
   }
@@ -429,7 +427,6 @@ struct MeshStore {
         .label = "Positions Store",
         .size = numVertices * sizeof(XMFLOAT3),
         .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
-        .enhanced = true,
       };
       m_VertexPositions = device->CreateBuffer(desc);
     }
@@ -1881,7 +1878,6 @@ static void InitFrameResources()
       .label = "Draw Meshlets command buffer",
       .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
       .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
-      .enhanced = true,
     };
     g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
   }

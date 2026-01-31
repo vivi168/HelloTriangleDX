@@ -120,11 +120,6 @@ std::optional<CD3DX12_BUFFER_BARRIER> Buffer::Transition(StageAccess to)
   return barrier;
 }
 
-D3D12_RESOURCE_BARRIER Buffer::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
-{
-  return CD3DX12_RESOURCE_BARRIER::Transition(Resource(), stateBefore, stateAfter);
-}
-
 static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(BufferRange& range, UINT byteStride)
 {
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
