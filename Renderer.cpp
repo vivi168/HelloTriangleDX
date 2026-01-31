@@ -89,6 +89,7 @@ struct AccelerationStructure {
       .label = "Acceleration structure Scratch Resource",
       .size = scratchSize,
       .usage = IssouRHI::BufferUsage::Storage,
+      .enhanced = true,
     };
     scratch = device->CreateBuffer(scratchDesc);
 
@@ -96,6 +97,7 @@ struct AccelerationStructure {
       .label = "Acceleration structure Result Resource",
       .size = resultDataSize,
       .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
+      .enhanced = true,
     };
     resultData = device->CreateBuffer(resultDesc);
   }
@@ -427,6 +429,7 @@ struct MeshStore {
         .label = "Positions Store",
         .size = numVertices * sizeof(XMFLOAT3),
         .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+        .enhanced = true,
       };
       m_VertexPositions = device->CreateBuffer(desc);
     }
@@ -1057,21 +1060,28 @@ static void Update(FrameContext* ctx, float time, float dt)
 
 // TODO: move this to the RHI
 struct TextureTransition {
-  IssouRHI::Texture* texture;
+  IssouRHI::Texture* resource;
   IssouRHI::StageAccessLayout transition;
+};
+
+struct BufferTransition {
+  IssouRHI::Buffer* resource;
+  IssouRHI::StageAccess transition;
 };
 
 // TODO: these should be part of the command buffer class
 // when recording commands, we can deduce required StageAccessLayout
 // from binding (eg resource->CreateView()->Uav() and from the command type ?
 static std::array<D3D12_TEXTURE_BARRIER, 32> g_TextureBarriers{};
+static std::array<D3D12_BUFFER_BARRIER, 32> g_BufferBarriers{};
 
-static size_t BuildBarriers(std::span<TextureTransition> transitions, std::span<D3D12_TEXTURE_BARRIER> barriers)
+template <typename TransitionT, typename BarrierT>
+static size_t BuildBarriers(std::span<TransitionT> transitions, std::span<BarrierT> barriers)
 {
   size_t nb = 0;
 
   for (auto &transition : transitions) {
-    auto barrier = transition.texture->Transition(transition.transition);
+    auto barrier = transition.resource->Transition(transition.transition);
     if (barrier) {
       barriers[nb++] = barrier.value();
     }
@@ -1082,8 +1092,6 @@ static size_t BuildBarriers(std::span<TextureTransition> transitions, std::span<
 
 void Render(float time, float dt)
 {
-  static UINT64 g_FrameIndex = 0;
-
   auto renderTarget = g_Surface->GetCurrentTexture();
   auto renderTargetView = renderTarget->CreateView();
   auto ctx = &g_FrameContext[g_Surface->CurrentFrameIndex()];
@@ -1112,7 +1120,7 @@ void Render(float time, float dt)
         TextureTransition{g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_LAYOUT_RENDER_TARGET}},
     };
 
-    auto nb = BuildBarriers(transitions, g_TextureBarriers);
+    auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
 
     if (nb > 0) {
       D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
@@ -1149,14 +1157,19 @@ void Render(float time, float dt)
   // TODO: we should also update culling data. And move to Indirect?
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
   if (g_Scene.skinnedMeshInstances.size() > 0) {
+    {
+      auto b = g_MeshStore.m_VertexPositions->Transition({D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS});
+      if (b) {
+        D3D12_BUFFER_BARRIER barriers[] = { b.value() };
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
     g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
     g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
                                                 SizeOfInUint(SkinningBuffersDescriptorIndices),
                                                 &ctx->skinningBuffersDescriptorsIndices, 0);
-    auto b0 = g_MeshStore.m_VertexPositions->Transition(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                                                       D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_CommandList->ResourceBarrier(1, &b0);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
@@ -1165,10 +1178,6 @@ void Render(float time, float dt)
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
-
-    auto b1 = g_MeshStore.m_VertexPositions->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    g_CommandList->ResourceBarrier(1, &b1);
   }
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
@@ -1189,17 +1198,28 @@ void Render(float time, float dt)
 
     g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.numMeshInstances, 0);
 
+    {
+      auto b = g_DrawMeshCommands->Transition({D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST});
+      if (b) {
+        D3D12_BUFFER_BARRIER barriers[] = { b.value() };
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
+
     g_CommandList->CopyBufferRegion(g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
                                     g_UAVCounterReset->Resource(), 0, sizeof(UINT));
 
-    auto before = g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    g_CommandList->ResourceBarrier(1, &before);
+    {
+      auto b = g_DrawMeshCommands->Transition({D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS});
+      if (b) {
+        D3D12_BUFFER_BARRIER barriers[] = { b.value() };
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
 
     g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
-
-    auto after =
-        g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-    g_CommandList->ResourceBarrier(1, &after);
 
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
   }
@@ -1207,8 +1227,22 @@ void Render(float time, float dt)
   // Record drawing commands
   {
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
+    {
+      std::array transitions{
+        BufferTransition{g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}},
+        BufferTransition{g_DrawMeshCommands.get(), {D3D12_BARRIER_SYNC_EXECUTE_INDIRECT, D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT}},
+      };
+
+      auto nb = BuildBarriers<BufferTransition, D3D12_BUFFER_BARRIER>(transitions, g_BufferBarriers);
+
+      if (nb > 0) {
+        D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_BufferBarriers.data())};
+        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      }
+    }
 
     auto rtvHandle = g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle;
+    // TODO: RenderPass Begin/End
     g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
@@ -1239,7 +1273,7 @@ void Render(float time, float dt)
           TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}},
       };
 
-      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+      auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
@@ -1269,7 +1303,7 @@ void Render(float time, float dt)
           TextureTransition{g_GBuffer.worldPosition.get(), {D3D12_BARRIER_SYNC_RAYTRACING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
       };
 
-      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+      auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
@@ -1315,7 +1349,7 @@ void Render(float time, float dt)
           TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
       };
 
-      auto nb = BuildBarriers(transitions, g_TextureBarriers);
+      auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
@@ -1348,19 +1382,13 @@ void Render(float time, float dt)
         TextureTransition{renderTarget.get(), {D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_LAYOUT_PRESENT}},
     };
 
-    auto nb = BuildBarriers(transitions, g_TextureBarriers);
+    auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
 
     if (nb > 0) {
       D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
       g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
     }
   }
-
-  std::array<D3D12_RESOURCE_BARRIER, 1> postRenderBarriers;
-  // postRenderBarriers[0] = renderTarget->Transition(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-  postRenderBarriers[0] = g_DrawMeshCommands->Transition(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST);
-
-  g_CommandList->ResourceBarrier(static_cast<UINT>(postRenderBarriers.size()), postRenderBarriers.data());
 
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
 
@@ -1376,8 +1404,6 @@ void Render(float time, float dt)
   g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
 
   g_Surface->Present();
-
-  g_FrameIndex++;
 }
 
 void Cleanup()
@@ -1855,6 +1881,7 @@ static void InitFrameResources()
       .label = "Draw Meshlets command buffer",
       .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
       .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
+      .enhanced = true,
     };
     g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
   }

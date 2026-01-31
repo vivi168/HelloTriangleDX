@@ -3,7 +3,11 @@
 
 namespace IssouRHI
 {
-Buffer::Buffer(Device* device, BufferDesc& desc) : m_Device(device), m_Desc(desc) {}
+Buffer::Buffer(Device* device, BufferDesc& desc) : m_Device(device), m_Desc(desc)
+{
+  m_CurrentStageAccess.stage = D3D12_BARRIER_SYNC_NONE;
+  m_CurrentStageAccess.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
+}
 
 Buffer::~Buffer()
 {
@@ -27,12 +31,6 @@ void Buffer::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
 {
   m_Resource.Attach(other);
   m_Allocation = allocation;
-}
-
-void Buffer::InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState)
-{
-  m_CurrentState = initialResourceState;
-  m_FixedResourceState = fixedResourceState;
 }
 
 BufferRange Buffer::ClampBufferRange(BufferRange range)
@@ -100,6 +98,26 @@ void Buffer::Unmap()
   if (m_Address == nullptr) return;
 
   m_Resource->Unmap(0, nullptr);
+}
+
+std::optional<CD3DX12_BUFFER_BARRIER> Buffer::Transition(StageAccess to)
+{
+  // mutex?
+  bool accessChanged = m_CurrentStageAccess.access != to.access;
+  bool storageBarrier = m_CurrentStageAccess.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+
+  if (!accessChanged && !storageBarrier)
+    return std::nullopt;
+
+  auto barrier = CD3DX12_BUFFER_BARRIER(m_CurrentStageAccess.stage,
+                                        to.stage,
+                                        m_CurrentStageAccess.access,
+                                        to.access,
+                                        Resource());
+  // TODO: should probably update AFTER cmdList->Barrier has been called with the above barrier...
+  // leave that responsability to the future command list class ?
+  m_CurrentStageAccess = to;
+  return barrier;
 }
 
 D3D12_RESOURCE_BARRIER Buffer::Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)

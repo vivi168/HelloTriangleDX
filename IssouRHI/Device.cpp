@@ -364,16 +364,13 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
     allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
   }
 
-  // TODO: D3D12_BARRIER_LAYOUT initialLayout instead (enhanced barrier)
   D3D12_RESOURCE_STATES initialResourceState = D3D12_RESOURCE_STATE_COMMON;
-  bool fixedResourceState = false;
   if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
     initialResourceState |= D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
   } else {
     switch (allocDesc.HeapType) {
       case D3D12_HEAP_TYPE_READBACK:
         initialResourceState |= D3D12_RESOURCE_STATE_COPY_DEST;
-        fixedResourceState = true;
         break;
       // if we ever support D3D12_HEAP_TYPE_UPLOAD -> D3D12_RESOURCE_STATE_GENERIC_READ + fixedResourceState = true
       default:
@@ -385,18 +382,26 @@ std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
   if (desc.usage & BufferUsage::Storage) {
     bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
   }
+  if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
+    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
+  }
+  auto bufferDesc1 = CD3DX12_RESOURCE_DESC1(bufferDesc);
+
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
   // TODO CreateResource3
-  CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
-                                       IID_PPV_ARGS(&resource)));
+  if (desc.enhanced)
+    CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
+                                          &allocation, IID_PPV_ARGS(&resource)));
+  else
+    CHECK_HR(m_Allocator->CreateResource(&allocDesc, &bufferDesc, initialResourceState, nullptr, &allocation,
+                                        IID_PPV_ARGS(&resource)));
   resource->SetName(StringToWstring(desc.label).c_str());
 
   auto buf = std::make_shared<Buffer>(this, desc);
 
   buf->Attach(resource, allocation);
-  buf->InitState(initialResourceState, fixedResourceState);
   return buf;
 }
 
@@ -412,7 +417,7 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDe
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
 
-  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
+  auto computePipeline = std::make_shared<ComputePipeline>(this);
 
   computePipeline->Attach(pipelineStateObject);
   return computePipeline;

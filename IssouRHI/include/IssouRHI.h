@@ -335,6 +335,7 @@ struct BufferDesc {
   std::string label;
   uint64_t size;
   BufferUsage usage;
+  bool enhanced = false;
 };
 
 class Buffer {
@@ -345,13 +346,13 @@ public:
   uint64_t Size() const { return m_Desc.size; }
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
-  // TODO: use enhanced barriers
-  void InitState(D3D12_RESOURCE_STATES initialResourceState, bool fixedResourceState);
 
   void Write(BufferRange range, const void* data);
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);
 
+  // TODO: implement our own struct...
+  std::optional<CD3DX12_BUFFER_BARRIER> Transition(StageAccess to);
   D3D12_RESOURCE_BARRIER Transition(D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
@@ -366,7 +367,6 @@ private:
   BufferDesc m_Desc;
 
   BufferRange ClampBufferRange(BufferRange range);
-
 private: // D3D12 impl specific
   void Map();
   void Unmap();
@@ -406,9 +406,7 @@ private: // D3D12 impl specific
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 
-  // TODO: use enhanced barriers
-  D3D12_RESOURCE_STATES m_CurrentState = D3D12_RESOURCE_STATE_COMMON;
-  bool m_FixedResourceState = false;
+  StageAccess m_CurrentStageAccess;
 };
 
 enum class ShaderStage : uint32_t {
@@ -474,11 +472,10 @@ struct ComputePipelineDesc {
 class ComputePipeline : public PipelineBase
 {
 public:
-  ComputePipeline(Device* device, ComputePipelineDesc& desc);
+  ComputePipeline(Device* device);
   ~ComputePipeline();
 private:
   Device* m_Device;
-  ComputePipelineDesc m_Desc;
 };
 
 class Device
