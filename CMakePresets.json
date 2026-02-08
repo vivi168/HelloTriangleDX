@@ -70,9 +70,9 @@
       }
     },
     {
-      "name": "Visual Studio",
+      "name": "Visual-Studio",
       "displayName": "Visual Studio",
-      "generator": "Visual Studio 17 2022",
+      "generator": "Visual Studio 18 2026",
       "binaryDir": "${sourceDir}/build",
       "architecture": "x64",
       "cacheVariables": {

@@ -7,10 +7,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
-if(IS_MULTI_CONFIG)
-    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "")
-endif()
-
 if(MSVC)
     add_compile_options(/W4 /permissive-)
 
@@ -35,9 +31,6 @@ set(IMGUI_SOURCES
 set(D3D12MA_SOURCES
     third_party/D3D12MemoryAllocator/src/D3D12MemAlloc.cpp)
 
-set(THIRD_PARTY_SOURCES ${IMGUI_SOURCES} ${D3D12MA_SOURCES})
-
-# TODO: move to standalone library later
 set(ISSOURHI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/IssouRHI)
 set(ISSOURHI_SOURCES
     ${ISSOURHI_DIR}/Buffer.cpp
@@ -50,6 +43,25 @@ set(ISSOURHI_SOURCES
 set(ISSOURHI_HEADERS
     ${ISSOURHI_DIR}/include/IssouRHI.h)
 
+add_library(IssouRHI
+    ${ISSOURHI_SOURCES}
+    ${ISSOURHI_HEADERS}
+    ${D3D12MA_SOURCES})
+
+target_include_directories(IssouRHI
+    PUBLIC
+    ${ISSOURHI_DIR}/include
+    # PRIVATE # TODO: make these private when we remove these include from IssouRHI.h
+    third_party/DirectX-Headers/include/directx
+    third_party/D3D12MemoryAllocator/include)
+
+target_link_libraries(IssouRHI PRIVATE
+    d3d12.lib
+    dxgi.lib
+    shlwapi.lib)
+
+target_compile_definitions(IssouRHI PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+
 set(SHADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(HLSL_SOURCES
     ${SHADERS_DIR}/FillGBuffer.cs.hlsl
@@ -61,10 +73,10 @@ set(HLSL_SOURCES
     ${SHADERS_DIR}/Meshlet.ps.hlsl
     ${SHADERS_DIR}/Skinning.cs.hlsl
     ${SHADERS_DIR}/RayTracing.rt.hlsl)
-
+set(SHARED_HEADERS
+    ${SHADERS_DIR}/Shared.h)
 set(HLSL_HEADERS
     ${SHADERS_DIR}/MeshletCommon.hlsli
-    ${SHADERS_DIR}/Shared.h
     ${SHADERS_DIR}/VisibilityBufferCommon.hlsli)
 
 set(SOURCES
@@ -75,10 +87,7 @@ set(SOURCES
     Main.cpp
     Mesh.cpp
     Renderer.cpp
-    Win32Application.cpp
-    ${ISSOURHI_SOURCES}
-    ${THIRD_PARTY_SOURCES})
-
+    Win32Application.cpp)
 set(HEADERS
     Camera.h
     Collider.h
@@ -87,20 +96,21 @@ set(HEADERS
     Mesh.h
     Renderer.h
     RendererHelper.h
-    Win32Application.h
-    ${ISSOURHI_HEADERS}
-    ${SHADERS_DIR}/Shared.h)
-
+    Win32Application.h)
 set(STDAFX_HEADER stdafx.h)
 
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${STDAFX_HEADER})
+add_executable(HelloTriangleDX
+  ${SOURCES}
+  ${HEADERS}
+  ${SHARED_HEADERS}
+  ${IMGUI_SOURCES}
+  ${STDAFX_HEADER})
 
-target_precompile_headers(${PROJECT_NAME} PRIVATE ${STDAFX_HEADER})
-set_source_files_properties(${THIRD_PARTY_SOURCES} ${ISSOURHI_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+target_precompile_headers(HelloTriangleDX PRIVATE ${STDAFX_HEADER})
+set_source_files_properties(${IMGUI_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_include_directories(HelloTriangleDX PRIVATE
     ${ISSOURHI_DIR}/include
-    third_party/D3D12MemoryAllocator/include
     third_party/DirectX-Headers/include/directx
     third_party/DirectXMesh/DirectXMesh
     third_party/DirectXTex/DirectXTex
@@ -108,9 +118,8 @@ target_include_directories(HelloTriangleDX PRIVATE
     third_party/imgui/backends)
 
 target_link_libraries(HelloTriangleDX PRIVATE
-    d3d12.lib
-    dxgi.lib
-    shlwapi.lib
+    IssouRHI
+    d3d12.lib # TODO: remove when everything dx12 is done through the rhi
     DirectXMesh
     DirectXTex)
 
@@ -162,7 +171,7 @@ foreach(HLSL ${HLSL_SOURCES})
             /nologo /T ${SHADER_PROFILE} # assume /E main
             /Fo ${CSO}
             /Zi /Qembed_debug ${HLSL}
-        DEPENDS ${HLSL} ${HLSL_HEADERS})
+        DEPENDS ${HLSL} ${HLSL_HEADERS} ${SHARED_HEADERS})
     list(APPEND SHADER_BINARY_FILES ${CSO})
 endforeach()
 

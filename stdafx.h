@@ -23,8 +23,6 @@
 #include <DirectXMesh.h>
 #include <DirectXTex.h>
 
-#include "D3D12MemAlloc.h"
-
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
 
