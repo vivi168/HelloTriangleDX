@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Win32Application.h"
+#include "StepTimer.h"
 #include "Renderer.h"
 #include "Input.h"
 #include "Game.h"
@@ -12,11 +13,8 @@ static const LONG WINDOW_WIDTH = 1920;
 static const LONG WINDOW_HEIGHT = 1080;
 
 static HWND g_Hwnd = nullptr;
-static LARGE_INTEGER g_Frequency;
-static LARGE_INTEGER g_StartTime;
-static LARGE_INTEGER g_LastTime;
-static float g_Time;         // g_TimeValue converted to float, in seconds.
-static float g_TimeDelta;
+
+StepTimer g_Timer;
 
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -70,11 +68,6 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<Iss
   Renderer::InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
   Renderer::Init(device, surface);
 
-
-  QueryPerformanceFrequency(&g_Frequency);
-  QueryPerformanceCounter(&g_StartTime);
-  g_LastTime = g_StartTime;
-
   ShowWindow(g_Hwnd, nCmdShow);
 
   Game::Init();
@@ -89,23 +82,21 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<Iss
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     } else {
-      LARGE_INTEGER currentTime;
-      QueryPerformanceCounter(&currentTime);
-      g_TimeDelta = static_cast<float>(currentTime.QuadPart - g_LastTime.QuadPart) / g_Frequency.QuadPart;
-      g_Time = static_cast<float>(currentTime.QuadPart - g_StartTime.QuadPart) / g_Frequency.QuadPart;
-      g_LastTime = currentTime;
+      g_Timer.Tick([&]() {
+        float t = static_cast<float>(g_Timer.GetTotalSeconds());
+        float dt = static_cast<float>(g_Timer.GetElapsedSeconds());
 
-      if (g_TimeDelta > 0.f)
-      {
         Input::Update();
 
         if (Input::IsPressed(Input::KB::Escape)) {
           PostMessage(g_Hwnd, WM_CLOSE, 0, 0);
         }
 
-        Game::Update(g_Time, g_TimeDelta);
-        Renderer::Render(g_Time, g_TimeDelta);
-      }
+        Game::Update(t, dt);
+      });
+
+      float t = static_cast<float>(g_Timer.GetTotalSeconds());
+      Renderer::Render(t);
     }
   }
 

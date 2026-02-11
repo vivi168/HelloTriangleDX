@@ -873,7 +873,7 @@ void LoadAssets()
   }
 }
 
-static void Update(FrameContext* ctx, float time, float dt)
+static void Update(FrameContext* ctx, float time)
 {
   // Per frame root constants
   {
@@ -913,7 +913,7 @@ static void Update(FrameContext* ctx, float time, float dt)
 
       if (model->HasCurrentAnimation()) {
         for (auto &[k, skin] : model->skins) {
-          std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(dt, skin.get());
+          std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(time, skin.get());
 
           for (auto &smi : node.skinnedMeshInstances) {
             // TODO: should reuse bone matrice buffer for meshes of same model which share skin
@@ -1087,13 +1087,13 @@ static size_t BuildBarriers(std::span<TransitionT> transitions, std::span<Barrie
   return nb;
 }
 
-void Render(float time, float dt)
+void Render(float time)
 {
   auto renderTarget = g_Surface->GetCurrentTexture();
   auto renderTargetView = renderTarget->CreateView();
   auto ctx = &g_FrameContext[g_Surface->CurrentFrameIndex()];
 
-  Update(ctx, time, dt);
+  Update(ctx, time);
 
   // we can only reset an allocator once the gpu is done with it. Resetting an
   // allocator frees the memory that the command list was stored in

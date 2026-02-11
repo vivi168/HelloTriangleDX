@@ -96,6 +96,7 @@ set(HEADERS
     Mesh.h
     Renderer.h
     RendererHelper.h
+    StepTimer.h
     Win32Application.h)
 set(STDAFX_HEADER stdafx.h)
 

@@ -50,12 +50,10 @@ struct AnimationInfo {
   std::shared_ptr<Animation> animation = nullptr;
   std::unordered_map<int, DirectX::XMMATRIX> globalTransforms;
 
-  float curTime = 0.0f;
-
-  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float dt, Skin* skin)
+  std::vector<DirectX::XMFLOAT4X4> BoneTransforms(float time, Skin* skin)
   {
-    curTime += dt;
-    if (curTime > animation->maxTime) curTime = animation->minTime;
+    float duration = animation->maxTime - animation->minTime;
+    float curTime = animation->minTime + fmod(time, duration);
 
     return animation->BoneTransforms(curTime, skin, globalTransforms);
   }
