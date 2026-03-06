@@ -53,7 +53,7 @@ struct GPUSelection {
   std::wstring Substring;
 };
 
-Microsoft::WRL::ComPtr<IDXGIFactory4> GetDXGIFactory();
+void ReportLiveObjects();
 void PrintAdapterList();
 std::filesystem::path GetExecutableDirectory();
 
@@ -486,6 +486,7 @@ public:
 
   // TODO: tmp. make interface.
   ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
+  IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
   ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 
@@ -507,7 +508,6 @@ public:
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
-  Microsoft::WRL::ComPtr<IDXGIFactory4> m_Factory;
   Microsoft::WRL::ComPtr<ID3D12Device5> m_Device;
   Microsoft::WRL::ComPtr<D3D12MA::Allocator> m_Allocator;
   // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS

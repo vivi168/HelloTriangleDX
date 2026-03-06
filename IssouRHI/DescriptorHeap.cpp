@@ -3,7 +3,7 @@
 
 namespace IssouRHI
 {
- void DescriptorHeap::Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
+  void DescriptorHeap::Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
   {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc{.Type = type,
                                         .NumDescriptors = numDescriptors,

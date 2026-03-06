@@ -1,42 +1,33 @@
 #include "IssouRHI.h"
 
+#include <dxgidebug.h>
+
 using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
 {
-
-static ComPtr<IDXGIFactory4> CreateDXGIFactory()
+void ReportLiveObjects()
 {
-  UINT dxgiFactoryFlags = 0;
-
 #ifdef ENABLE_DEBUG_LAYER
-  ComPtr<ID3D12Debug> debugController;
-  if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
-    debugController->EnableDebugLayer();
-
-    // Enable additional debug layers.
-    dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+  {
+    Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
+    if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)))) {
+      dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL,
+                                   DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+    }
   }
 #endif
-
-  ComPtr<IDXGIFactory4> factory;
-  SUCCEEDED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-
-  return factory;
-}
-
-ComPtr<IDXGIFactory4> GetDXGIFactory()
-{
-  static ComPtr<IDXGIFactory4> factory = CreateDXGIFactory();
-
-  return factory;
 }
 
 void PrintAdapterList()
 {
   UINT index = 0;
+  ComPtr<IDXGIFactory4> dxgiFactory;
   ComPtr<IDXGIAdapter1> adapter;
-  while (GetDXGIFactory()->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND) {
+
+  CHECK_HR(CreateDXGIFactory2(0, IID_PPV_ARGS(&dxgiFactory)));
+
+  while (dxgiFactory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND) {
     DXGI_ADAPTER_DESC1 desc;
     adapter->GetDesc1(&desc);
 

@@ -58,6 +58,7 @@ target_include_directories(IssouRHI
 target_link_libraries(IssouRHI PRIVATE
     d3d12.lib
     dxgi.lib
+    dxguid.lib
     shlwapi.lib)
 
 target_compile_definitions(IssouRHI PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

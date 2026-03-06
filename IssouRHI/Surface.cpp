@@ -6,7 +6,7 @@ using Microsoft::WRL::ComPtr;
 namespace IssouRHI
 {
 
-Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
+Surface::Surface(Device* device, HWND hwnd) : m_Handle(hwnd), m_Device(device)
 {
   m_CommandQueue = device->GetNativeQueue();
 
@@ -59,8 +59,11 @@ void Surface::CreateSwapChain(SurfaceConfiguration& config)
 
   swapChainDesc.Windowed = true;
 
+  ComPtr<IDXGIFactory4> dxgiFactory;
+  CHECK_HR(m_Device->GetAdapter()->GetParent(IID_PPV_ARGS(&dxgiFactory)));
+
   IDXGISwapChain* swapChain = nullptr;
-  CHECK_HR(GetDXGIFactory()->CreateSwapChain(m_CommandQueue, &swapChainDesc, &swapChain));
+  CHECK_HR(dxgiFactory->CreateSwapChain(m_CommandQueue, &swapChainDesc, &swapChain));
   m_SwapChain.Attach(static_cast<IDXGISwapChain3*>(swapChain));
 
   m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();

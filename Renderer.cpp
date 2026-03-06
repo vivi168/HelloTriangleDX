@@ -1441,6 +1441,7 @@ void Cleanup()
   g_PipelineStateObjects[PSO::FillGBufferCS].Reset();
   g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
   g_RootSignature.Reset();
+  g_ComputeRootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
   g_DrawMeshCommands.reset();
@@ -1464,6 +1465,7 @@ void Cleanup()
   g_ShadowBuffer.reset();
 
   g_CommandList.Reset();
+  g_TimestampQueryHeap.Reset();
 
   g_DepthStencilBuffer.reset();
 
@@ -1617,14 +1619,14 @@ static void InitFrameResources()
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
         RootParameter::Count, rootParameters, static_cast<UINT>(staticSamplers.size()), staticSamplers.data(), flags);
 
-    ID3DBlob* signatureBlobPtr;
+    ComPtr<ID3DBlob> signatureBlob;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
-                                                  &signatureBlobPtr, nullptr));
+                                                  &signatureBlob, nullptr));
 
     ID3D12RootSignature* rootSignature = nullptr;
     CHECK_HR(g_Device->CreateRootSignature(
-        0, signatureBlobPtr->GetBufferPointer(),
-        signatureBlobPtr->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
+        0, signatureBlob->GetBufferPointer(),
+        signatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
     g_RootSignature.Attach(rootSignature);
   }
 

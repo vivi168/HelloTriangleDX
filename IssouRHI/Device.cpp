@@ -20,6 +20,20 @@ static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 static ComPtr<IDXGIAdapter1> SelectAdapter(const GPUSelection& GPUSelection)
 {
   ComPtr<IDXGIAdapter1> adapter;
+  ComPtr<IDXGIFactory4> dxgiFactory;
+  UINT dxgiFactoryFlags = 0;
+
+#ifdef ENABLE_DEBUG_LAYER
+  ComPtr<ID3D12Debug> debugController;
+  if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+    debugController->EnableDebugLayer();
+
+    // Enable additional debug layers.
+    dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+  }
+#endif
+
+  CHECK_HR(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&dxgiFactory)));
 
   if (GPUSelection.Index != UINT32_MAX) {
     // Cannot specify both index and name.
@@ -27,13 +41,13 @@ static ComPtr<IDXGIAdapter1> SelectAdapter(const GPUSelection& GPUSelection)
       return adapter;
     }
 
-    CHECK_HR(GetDXGIFactory()->EnumAdapters1(GPUSelection.Index, &adapter));
+    CHECK_HR(dxgiFactory->EnumAdapters1(GPUSelection.Index, &adapter));
     return adapter;
   }
 
   if (!GPUSelection.Substring.empty()) {
     ComPtr<IDXGIAdapter1> tmpAdapter;
-    for (UINT i = 0; GetDXGIFactory()->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+    for (UINT i = 0; dxgiFactory->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
       DXGI_ADAPTER_DESC1 desc;
       tmpAdapter->GetDesc1(&desc);
       if (StrStrI(desc.Description, GPUSelection.Substring.c_str())) {
@@ -53,7 +67,7 @@ static ComPtr<IDXGIAdapter1> SelectAdapter(const GPUSelection& GPUSelection)
   }
 
   // Select first one.
-  GetDXGIFactory()->EnumAdapters1(0, &adapter);
+  dxgiFactory->EnumAdapters1(0, &adapter);
   return adapter;
 }
 
@@ -131,11 +145,11 @@ Device::Device(const GPUSelection& gpuSelection)
   assert(options16.GPUUploadHeapSupported);
 
 #ifdef ENABLE_DEBUG_LAYER
-  ID3D12InfoQueue* pInfoQueue = nullptr;
-  if (SUCCEEDED(m_Device->QueryInterface(IID_PPV_ARGS(&pInfoQueue)))) {
-    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-    pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+  ComPtr<ID3D12InfoQueue> infoQueue;
+  if (SUCCEEDED(m_Device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+    infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+    infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+    infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
   }
 #endif
 
@@ -215,6 +229,7 @@ Device::Device(const GPUSelection& gpuSelection)
 Device::~Device()
 {
   m_CommandQueue.Reset();
+  m_RootSignature.Reset();
 
   PrintStatsString(m_Allocator.Get());
   m_Allocator.Reset();
