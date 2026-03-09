@@ -9,11 +9,6 @@ get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
 if(MSVC)
     add_compile_options(/W4 /permissive-)
-
-    if(CMAKE_GENERATOR MATCHES "Visual Studio")
-        add_compile_options("/MP $<$<CONFIG:RELEASE>:/Zi>")
-        add_link_options("$<$<CONFIG:RELEASE>:/DEBUG>")
-    endif()
 endif()
 
 add_subdirectory(third_party/DirectXMesh)
