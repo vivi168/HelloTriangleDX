@@ -114,6 +114,7 @@ void Surface::Present()
   m_FenceValues[m_FrameIndex] = m_NextFenceValue;
 }
 
+// TODO: useless here? as part of the Queue?
 void Surface::WaitForAllFrames()
 {
   const UINT64 fenceValue = m_NextFenceValue++;

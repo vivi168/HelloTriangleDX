@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -567,11 +568,89 @@ private:
 };
 
 class CommandEncoder;
-class CommandQueue;
 
-class RenderPass;
-class ComputePass;
-class RaytracingPass;
+struct CommandBuffer {
+  Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
+  Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList8> commandList;
+
+  UINT64 fenceValue = 0;
+
+  void Reset();
+};
+
+class Queue
+{
+public:
+  Queue(Device* device);
+  ~Queue();
+
+  std::shared_ptr<CommandEncoder> CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
+
+  void Submit(std::span<std::shared_ptr<CommandBuffer>> commandBuffers);
+  void WaitForAll();
+private:
+  std::shared_ptr<CommandBuffer> FindOrCreateCommandBuffer();
+  std::shared_ptr<CommandBuffer> CreateCommandBuffer();
+  void RecycleCommandBuffers();
+
+  Device* m_Device;
+
+  std::list<std::shared_ptr<CommandBuffer>> m_CommandBuffersExecuting;
+  std::list<std::shared_ptr<CommandBuffer>> m_CommandBuffersAvailable;
+private:
+  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
+
+  Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
+  UINT64 m_NextFenceValue = 0;
+};
+
+class ComputePassEncoder;
+class RenderPassEncoder;
+class RaytracingPassEncoder;
+
+class CommandEncoder
+{
+public:
+  CommandEncoder(std::string label, std::shared_ptr<CommandBuffer> commandBuffer);
+  ~CommandEncoder();
+
+  ComputePassEncoder BeginComputePass();
+  RenderPassEncoder BeginRenderPass();
+
+  void CopyBufferToBuffer();
+
+  std::shared_ptr<CommandBuffer> Finish();
+private:
+  std::string m_Label;
+
+  std::shared_ptr<CommandBuffer> m_CommandBuffer;
+};
+
+class ComputePassEncoder
+{
+public:
+  ComputePassEncoder();
+  ~ComputePassEncoder();
+
+  void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1);
+  void End();
+private:
+  std::string m_Label;
+};
+
+class RenderPassEncoder
+{
+public:
+  RenderPassEncoder();
+  ~RenderPassEncoder();
+
+  void DrawInstanced();
+  void DrawMeshIndirect();
+
+  void End();
+private:
+  std::string m_Label;
+};
 
 struct RenderPipelineDesc;
 class RenderPipeline;
