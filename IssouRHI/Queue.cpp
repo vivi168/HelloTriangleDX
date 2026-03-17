@@ -1,26 +1,44 @@
 #include "IssouRHI.h"
 
+#include <array>
+
 // I need to sleep
 namespace IssouRHI
 {
 
-Queue::Queue(Device* device) : m_Device(device) {}
+Queue::Queue(Device* device) : m_Device(device)
+{
+  ID3D12Fence* fence = nullptr;
+  CHECK_HR(device->GetNativeDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+  m_Fence.Attach(fence);
 
-std::shared_ptr<CommandEncoder> Queue::CreateCommandEncoder(std::optional<std::string> label)
+  m_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+  assert(m_FenceEvent);
+
+  // TODO: should we pre-create a few CommandBuffer?
+}
+
+Queue::~Queue()
+{
+  WaitForAll();
+  CloseHandle(m_FenceEvent);
+}
+
+CommandEncoder Queue::CreateCommandEncoder(std::optional<std::string> label)
 {
   auto cb = FindOrCreateCommandBuffer();
 
-  return std::make_shared<CommandEncoder>(label.value_or(""), cb);
+  return CommandEncoder(label.value_or(""), cb);
 }
 
-void Queue::Submit(std::span<std::shared_ptr<CommandBuffer>> commandBuffers)
+void Queue::Submit(std::span<CommandBuffer*> commandBuffers)
 {
   m_NextFenceValue++;
 
   std::vector<ID3D12CommandList*> cmdLists;
   cmdLists.reserve(commandBuffers.size());
 
-  for (auto& cb : commandBuffers) {
+  for (auto cb : commandBuffers) {
     cb->fenceValue = m_NextFenceValue;
     m_CommandBuffersExecuting.push_back(cb);
     cmdLists.push_back(static_cast<ID3D12CommandList*>(cb->commandList.Get()));
@@ -37,26 +55,31 @@ void Queue::Submit(std::span<std::shared_ptr<CommandBuffer>> commandBuffers)
 
 void Queue::WaitForAll()
 {
-  // Wait for fence
+  // Wait for all executing command buffer to finish
+  const UINT64 fenceValue = m_NextFenceValue++;
+  CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), fenceValue));
+
+  if (m_Fence->GetCompletedValue() < fenceValue) {
+    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
+    WaitForSingleObject(m_FenceEvent, INFINITE);
+  }
 }
 
-std::shared_ptr<CommandBuffer> Queue::FindOrCreateCommandBuffer()
+CommandBuffer* Queue::FindOrCreateCommandBuffer()
 {
-  std::shared_ptr<CommandBuffer> cb;
-
   if (m_CommandBuffersAvailable.empty()) {
-    cb = CreateCommandBuffer();
-  } else {
-    cb = m_CommandBuffersAvailable.front();
-    m_CommandBuffersAvailable.pop_front();
+    return CreateCommandBuffer();
   }
+
+  CommandBuffer* cb = m_CommandBuffersAvailable.front();
+  m_CommandBuffersAvailable.pop_front();
 
   return cb;
 }
 
-std::shared_ptr<CommandBuffer> Queue::CreateCommandBuffer()
+CommandBuffer* Queue::CreateCommandBuffer()
 {
-  auto cb = std::make_shared<CommandBuffer>();
+  auto cb = std::make_unique<CommandBuffer>();
 
   ID3D12CommandAllocator* commandAllocator = nullptr;
   CHECK_HR(m_Device->GetNativeDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
@@ -64,10 +87,13 @@ std::shared_ptr<CommandBuffer> Queue::CreateCommandBuffer()
 
   CHECK_HR(m_Device->GetNativeDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cb->commandAllocator.Get(), NULL, IID_PPV_ARGS(&cb->commandList)));
 
-  // command lists are created in the recording state so close it now.
-  cb->commandList->Close();
+  std::array descriptorHeaps{m_Device->SrvUavDescriptorHeap()};
+  cb->commandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 
-  return cb;
+  CommandBuffer* ptr = cb.get();
+  m_CommandBuffers.push_back(std::move(cb));
+
+  return ptr;
 }
 
 void Queue::RecycleCommandBuffers()
@@ -75,33 +101,46 @@ void Queue::RecycleCommandBuffers()
   UINT64 completedValue = m_Fence->GetCompletedValue();
 
   for (auto it = m_CommandBuffersExecuting.begin(); it != m_CommandBuffersExecuting.end();) {
-    auto& cb = *it;
-    if (completedValue < cb->fenceValue) {
-      it++;
-    } else {
+    auto cb = *it;
+    if (cb->fenceValue <= completedValue) {
+      ResetCommandBuffer(cb);
       m_CommandBuffersAvailable.splice(m_CommandBuffersAvailable.end(), m_CommandBuffersExecuting, it++);
-      cb->Reset();
+    } else {
+      it++;
     }
   }
+}
+
+void Queue::ResetCommandBuffer(CommandBuffer* commandBuffer)
+{
+  commandBuffer->Reset();
+
+  std::array descriptorHeaps{m_Device->SrvUavDescriptorHeap()};
+  commandBuffer->commandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 }
 
 void CommandBuffer::Reset()
 {
   CHECK_HR(commandAllocator->Reset());
   CHECK_HR(commandList->Reset(commandAllocator.Get(), nullptr));
-
-  // SetDescriptorHeaps ? we can easily, because we get it from device->SrvUavDescriptorHeap()
 }
 
-CommandEncoder::CommandEncoder(std::string label, std::shared_ptr<CommandBuffer> commandBuffer) : m_Label(label), m_CommandBuffer(commandBuffer) {}
+CommandEncoder::CommandEncoder(std::string label, CommandBuffer* commandBuffer) : m_Label(label), m_CommandBuffer(commandBuffer) {}
 
-CommandEncoder::~CommandEncoder() {}
+CommandEncoder::~CommandEncoder()
+{
+  assert(m_CommandBuffer == nullptr); // Forgot to call Finish() ?
+  // or simply close cmd list and recycle cmd buffer since it was not used?
+}
 
-std::shared_ptr<CommandBuffer> CommandEncoder::Finish()
+CommandBuffer* CommandEncoder::Finish()
 {
   m_CommandBuffer->commandList->Close();
 
-  return std::move(m_CommandBuffer);
+  CommandBuffer* ptr = m_CommandBuffer;
+  m_CommandBuffer = nullptr;
+
+  return ptr;
 }
 
 }  // namespace IssouRHI

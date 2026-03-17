@@ -584,24 +584,28 @@ public:
   Queue(Device* device);
   ~Queue();
 
-  std::shared_ptr<CommandEncoder> CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
+  CommandEncoder CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
 
-  void Submit(std::span<std::shared_ptr<CommandBuffer>> commandBuffers);
+  void Submit(std::span<CommandBuffer*> commandBuffers);
   void WaitForAll();
 private:
-  std::shared_ptr<CommandBuffer> FindOrCreateCommandBuffer();
-  std::shared_ptr<CommandBuffer> CreateCommandBuffer();
+  CommandBuffer* FindOrCreateCommandBuffer();
+  CommandBuffer* CreateCommandBuffer();
   void RecycleCommandBuffers();
+  void ResetCommandBuffer(CommandBuffer* commandBuffer);
 
   Device* m_Device;
 
-  std::list<std::shared_ptr<CommandBuffer>> m_CommandBuffersExecuting;
-  std::list<std::shared_ptr<CommandBuffer>> m_CommandBuffersAvailable;
+  // TODO: mutex to protect these
+  std::vector<std::unique_ptr<CommandBuffer>> m_CommandBuffers;
+  std::list<CommandBuffer*> m_CommandBuffersExecuting;
+  std::list<CommandBuffer*> m_CommandBuffersAvailable;
 private:
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
 
   Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
   UINT64 m_NextFenceValue = 0;
+  HANDLE m_FenceEvent = nullptr;
 };
 
 class ComputePassEncoder;
@@ -611,7 +615,7 @@ class RaytracingPassEncoder;
 class CommandEncoder
 {
 public:
-  CommandEncoder(std::string label, std::shared_ptr<CommandBuffer> commandBuffer);
+  CommandEncoder(std::string label, CommandBuffer* commandBuffer);
   ~CommandEncoder();
 
   ComputePassEncoder BeginComputePass();
@@ -619,11 +623,11 @@ public:
 
   void CopyBufferToBuffer();
 
-  std::shared_ptr<CommandBuffer> Finish();
+  CommandBuffer* Finish();
 private:
   std::string m_Label;
 
-  std::shared_ptr<CommandBuffer> m_CommandBuffer;
+  CommandBuffer* m_CommandBuffer;
 };
 
 class ComputePassEncoder
