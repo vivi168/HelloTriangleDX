@@ -66,12 +66,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
     return (int)ExitCode::GPUList;
   }
 
-  int result = 0;
-  {
+  int result = [&]() {
     auto device = std::make_shared<IssouRHI::Device>(g_CommandLineParameters.m_GPUSelection);
-
-    result = Win32Application::Run(hInstance, nCmdShow, device);
-  }
+    return Win32Application::Run(hInstance, nCmdShow, device);
+  }();
 
   IssouRHI::ReportLiveObjects();
 
