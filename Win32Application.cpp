@@ -55,13 +55,12 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<Iss
 
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
 
-  // TODO: Create Surface and get info from surface instead
   auto surface = std::make_shared<IssouRHI::Surface>(device.get(), g_Hwnd);
   IssouRHI::SurfaceConfiguration config{
     .format = IssouRHI::TextureFormat::RGBA8Unorm,
     .width = WINDOW_WIDTH,
     .height = WINDOW_HEIGHT,
-    .bufferCount = 3, // FIXME magic number, Renderer#FRAME_BUFFER_COUNT
+    .bufferCount = Renderer::FRAME_BUFFER_COUNT,
   };
   surface->Configure(config);
 

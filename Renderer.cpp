@@ -17,7 +17,6 @@ namespace Renderer
 {
 // ========== Constants
 
-static constexpr size_t FRAME_BUFFER_COUNT = 3;
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
 static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
 
