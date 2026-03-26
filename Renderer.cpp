@@ -33,16 +33,6 @@ static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
 
 enum class PSO { BasicMS, SkinningCS, InstanceCullingCS, FillGBufferCS, FinalComposeVS };
 
-namespace RootParameter
-{
-enum Slots : size_t { PerDrawConstants = 0, FrameConstants, BuffersDescriptorIndices, Count };
-}
-
-namespace SkinningCSRootParameter
-{
-enum Slots : size_t { BuffersOffsets = 0, BuffersDescriptorIndices, Count };
-}
-
 namespace Timestamp
 {
 enum Timestamps : size_t {
@@ -107,7 +97,7 @@ struct AccelerationStructure {
                                             .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
                                             .RaytracingAccelerationStructure = {.Location = resultData->GpuAddress()}};
 
-    srv = device->AllocSrvUavDescriptor();
+    srv = device->AllocCbvSrvUavDescriptor();
     device->GetNativeDevice()->CreateShaderResourceView(nullptr, &srvDesc, srv.cpuHandle);
 
     return srv.index;
@@ -216,10 +206,17 @@ struct FrameContext {
 
   static constexpr size_t frameConstantsSize = SizeOfInUint(frameConstants);
 
+  std::shared_ptr<IssouRHI::Buffer> frameConstantBuffer;
   std::shared_ptr<IssouRHI::Buffer> timestampReadBackBuffer;
   ComPtr<ID3D12CommandAllocator> commandAllocator;
 
+  void UpdateFrameConstants()
+  {
+    frameConstantBuffer->Write(IssouRHI::FullBufferRange, &frameConstants);
+  }
+
   void Reset() {
+    frameConstantBuffer.reset();
     timestampReadBackBuffer.reset();
     commandAllocator.Reset();
   }
@@ -376,36 +373,34 @@ struct MeshStore {
   BuffersDescriptorIndices BuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
-        .vertexNormalsBufferId = m_VertexNormals->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
-        .vertexTangentsBufferId = m_VertexTangents->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4)).index,
-        .vertexUVsBufferId = m_VertexUVs->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT2)).index,
+        .vertexPositionsBufferId = m_VertexPositions->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMFLOAT3)}),
+        .vertexNormalsBufferId = m_VertexNormals->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMFLOAT3)}),
+        .vertexTangentsBufferId = m_VertexTangents->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMFLOAT4)}),
+        .vertexUVsBufferId = m_VertexUVs->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMFLOAT2)}),
 
-        .meshletsBufferId = m_Meshlets->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshletData)).index,
-        .meshletVertIndicesBufferId = m_MeshletUniqueIndices->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(UINT)).index,
-        .meshletsPrimitivesBufferId = m_MeshletPrimitives->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshletTriangle)).index,
+        .meshletsBufferId = m_Meshlets->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(MeshletData)}),
+        .meshletVertIndicesBufferId = m_MeshletUniqueIndices->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(UINT)}),
+        .meshletsPrimitivesBufferId = m_MeshletPrimitives->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(MeshletTriangle)}),
 
-        .materialsBufferId = m_Materials->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(Material::m_GpuData)).index,
-        .instancesBufferId = m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshInstance::data)).index,
+        .materialsBufferId = m_Materials->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(Material::m_GpuData)}),
+        .instancesBufferId = m_Instances[frameIndex]->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(MeshInstance::data)}),
     };
   }
 
-  // TODO: this won't be necessary here once we have bindGroups / pass descriptor
   SkinningBuffersDescriptorIndices SkinningBuffersDescriptorIndices(UINT frameIndex) const
   {
     return {
-        .vertexPositionsBufferId = m_VertexPositions->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
-        .vertexNormalsBufferId = m_VertexNormals->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT3)).index,
-        .vertexTangentsBufferId = m_VertexTangents->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4)).index,
-        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMUINT2)).index,
-        .boneMatricesBufferId = m_BoneMatrices[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(XMFLOAT4X4)).index,
+        .vertexPositionsBufferId = m_VertexPositions->DescriptorIndex({IssouRHI::BufferAccess::ReadWrite, IssouRHI::FullBufferRange, sizeof(XMFLOAT3)}),
+        .vertexNormalsBufferId = m_VertexNormals->DescriptorIndex({IssouRHI::BufferAccess::ReadWrite, IssouRHI::FullBufferRange, sizeof(XMFLOAT3)}),
+        .vertexTangentsBufferId = m_VertexTangents->DescriptorIndex({IssouRHI::BufferAccess::ReadWrite, IssouRHI::FullBufferRange, sizeof(XMFLOAT4)}),
+        .vertexBlendWeightsAndIndicesBufferId = m_VertexBlendWeightsAndIndices->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMUINT2)}),
+        .boneMatricesBufferId = m_BoneMatrices[frameIndex]->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(XMFLOAT4X4)}),
     };
   }
 
-  // TODO: this won't be necessary here once we have bindGroups / pass descriptor
   UINT InstancesBufferId(UINT frameIndex) const
   {
-    return m_Instances[frameIndex]->SrvDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(MeshInstance::data)).index;
+    return m_Instances[frameIndex]->DescriptorIndex({IssouRHI::BufferAccess::Read, IssouRHI::FullBufferRange, sizeof(MeshInstance::data)});
   }
 
   void Init(IssouRHI::Device* device)
@@ -622,7 +617,6 @@ static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
 static ComPtr<ID3D12RootSignature> g_RootSignature;
-static ComPtr<ID3D12RootSignature> g_ComputeRootSignature;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
 static ComPtr<ID3D12StateObject> g_DxrStateObject;
@@ -645,9 +639,9 @@ struct GBuffer {
   {
     return {
         .VisibilityBufferId = visBufferDescId,
-        .WorldPositionId = worldPosition->CreateView()->UavDescriptorAlloc().index,
-        .WorldNormalId = worldNormal->CreateView()->UavDescriptorAlloc().index,
-        .BaseColorId = baseColor->CreateView()->UavDescriptorAlloc().index,
+        .WorldPositionId = worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
+        .WorldNormalId = worldNormal->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
+        .BaseColorId = baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
     };
   }
 
@@ -992,6 +986,8 @@ static void Update(FrameContext* ctx, float time)
     ImGui::End();
   }
 
+  ctx->UpdateFrameConstants();
+
   {
     ImGui::Begin("Timestamps");
 
@@ -1028,22 +1024,22 @@ static void Update(FrameContext* ctx, float time)
 
     if (ImGui::BeginTabBar("GBufferTabs")) {
       if (ImGui::BeginTabItem("Normal")) {
-        ImGui::Image((ImTextureID)g_GBuffer.worldNormal->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.worldNormal->CreateView()->DescriptorHandle(IssouRHI::TextureAccess::Read), imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Position")) {
-        ImGui::Image((ImTextureID)g_GBuffer.worldPosition->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.worldPosition->CreateView()->DescriptorHandle(IssouRHI::TextureAccess::Read), imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Base Color")) {
-        ImGui::Image((ImTextureID)g_GBuffer.baseColor->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
+        ImGui::Image((ImTextureID)g_GBuffer.baseColor->CreateView()->DescriptorHandle(IssouRHI::TextureAccess::Read), imgSize);
         ImGui::EndTabItem();
       }
 
       if (ImGui::BeginTabItem("Shadow")) {
-        ImGui::Image((ImTextureID)g_ShadowBuffer->CreateView()->SrvDescriptorAlloc().gpuHandle.ptr, imgSize);
+        ImGui::Image((ImTextureID)g_ShadowBuffer->CreateView()->DescriptorHandle(IssouRHI::TextureAccess::Read), imgSize);
         ImGui::EndTabItem();
       }
 
@@ -1149,6 +1145,9 @@ void Render(float time)
   D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
   g_CommandList->RSSetScissorRects(1, &scissorRect);
 
+  g_CommandList->SetComputeRootSignature(g_RootSignature.Get());
+  uint32_t frameConstantsIndex = ctx->frameConstantBuffer->DescriptorIndex({IssouRHI::BufferAccess::Constant, IssouRHI::FullBufferRange, sizeof(FrameConstants)});
+
   // record skinning compute commands if needed
   // TODO: we should also update culling data. And move to Indirect?
   g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
@@ -1161,16 +1160,12 @@ void Render(float time)
         g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
-    g_CommandList->SetComputeRootSignature(g_ComputeRootSignature.Get());
 
-    g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersDescriptorIndices,
-                                                SizeOfInUint(SkinningBuffersDescriptorIndices),
-                                                &ctx->skinningBuffersDescriptorsIndices, 0);
+    g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices, 0);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
-      g_CommandList->SetComputeRoot32BitConstants(SkinningCSRootParameter::BuffersOffsets,
-                                                  SizeOfInUint(SkinningPerDispatchConstants), &o, 0);
+      g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(o), &o, SizeOfInUint(SkinningBuffersDescriptorIndices));
 
       g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
@@ -1183,16 +1178,9 @@ void Render(float time)
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
 
-    g_CommandList->SetComputeRootSignature(g_RootSignature.Get());
-
-    g_CommandList->SetComputeRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
-                                                 &ctx->frameConstants, 0);
-
-    g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                SizeOfInUint(CullingBuffersDescriptorIndices),
-                                                &ctx->cullingBuffersDescriptorsIndices, 0);
-
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.numMeshInstances, 0);
+    g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices, 0);
+    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(CullingBuffersDescriptorIndices));
+    g_CommandList->SetComputeRoot32BitConstant(0, g_Scene.numMeshInstances, SizeOfInUint(CullingBuffersDescriptorIndices) + 1);
 
     {
       auto b = g_DrawMeshCommands->Transition({D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST});
@@ -1245,12 +1233,8 @@ void Render(float time)
 
     g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
 
-    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::FrameConstants, FrameContext::frameConstantsSize,
-                                                 &ctx->frameConstants, 0);
-    g_CommandList->SetGraphicsRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                 SizeOfInUint(BuffersDescriptorIndices),
-                                                 &ctx->buffersDescriptorsIndices,
-                                                 0);
+    g_CommandList->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
+    g_CommandList->SetGraphicsRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(BuffersDescriptorIndices));
 
     g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
                                    0, g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
@@ -1278,12 +1262,17 @@ void Render(float time)
     }
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
-    auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->SrvDescriptorAlloc().index);
+    auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read));
     UINT n = SizeOfInUint(c);
-    g_CommandList->SetComputeRoot32BitConstants(RootParameter::PerDrawConstants, n, &c, 0);
+    UINT n2 = SizeOfInUint(ctx->buffersDescriptorsIndices);
 
-    g_CommandList->SetComputeRoot32BitConstants(RootParameter::BuffersDescriptorIndices,
-                                                SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
+    // TODO: instead of beeing dumb. only do SetComputeRoot32BitConstants once at the beginning of frame
+    // same for SetGraphicsRoot32BitConstant. "bind" everything up front, and be done with it.
+    // Only have one "slot", so only one "InitAsConstant" and prepare some enum for the different offsets in the root signature.
+    // Also, instead of writing an entire struct to the root signature. have ConstantBuffer and write the cbv to it.
+    g_CommandList->SetComputeRoot32BitConstants(0, n, &c, 0);
+    g_CommandList->SetComputeRoot32BitConstants(0, n2, &ctx->buffersDescriptorsIndices, n);
+    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, n + n2);
 
     g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
 
@@ -1309,10 +1298,10 @@ void Render(float time)
 
     g_CommandList->SetPipelineState1(g_DxrStateObject.Get());
 
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants,
-                                               g_GBuffer.worldPosition->CreateView()->SrvDescriptorAlloc().index, 0);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer->CreateView()->UavDescriptorAlloc().index, 1);
-    g_CommandList->SetComputeRoot32BitConstant(RootParameter::PerDrawConstants, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
+    g_CommandList->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
+    g_CommandList->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
+    g_CommandList->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
+    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
 
     {
       D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
@@ -1359,10 +1348,9 @@ void Render(float time)
 
     g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
 
-    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants,
-                                                g_GBuffer.baseColor->CreateView()->SrvDescriptorAlloc().index, 0);
-    g_CommandList->SetGraphicsRoot32BitConstant(RootParameter::PerDrawConstants, g_ShadowBuffer->CreateView()->SrvDescriptorAlloc().index,
-                                                1);
+    g_CommandList->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
+    g_CommandList->SetGraphicsRoot32BitConstant(0, g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices));
+    g_CommandList->SetGraphicsRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices) + 1);
 
     g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g_CommandList->DrawInstanced(3, 1, 0, 0);
@@ -1440,7 +1428,6 @@ void Cleanup()
   g_PipelineStateObjects[PSO::FillGBufferCS].Reset();
   g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
   g_RootSignature.Reset();
-  g_ComputeRootSignature.Reset();
   g_DrawMeshCommandSignature.Reset();
 
   g_DrawMeshCommands.reset();
@@ -1584,7 +1571,7 @@ static void InitFrameResources()
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
-        IssouRHI::DescriptorAllocation alloc = g_RhiDevice->AllocSrvUavDescriptor();
+        IssouRHI::DescriptorAllocation alloc = g_RhiDevice->AllocCbvSrvUavDescriptor();
         *outCpuHandle = alloc.cpuHandle;
         *outGpuHandle = alloc.gpuHandle;
       };
@@ -1602,11 +1589,8 @@ static void InitFrameResources()
   {
     // Root parameters
     // Applications should sort entries in the root signature from most frequently changing to least.
-    CD3DX12_ROOT_PARAMETER rootParameters[RootParameter::Count] = {};
-    rootParameters[RootParameter::PerDrawConstants].InitAsConstants(4, 0);  // b0, fill g-buffer use 4 constants
-    // TODO: should use constant buffer... camera matrices, planes, etc quickly add up...
-    rootParameters[RootParameter::FrameConstants].InitAsConstants(FrameContext::frameConstantsSize, 1);  // b1
-    rootParameters[RootParameter::BuffersDescriptorIndices].InitAsConstants(SizeOfInUint(BuffersDescriptorIndices), 2);  // b2
+    std::array<CD3DX12_ROOT_PARAMETER, 1> rootParameters{};
+    rootParameters[0].InitAsConstants(32, 0); // b0
 
     // Static sampler
     std::array<CD3DX12_STATIC_SAMPLER_DESC, 2> staticSamplers{};
@@ -1615,8 +1599,9 @@ static void InitFrameResources()
 
     // Root Signature
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-        RootParameter::Count, rootParameters, static_cast<UINT>(staticSamplers.size()), staticSamplers.data(), flags);
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(static_cast<UINT>(rootParameters.size()), rootParameters.data(),
+                                                            static_cast<UINT>(staticSamplers.size()), staticSamplers.data(),
+                                                            flags);
 
     ComPtr<ID3DBlob> signatureBlob;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
@@ -1634,8 +1619,8 @@ static void InitFrameResources()
     std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2> argDesc{};
     argDesc[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
     argDesc[0].Constant = {
-        .RootParameterIndex = RootParameter::PerDrawConstants,
-        .DestOffsetIn32BitValues = 0,
+        .RootParameterIndex = 0,
+        .DestOffsetIn32BitValues = SizeOfInUint(BuffersDescriptorIndices) + 1,
         .Num32BitValuesToSet = SizeOfInUint(DrawMeshCommand::constants),
     };
     argDesc[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
@@ -1648,26 +1633,6 @@ static void InitFrameResources()
 
     CHECK_HR(g_Device->CreateCommandSignature(&signatureDesc, g_RootSignature.Get(),
                                               IID_PPV_ARGS(&g_DrawMeshCommandSignature)));
-  }
-
-  // Compute skinning root signature
-  // TODO: reuse same command signature as above to avoid switching?
-  {
-    D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-    CD3DX12_ROOT_PARAMETER1 rootParameters[SkinningCSRootParameter::Count] = {};
-    rootParameters[SkinningCSRootParameter::BuffersOffsets].InitAsConstants(SizeOfInUint(SkinningPerDispatchConstants), 0);  // b0
-    rootParameters[SkinningCSRootParameter::BuffersDescriptorIndices].InitAsConstants(
-        SizeOfInUint(SkinningBuffersDescriptorIndices), 1);  // b1
-
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(SkinningCSRootParameter::Count, rootParameters, 0, nullptr, flags);
-
-    ID3DBlob* signatureBlobPtr;
-    CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlobPtr, nullptr));
-
-    ID3D12RootSignature* rootSignature = nullptr;
-    CHECK_HR(g_Device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(),
-                                           IID_PPV_ARGS(&rootSignature)));
-    g_ComputeRootSignature.Attach(rootSignature);
   }
 
   // Mesh Shader Pipeline State for static objects
@@ -1717,7 +1682,7 @@ static void InitFrameResources()
     D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-        .pRootSignature = g_ComputeRootSignature.Get(),
+        .pRootSignature = g_RootSignature.Get(),
         .CS = computeShader,
     };
 
@@ -1963,8 +1928,18 @@ static void InitFrameResources()
     ctx->skinningBuffersDescriptorsIndices = g_MeshStore.SkinningBuffersDescriptorIndices(static_cast<UINT>(i));
     ctx->cullingBuffersDescriptorsIndices = {
         .InstancesBufferId = g_MeshStore.InstancesBufferId(static_cast<UINT>(i)),
-        .DrawMeshCommandsBufferId = g_DrawMeshCommands->UavDescriptorAlloc(IssouRHI::FullBufferRange, sizeof(DrawMeshCommand), g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET).index,
+        .DrawMeshCommandsBufferId = g_DrawMeshCommands->DescriptorIndex({IssouRHI::BufferAccess::ReadWrite, IssouRHI::FullBufferRange, sizeof(DrawMeshCommand), DRAW_MESH_CMDS_COUNTER_OFFSET, g_DrawMeshCommands.get()}),
     };
+  }
+
+  // frame constants buffer
+  for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
+    IssouRHI::BufferDesc desc{
+      .label = std::format("Frame constants buffer {}", i),
+      .size = AlignUp(sizeof(FrameConstants), 256), // constant buffer alignment
+      .usage = IssouRHI::BufferUsage::MapWrite,
+    };
+    g_FrameContext[i].frameConstantBuffer = g_RhiDevice->CreateBuffer(desc);
   }
 
   // timestamp readback buffer
@@ -2102,7 +2077,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 static UINT CreateTexture(std::filesystem::path filename)
 {
   if (auto it = g_Textures.find(filename); it != g_Textures.end()) {
-    return it->second->CreateView()->SrvDescriptorAlloc().index;
+    return it->second->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read);
   }
 
   TexMetadata metadata;
@@ -2152,6 +2127,6 @@ static UINT CreateTexture(std::filesystem::path filename)
 
   g_Textures[filename] = tex;
 
-  return tex->CreateView()->SrvDescriptorAlloc().index;
+  return tex->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read);
 }
 }  // namespace Renderer

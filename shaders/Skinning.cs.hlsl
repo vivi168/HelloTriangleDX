@@ -1,8 +1,9 @@
 #include "Shared.h"
 
-ConstantBuffer<SkinningPerDispatchConstants> g_Constants : register(b0);
-
-ConstantBuffer<SkinningBuffersDescriptorIndices> g_DescIds : register(b1);
+cbuffer PushConstants : register(b0) {
+  SkinningBuffersDescriptorIndices g_DescIds;
+  SkinningPerDispatchConstants g_Constants;
+}
 
 float4 UnpackBoneWeights(uint bw)
 {

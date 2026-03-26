@@ -1,13 +1,10 @@
 #include "Shared.h"
 
-cbuffer PerDispatch : register(b0)
-{
+cbuffer PushConstants : register(b0) {
+  CullingBuffersDescriptorIndices g_DescIds;
+  uint FrameConstantsIndex;
   uint NumInstances;
-};
-
-ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
-
-ConstantBuffer<CullingBuffersDescriptorIndices> g_DescIds : register(b2);
+}
 
 struct DrawMeshCommand {
   uint instanceIndex;
@@ -29,6 +26,8 @@ void main(uint dtid : SV_DispatchThreadID)
 
   float4 center = mul(float4(mi.boundingSphere.xyz, 1), mi.worldMatrix);
   float radius = mi.boundingSphere.w * mi.scale;
+
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
 
   for (int i = 0; i < 6; ++i) {
     if (dot(center, g_FrameConstants.FrustumPlanes[i]) < -radius) {

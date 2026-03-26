@@ -250,14 +250,14 @@ class TextureView;
 
 class Texture {
 public:
-  static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(TextureDesc& desc);
+  static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(const TextureDesc& desc);
 
-  Texture(Device* device, TextureDesc& desc);
+  Texture(Device* device, const TextureDesc& desc);
   ~Texture();
 
   // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();
-  std::shared_ptr<TextureView> CreateView(TextureViewDesc& desc);
+  std::shared_ptr<TextureView> CreateView(const TextureViewDesc& desc);
 
   Device* GetDevice() const { return m_Device; }
   TextureUsage Usage() const { return m_Desc.usage; }
@@ -269,10 +269,11 @@ public: // D3D12 impl specific
   // TODO: implement our own struct...
   std::optional<D3D12_TEXTURE_BARRIER> Transition(StageAccessLayout to);
 
-  D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(TextureViewDesc& desc) const;
-  D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(TextureViewDesc& desc) const;
-  D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(TextureViewDesc& desc) const;
-  D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(TextureViewDesc& desc) const;
+  D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(const TextureViewDesc& desc) const;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(const TextureViewDesc& desc) const;
+  // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
+  D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(const TextureViewDesc& desc) const;
+  D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(const TextureViewDesc& desc) const;
 
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
 private:
@@ -289,13 +290,20 @@ private:  // D3D12 impl specific
   StageAccessLayout m_CurrentStageAccessLayout;
 };
 
+enum class TextureAccess { Read, ReadWrite };
+
 class TextureView {
 public:
-  TextureView(Texture* tex, TextureViewDesc& desc);
+  TextureView(Texture* tex, const TextureViewDesc& desc);
   ~TextureView();
+
+  uint32_t DescriptorIndex(TextureAccess access) const;
+  uint64_t DescriptorHandle(TextureAccess access) const;
 public: // D3D12 impl specific
+  // Internal use
   DescriptorAllocation SrvDescriptorAlloc() const { return m_Srv; }
   DescriptorAllocation UavDescriptorAlloc() const { return m_Uav; }
+  // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
   DescriptorAllocation RtvDescriptorAlloc() const { return m_Rtv; }
   DescriptorAllocation DsvDescriptorAlloc() const { return m_Dsv; }
 
@@ -325,8 +333,8 @@ enum class BufferUsage : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
 struct BufferRange {
-  uint64_t offset ;
-  uint64_t size ;
+  uint64_t offset;
+  uint64_t size;
 
   bool operator==(const BufferRange& other) const { return offset == other.offset && size == other.size; }
 };
@@ -338,12 +346,27 @@ struct BufferDesc {
   BufferUsage usage;
 };
 
+enum class BufferAccess { Constant, Read, ReadWrite };
+
+class Buffer;
+
+struct BufferViewDesc {
+  BufferAccess access;
+  BufferRange range = FullBufferRange;
+  uint32_t elementStride = 0;
+  size_t counterOffset = 0;
+  Buffer* counter = nullptr;
+};
+
 class Buffer {
 public:
-  Buffer(Device* device, BufferDesc& desc);
+  Buffer(Device* device, const BufferDesc& desc);
   ~Buffer();
 
   uint64_t Size() const { return m_Desc.size; }
+public:
+  uint32_t DescriptorIndex(const BufferViewDesc& desc);
+  // FIXME: sort methods below by correct "ownership"
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
 
@@ -356,16 +379,17 @@ public: // D3D12 impl specific
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 
-  DescriptorAllocation SrvDescriptorAlloc(BufferRange range, UINT byteStride);
-  DescriptorAllocation UavDescriptorAlloc(BufferRange range, UINT byteStride, Buffer* counter = nullptr, UINT64 counterOffsetInBytes = 0);
-
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
 
 private:
+  BufferRange ClampBufferRange(BufferRange range);
+
+  DescriptorAllocation CbvDescriptorAlloc(BufferRange range);
+  DescriptorAllocation SrvDescriptorAlloc(BufferRange range, UINT byteStride);
+  DescriptorAllocation UavDescriptorAlloc(BufferRange range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
+
   Device* m_Device;
   BufferDesc m_Desc;
-
-  BufferRange ClampBufferRange(BufferRange range);
 private: // D3D12 impl specific
   void Map();
   void Unmap();
@@ -376,7 +400,7 @@ private: // D3D12 impl specific
 
   struct ViewKey {
     BufferRange range;
-    UINT byteStride;
+    UINT byteStride = 0;
     Buffer* counter = nullptr;
     UINT64 counterOffsetInBytes = 0;
 
@@ -402,6 +426,7 @@ private: // D3D12 impl specific
     };
   };
 
+  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Cbvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 
@@ -485,18 +510,12 @@ public:
 
   void PrintAdapterInformation();
 
-  // TODO: tmp. make interface.
-  ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
-  IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
-  D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
-  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
-
-  std::shared_ptr<Texture> CreateTexture(TextureDesc& desc);
-  std::shared_ptr<Buffer> CreateBuffer(BufferDesc& desc);
+  std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
+  std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
 
   std::shared_ptr<ComputePipeline> CreateComputePipeline(ComputePipelineDesc& desc);
 
-  DescriptorAllocation AllocSrvUavDescriptor();
+  DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
   DescriptorAllocation AllocDsvDescriptor();
 
@@ -504,6 +523,13 @@ public:
   void FreeRtvDescriptor(DescriptorAllocation alloc);
   void FreeDsvDescriptor(DescriptorAllocation alloc);
 
+public:
+  ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
+  IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
+  D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
+  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
+
+  // TODO: rename to CbvSrvUavDescriptorHeap
   ID3D12DescriptorHeap* SrvUavDescriptorHeap() const { return m_SrvUavDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }

@@ -1,7 +1,9 @@
 #include "MeshletCommon.hlsli"
 #include "VisibilityBufferCommon.hlsli"
 
-ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
+cbuffer PushConstants : register(b0) {
+  BuffersDescriptorIndices g_DescIds;
+}
 
 SamplerState s1 : register(s1);
 

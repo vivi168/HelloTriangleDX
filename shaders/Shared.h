@@ -17,6 +17,7 @@ using hlsl_float2 = DirectX::XMFLOAT2;
 using hlsl_uint = UINT;
 using hlsl_bounding_sphere = DirectX::BoundingSphere;
 using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
+#define ASSERT_SIZE_M16(T) static_assert(sizeof(T) % 16 == 0, #T " size must be multiple of 16")
 #else
 #define hlsl_float4x4 float4x4
 #define hlsl_float3x3 float3x3
@@ -26,6 +27,7 @@ using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
 #define hlsl_uint uint
 #define hlsl_bounding_sphere float4
 #define hlsl_byte4 uint
+#define ASSERT_SIZE_M16(T)
 #endif
 
 struct FrameConstants {
@@ -57,7 +59,9 @@ struct SkinningBuffersDescriptorIndices {
   hlsl_uint vertexTangentsBufferId;
   hlsl_uint vertexBlendWeightsAndIndicesBufferId;
   hlsl_uint boneMatricesBufferId;
+  hlsl_float3 _pad;
 };
+ASSERT_SIZE_M16(SkinningBuffersDescriptorIndices);
 
 struct SkinningPerDispatchConstants {
   hlsl_uint firstPosition;
@@ -91,6 +95,7 @@ struct MaterialData {
   // TODO: Add double sided true/false?
   hlsl_uint pad;
 };
+ASSERT_SIZE_M16(MaterialData);
 
 struct MeshletData {
   hlsl_uint numVerts;
@@ -105,6 +110,7 @@ struct MeshletData {
   hlsl_uint instanceIndex;
   hlsl_uint materialIndex;
 };
+ASSERT_SIZE_M16(MeshletData);
 
 struct MeshInstanceData {
   // TODO: keep this separate to minimize data transfer?
@@ -131,10 +137,6 @@ struct MeshInstanceData {
   // TODO: add skinned true/false?
   hlsl_float2 _pad;
 };
-
-#ifdef __cplusplus
-static_assert(sizeof(MeshletData) % 16 == 0);
-static_assert(sizeof(MeshInstanceData) % 16 == 0);
-#endif
+ASSERT_SIZE_M16(MeshInstanceData);
 
 #endif

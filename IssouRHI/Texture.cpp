@@ -46,7 +46,7 @@ static uint32_t PlaneSlice(TextureAspect aspect)
   }
 }
 
-D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(TextureDesc& desc)
+D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(const TextureDesc& desc)
 {
   switch (desc.dimension) {
     case TextureDimension::Texture1D:
@@ -78,7 +78,7 @@ D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(TextureDesc& desc)
   return D3D12_RESOURCE_DESC1{};
 }
 
-Texture::Texture(Device* device, TextureDesc& desc) : m_Device(device), m_Desc(desc)
+Texture::Texture(Device* device, const TextureDesc& desc) : m_Device(device), m_Desc(desc)
 {
   m_CurrentStageAccessLayout.stage = D3D12_BARRIER_SYNC_NONE;
   m_CurrentStageAccessLayout.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
@@ -121,7 +121,7 @@ std::shared_ptr<TextureView> Texture::CreateView()
   return CreateView(desc);
 }
 
-std::shared_ptr<TextureView> Texture::CreateView(TextureViewDesc& desc)
+std::shared_ptr<TextureView> Texture::CreateView(const TextureViewDesc& desc)
 {
   if (auto it = m_Views.find(desc); it != m_Views.end()) {
     return it->second;
@@ -203,7 +203,7 @@ std::optional<D3D12_TEXTURE_BARRIER> Texture::Transition(StageAccessLayout to)
   return barrier;
 }
 
-D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) const
+D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(const TextureViewDesc& desc) const
 {
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
   srvDesc.Format = DXGIFormat(desc.format);
@@ -251,7 +251,7 @@ D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(TextureViewDesc& desc) co
   return srvDesc;
 }
 
-D3D12_UNORDERED_ACCESS_VIEW_DESC Texture::UavDescriptor(TextureViewDesc& desc) const
+D3D12_UNORDERED_ACCESS_VIEW_DESC Texture::UavDescriptor(const TextureViewDesc& desc) const
 {
   D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
   uavDesc.Format = DXGIFormat(desc.format);
@@ -283,7 +283,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC Texture::UavDescriptor(TextureViewDesc& desc) c
   return uavDesc;
 }
 
-D3D12_RENDER_TARGET_VIEW_DESC Texture::RtvDescriptor(TextureViewDesc& desc) const
+D3D12_RENDER_TARGET_VIEW_DESC Texture::RtvDescriptor(const TextureViewDesc& desc) const
 {
   D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
   rtvDesc.Format = DXGIFormat(desc.format);
@@ -311,7 +311,7 @@ D3D12_RENDER_TARGET_VIEW_DESC Texture::RtvDescriptor(TextureViewDesc& desc) cons
   return rtvDesc;
 }
 
-D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(TextureViewDesc& desc) const
+D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(const TextureViewDesc& desc) const
 {
   D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
   dsvDesc.Format = DXGIFormat(desc.format);
@@ -336,14 +336,14 @@ D3D12_DEPTH_STENCIL_VIEW_DESC Texture::DsvDescriptor(TextureViewDesc& desc) cons
   return dsvDesc;
 }
 
-TextureView::TextureView(Texture* tex, TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc)
+TextureView::TextureView(Texture* tex, const TextureViewDesc& desc) : m_Texture(tex), m_Desc(desc)
 {
   if (m_Texture->Usage() & TextureUsage::TextureBinding) {
-    m_Srv = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+    m_Srv = m_Texture->GetDevice()->AllocCbvSrvUavDescriptor();
   }
 
   if (m_Texture->Usage() & TextureUsage::StorageBinding) {
-    m_Uav = m_Texture->GetDevice()->AllocSrvUavDescriptor();
+    m_Uav = m_Texture->GetDevice()->AllocCbvSrvUavDescriptor();
   }
 
   if (m_Texture->Usage() & TextureUsage::RenderAttachment) {
@@ -361,6 +361,30 @@ TextureView::~TextureView()
   m_Texture->GetDevice()->FreeSrvUavDescriptor(m_Uav);
   m_Texture->GetDevice()->FreeRtvDescriptor(m_Rtv);
   m_Texture->GetDevice()->FreeDsvDescriptor(m_Dsv);
+}
+
+uint32_t TextureView::DescriptorIndex(TextureAccess access) const
+{
+  switch (access) {
+  case TextureAccess::Read:
+    return m_Srv.index;
+  case TextureAccess::ReadWrite:
+    return m_Uav.index;
+  default:
+    std::unreachable();
+  }
+}
+
+uint64_t TextureView::DescriptorHandle(TextureAccess access) const
+{
+  switch (access) {
+  case TextureAccess::Read:
+    return m_Srv.gpuHandle.ptr;
+  case TextureAccess::ReadWrite:
+    return m_Uav.gpuHandle.ptr;
+  default:
+    std::unreachable();
+  }
 }
 
 }  // namespace IssouRHI

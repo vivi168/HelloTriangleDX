@@ -1,11 +1,11 @@
 #include "MeshletCommon.hlsli"
 #include "VisibilityBufferCommon.hlsli"
 
-ConstantBuffer<FillGBufferPerDispatchConstants> g_PerDispatchConstants : register(b0);
-
-ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
-
-ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
+cbuffer PushConstants : register(b0) {
+  FillGBufferPerDispatchConstants g_PerDispatchConstants;
+  BuffersDescriptorIndices g_DescIds;
+  uint FrameConstantsIndex;
+}
 
 SamplerState s1 : register(s1);
 
@@ -112,6 +112,8 @@ float3 Interpolate(float3 lambda, float3 v0, float3 v1, float3 v2)
 void main(uint3 dtid : SV_DispatchThreadID)
 {
   uint2 position = dtid.xy;
+
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
 
   if (any(position >= uint2(g_FrameConstants.ScreenSize))) {
     return;

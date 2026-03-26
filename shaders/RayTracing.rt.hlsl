@@ -5,14 +5,13 @@ struct ShadowPayload
   float visibility;
 };
 
-cbuffer PerDrawConstants : register(b0)
+cbuffer PushConstants : register(b0)
 {
   uint GBufferWorldPosId;
   uint ShadowBufferId;
   uint TlasId;
+  uint FrameConstantsIndex;
 }
-
-ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
 
 [shader("raygeneration")]
 void ShadowRayGen()
@@ -24,6 +23,7 @@ void ShadowRayGen()
 
   RaytracingAccelerationStructure Scene = ResourceDescriptorHeap[TlasId];
   uint flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
   RayDesc ray = { worldPos.xyz, 1.0e-2f, normalize(-g_FrameConstants.SunDirection), 1.0e3f };
   ShadowPayload payload = { 0.0f };
 
@@ -38,6 +38,7 @@ void ShadowRayGen()
 void ShadowAnyHit(inout ShadowPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
   // TODO: sample textures to see if we hit cutout part of texture (eg: fence, leaves, etc)
+  // ^ use OMM instead in 2026 loul
 }
 
 [shader("miss")]

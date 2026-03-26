@@ -1,13 +1,10 @@
 #include "MeshletCommon.hlsli"
 
-cbuffer PerDrawConstants : register(b0)
-{
+cbuffer PushConstants : register(b0) {
+  BuffersDescriptorIndices g_DescIds;
+  uint FrameConstantsIndex;
   uint InstanceIndex;
-};
-
-ConstantBuffer<FrameConstants> g_FrameConstants : register(b1);
-
-ConstantBuffer<BuffersDescriptorIndices> g_DescIds : register(b2);
+}
 
 VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex, uint textureIndex)
 {
@@ -61,6 +58,8 @@ void main(
   MeshletData m = meshlets[mi.firstMeshlet + meshletIndex];
 
   SetMeshOutputCounts(m.numVerts, m.numPrims);
+
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
 
   if (gtid < m.numVerts)
   {

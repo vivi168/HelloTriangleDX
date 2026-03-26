@@ -3,7 +3,7 @@
 
 namespace IssouRHI
 {
-Buffer::Buffer(Device* device, BufferDesc& desc) : m_Device(device), m_Desc(desc)
+Buffer::Buffer(Device* device, const BufferDesc& desc) : m_Device(device), m_Desc(desc)
 {
   m_CurrentStageAccess.stage = D3D12_BARRIER_SYNC_NONE;
   m_CurrentStageAccess.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
@@ -120,8 +120,46 @@ std::optional<CD3DX12_BUFFER_BARRIER> Buffer::Transition(StageAccess to)
   return barrier;
 }
 
-static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(BufferRange& range, UINT byteStride)
+uint32_t Buffer::DescriptorIndex(const BufferViewDesc& desc)
 {
+  switch (desc.access) {
+  case BufferAccess::Constant:
+    return CbvDescriptorAlloc(desc.range).index;
+  case BufferAccess::Read:
+    return SrvDescriptorAlloc(desc.range, desc.elementStride).index;
+  case BufferAccess::ReadWrite:
+    return UavDescriptorAlloc(desc.range, desc.elementStride, desc.counter, desc.counterOffset).index;
+  default:
+    std::unreachable();
+  }
+}
+
+DescriptorAllocation Buffer::CbvDescriptorAlloc(BufferRange range)
+{
+  range = ClampBufferRange(range);
+
+  ViewKey k{.range = range};
+  auto& alloc = m_Cbvs[k];
+
+  if (alloc) {
+    return alloc;
+  }
+
+  alloc = m_Device->AllocCbvSrvUavDescriptor();
+
+  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc{
+    .BufferLocation = GpuAddress() + range.offset,
+    .SizeInBytes = static_cast<UINT>(range.size),
+  };
+  m_Device->GetNativeDevice()->CreateConstantBufferView(&cbvDesc, alloc.cpuHandle);
+
+  return alloc;
+}
+
+static D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(const BufferRange& range, UINT byteStride)
+{
+  assert(byteStride != 0);
+
   D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                           .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
                                           .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
@@ -138,6 +176,8 @@ DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStri
 {
   range = ClampBufferRange(range);
 
+  if (byteStride == 0) byteStride = 4;
+
   ViewKey k{.range = range, .byteStride = byteStride};
   auto& alloc = m_Srvs[k];
 
@@ -145,7 +185,7 @@ DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStri
     return alloc;
   }
 
-  alloc = m_Device->AllocSrvUavDescriptor();
+  alloc = m_Device->AllocCbvSrvUavDescriptor();
 
   auto srvDesc = SrvDescriptor(range, byteStride);
   m_Device->GetNativeDevice()->CreateShaderResourceView(Resource(), &srvDesc, alloc.cpuHandle);
@@ -153,8 +193,10 @@ DescriptorAllocation Buffer::SrvDescriptorAlloc(BufferRange range, UINT byteStri
   return alloc;
 }
 
-static D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(BufferRange& range, UINT byteStride, UINT64 counterOffsetInBytes)
+static D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(const BufferRange& range, UINT byteStride, UINT64 counterOffsetInBytes)
 {
+  assert(byteStride != 0);
+
   D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{.Format = DXGI_FORMAT_UNKNOWN,
                                            .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
                                            .Buffer = {.FirstElement = range.offset / byteStride,
@@ -173,6 +215,8 @@ DescriptorAllocation Buffer::UavDescriptorAlloc(BufferRange range,
 {
   range = ClampBufferRange(range);
 
+  if (byteStride == 0) byteStride = 4;
+
   ViewKey k{.range = range, .byteStride = byteStride, .counter = counter, .counterOffsetInBytes = counterOffsetInBytes};
   auto& alloc = m_Uavs[k];
 
@@ -180,7 +224,7 @@ DescriptorAllocation Buffer::UavDescriptorAlloc(BufferRange range,
     return alloc;
   }
 
-  alloc = m_Device->AllocSrvUavDescriptor();
+  alloc = m_Device->AllocCbvSrvUavDescriptor();
 
   auto uavDesc = UavDescriptor(range, byteStride, counterOffsetInBytes);
   m_Device->GetNativeDevice()->CreateUnorderedAccessView(Resource(), counter ? counter->Resource() : nullptr, &uavDesc,

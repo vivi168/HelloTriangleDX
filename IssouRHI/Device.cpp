@@ -197,13 +197,11 @@ Device::Device(const GPUSelection& gpuSelection)
   // Create root signature
   {
     // Root parameters
-    constexpr UINT RootParameterCount = 4;
-    constexpr UINT ConstantCount = 16;
+    constexpr UINT RootParameterCount = 1;
+    constexpr UINT ConstantCount = 32;
 
     CD3DX12_ROOT_PARAMETER rootParameters[RootParameterCount] = {};
-    for (UINT i = 0; i < RootParameterCount; i++) {
-      rootParameters[i].InitAsConstants(ConstantCount, i);
-    }
+    rootParameters[0].InitAsConstants(ConstantCount, 0);
 
     // Static sampler
     constexpr UINT StaticSamplerCount = 2;
@@ -327,7 +325,7 @@ static std::wstring StringToWstring(std::string_view s)
   return ws;
 }
 
-std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
+std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
 {
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
   if (desc.usage & TextureUsage::CopyDst) {
@@ -366,7 +364,7 @@ std::shared_ptr<Texture> Device::CreateTexture(TextureDesc& desc)
   return tex;
 }
 
-std::shared_ptr<Buffer> Device::CreateBuffer(BufferDesc& desc)
+std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
 {
   assert(!((desc.usage & BufferUsage::MapRead) && (desc.usage & BufferUsage::MapWrite)));
 
@@ -417,7 +415,7 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDe
   return computePipeline;
 }
 
-DescriptorAllocation Device::AllocSrvUavDescriptor()
+DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
 {
   return m_SrvUavDescriptorHeap.Alloc();
 }
