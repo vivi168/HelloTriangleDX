@@ -1213,7 +1213,7 @@ void Render(float time)
     g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     {
       std::array transitions{
-        BufferTransition{g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}},
+        BufferTransition{g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_VERTEX_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}},
         BufferTransition{g_DrawMeshCommands.get(), {D3D12_BARRIER_SYNC_EXECUTE_INDIRECT, D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT}},
       };
 
@@ -1330,8 +1330,8 @@ void Render(float time)
   {
     {
       std::array transitions{
-          TextureTransition{g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
-          TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_DRAW, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+          TextureTransition{g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
+          TextureTransition{g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
       };
 
       auto nb = BuildBarriers<TextureTransition, D3D12_TEXTURE_BARRIER>(transitions, g_TextureBarriers);
