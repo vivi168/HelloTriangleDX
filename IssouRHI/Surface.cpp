@@ -8,7 +8,7 @@ namespace IssouRHI
 
 Surface::Surface(Device* device, HWND hwnd) : m_Handle(hwnd), m_Device(device)
 {
-  m_CommandQueue = device->GetNativeQueue();
+  m_CommandQueue = device->GetQueue()->GetNativeQueue();
 
   // Fence
   {

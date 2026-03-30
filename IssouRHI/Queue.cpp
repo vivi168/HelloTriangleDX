@@ -24,6 +24,18 @@ Queue::~Queue()
   CloseHandle(m_FenceEvent);
 }
 
+void Queue::Create()
+{
+  D3D12_COMMAND_QUEUE_DESC qDesc{
+      .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+      .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+  };
+
+  ID3D12CommandQueue* commandQueue = nullptr;
+  CHECK_HR(m_Device->GetNativeDevice()->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&commandQueue)));
+  m_CommandQueue.Attach(commandQueue);
+}
+
 CommandEncoder Queue::CreateCommandEncoder(std::optional<std::string> label)
 {
   auto cb = FindOrCreateCommandBuffer();
@@ -39,9 +51,9 @@ void Queue::Submit(std::span<CommandBuffer*> commandBuffers)
   cmdLists.reserve(commandBuffers.size());
 
   for (auto cb : commandBuffers) {
-    cb->fenceValue = m_NextFenceValue;
+    cb->UpdateFenceValue(m_NextFenceValue);
     m_CommandBuffersExecuting.push_back(cb);
-    cmdLists.push_back(static_cast<ID3D12CommandList*>(cb->commandList.Get()));
+    cmdLists.push_back(static_cast<ID3D12CommandList*>(cb->CommandList()));
   }
 
   if (!cmdLists.empty()) {
@@ -79,19 +91,14 @@ CommandBuffer* Queue::FindOrCreateCommandBuffer()
 
 CommandBuffer* Queue::CreateCommandBuffer()
 {
-  auto cb = std::make_unique<CommandBuffer>();
+  auto cb = std::make_unique<CommandBuffer>(m_Device);
 
-  ID3D12CommandAllocator* commandAllocator = nullptr;
-  CHECK_HR(m_Device->GetNativeDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-  cb->commandAllocator.Attach(commandAllocator);
-
-  CHECK_HR(m_Device->GetNativeDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cb->commandAllocator.Get(), NULL, IID_PPV_ARGS(&cb->commandList)));
-
-  std::array descriptorHeaps{m_Device->SrvUavDescriptorHeap()};
-  cb->commandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
+  cb->Create();
 
   CommandBuffer* ptr = cb.get();
   m_CommandBuffers.push_back(std::move(cb));
+
+  printf("CREATE COMMAND BUFFER\n");
 
   return ptr;
 }
@@ -102,7 +109,7 @@ void Queue::RecycleCommandBuffers()
 
   for (auto it = m_CommandBuffersExecuting.begin(); it != m_CommandBuffersExecuting.end();) {
     auto cb = *it;
-    if (cb->fenceValue <= completedValue) {
+    if (cb->FenceValue() <= completedValue) {
       ResetCommandBuffer(cb);
       m_CommandBuffersAvailable.splice(m_CommandBuffersAvailable.end(), m_CommandBuffersExecuting, it++);
     } else {
@@ -114,33 +121,53 @@ void Queue::RecycleCommandBuffers()
 void Queue::ResetCommandBuffer(CommandBuffer* commandBuffer)
 {
   commandBuffer->Reset();
+  commandBuffer->Init();
+}
 
-  std::array descriptorHeaps{m_Device->SrvUavDescriptorHeap()};
-  commandBuffer->commandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
+CommandBuffer::CommandBuffer(Device* device) : m_Device(device) {}
+
+CommandBuffer::~CommandBuffer()
+{
+  // TODO
+}
+
+void CommandBuffer::Create()
+{
+  ID3D12CommandAllocator* commandAllocator = nullptr;
+  CHECK_HR(m_Device->GetNativeDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+  m_CommandAllocator.Attach(commandAllocator);
+
+  CHECK_HR(m_Device->GetNativeDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_CommandAllocator.Get(), NULL, IID_PPV_ARGS(&m_CommandList)));
+
+  Init();
+}
+
+void CommandBuffer::Init()
+{
+  std::array descriptorHeaps{m_Device->CbvSrvUavDescriptorHeap()};
+  m_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 }
 
 void CommandBuffer::Reset()
 {
-  CHECK_HR(commandAllocator->Reset());
-  CHECK_HR(commandList->Reset(commandAllocator.Get(), nullptr));
+  CHECK_HR(m_CommandAllocator->Reset());
+  CHECK_HR(m_CommandList->Reset(m_CommandAllocator.Get(), nullptr));
 }
 
-CommandEncoder::CommandEncoder(std::string label, CommandBuffer* commandBuffer) : m_Label(label), m_CommandBuffer(commandBuffer) {}
-
-CommandEncoder::~CommandEncoder()
+void CommandBuffer::SetComputeRootSignatureIfNeeded()
 {
-  assert(m_CommandBuffer == nullptr); // Forgot to call Finish() ?
-  // or simply close cmd list and recycle cmd buffer since it was not used?
+  if (m_ComputeRootSignatureSet) return;
+
+  m_CommandList->SetComputeRootSignature(m_Device->RootSignature());
+  m_ComputeRootSignatureSet = true;
 }
 
-CommandBuffer* CommandEncoder::Finish()
+void CommandBuffer::SetGraphicsRootSignatureIfNeeded()
 {
-  m_CommandBuffer->commandList->Close();
+  if (m_GraphicRootSignatureSet) return;
 
-  CommandBuffer* ptr = m_CommandBuffer;
-  m_CommandBuffer = nullptr;
-
-  return ptr;
+  m_CommandList->SetGraphicsRootSignature(m_Device->RootSignature());
+  m_GraphicRootSignatureSet = true;
 }
 
 }  // namespace IssouRHI

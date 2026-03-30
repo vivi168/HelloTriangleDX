@@ -29,10 +29,12 @@ set(D3D12MA_SOURCES
 set(ISSOURHI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/IssouRHI)
 set(ISSOURHI_SOURCES
     ${ISSOURHI_DIR}/Buffer.cpp
+    ${ISSOURHI_DIR}/CommandEncoder.cpp
     ${ISSOURHI_DIR}/DescriptorHeap.cpp
     ${ISSOURHI_DIR}/Device.cpp
     ${ISSOURHI_DIR}/Pipeline.cpp
     ${ISSOURHI_DIR}/Queue.cpp
+    ${ISSOURHI_DIR}/QuerySet.cpp
     ${ISSOURHI_DIR}/Utils.cpp
     ${ISSOURHI_DIR}/Surface.cpp
     ${ISSOURHI_DIR}/Texture.cpp)

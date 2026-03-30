@@ -27,6 +27,7 @@
 #define ENABLE_DEBUG_LAYER true
 #endif
 
+#define ISSOURHI_BIT(b) (1 << (b))
 #define ISSOURHI_ENUM_CLASS_OP(e) \
   static_assert(sizeof(e) <= sizeof(uint32_t)); \
   constexpr e operator ~ (e a) { return (e)(~(uint32_t)a); } \
@@ -39,6 +40,7 @@
 #define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x
 #define LINE_STRING STRINGIZE(__LINE__)
+// TODO: return std::expected for function that call CHECK_HR?
 #define CHECK_HR(expr)                                                             \
   do {                                                                             \
     if (FAILED(expr)) {                                                            \
@@ -85,6 +87,127 @@ private:
   std::deque<UINT> m_FreeIndices;
 
   // TODO: mutex
+};
+
+class Device;
+
+enum class QueryType {
+  Timestamp,
+};
+
+struct QuerySetDesc {
+  std::string label;
+  QueryType type;
+  uint32_t count;
+};
+
+class QuerySet
+{
+public:
+  QuerySet(Device* device, const QuerySetDesc& desc);
+  ~QuerySet();
+
+  void Create();
+public:
+  ID3D12QueryHeap* QueryHeap() const { return m_QueryHeap.Get(); }
+private:
+  Device* m_Device;
+  QuerySetDesc m_Desc;
+private:
+  Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_QueryHeap;
+};
+
+struct TimestampWrites {
+  uint32_t beginningOfPassWriteIndex;
+  uint32_t endOfPassWriteIndex;
+
+  QuerySet* querySet;
+};
+inline constexpr uint32_t QuerySetIndexUndefined = std::numeric_limits<uint32_t>::max();
+
+enum class PipelineStage : uint32_t {
+  None = 0,
+  All = std::numeric_limits<uint32_t>::max(),
+  // Graphics
+  IndexInput = ISSOURHI_BIT(0),
+  VertexShader = ISSOURHI_BIT(1),
+  TaskShader = ISSOURHI_BIT(2),
+  MeshShader = ISSOURHI_BIT(3),
+  FragmentShader = ISSOURHI_BIT(4),
+  DepthStencilAttachment = ISSOURHI_BIT(5),
+  ColorAttachment = ISSOURHI_BIT(6),
+  // Compute
+  ComputeShader = ISSOURHI_BIT(7),
+  // Ray Tracing
+  RayTracingShader = ISSOURHI_BIT(8),
+  AccelerationStructure = ISSOURHI_BIT(9),
+  MicroMap = ISSOURHI_BIT(10),
+  // Indirect
+  Indirect = ISSOURHI_BIT(11),
+  // Copy, Resolve, Clear
+  Copy = ISSOURHI_BIT(12),
+  Resolve = ISSOURHI_BIT(13),
+  ClearStorage = ISSOURHI_BIT(14),
+};
+ISSOURHI_ENUM_CLASS_OP(PipelineStage);
+
+enum class Access : uint32_t {
+  None = 0,
+  // Buffer
+  IndexBuffer = ISSOURHI_BIT(0),
+  VertexBuffer = ISSOURHI_BIT(1),
+  ConstantBuffer = ISSOURHI_BIT(2),
+  ArgumentBuffer = ISSOURHI_BIT(3),
+  ScratchBuffer = ISSOURHI_BIT(4),
+  // Attachment
+  ColorAttachmentRead = ISSOURHI_BIT(5),
+  ColorAttachmentWrite = ISSOURHI_BIT(6),
+  DepthStencilAttachmentRead = ISSOURHI_BIT(7),
+  DepthStencilAttachmentWrite = ISSOURHI_BIT(8),
+  ShadingRateAttachment = ISSOURHI_BIT(9),
+  InputAttachment = ISSOURHI_BIT(10),
+  // Acceleration Structures
+  AccelerationStructureRead = ISSOURHI_BIT(11),
+  AccelerationStructureWrite = ISSOURHI_BIT(12),
+  // Micromap
+  MicromapRead = ISSOURHI_BIT(13),
+  MicromapWrite = ISSOURHI_BIT(14),
+  // Shader Resources
+  ShaderResource = ISSOURHI_BIT(15),
+  ShaderResourceStorage = ISSOURHI_BIT(16),
+  ShaderBindingTable = ISSOURHI_BIT(17),
+  // Copy
+  CopySource = ISSOURHI_BIT(18),
+  CopyDestination = ISSOURHI_BIT(19),
+  // Resolve
+  ResolveSource = ISSOURHI_BIT(20),
+  ResolveDestination = ISSOURHI_BIT(21),
+  // Clear
+  ClearStorage = ISSOURHI_BIT(22),
+};
+ISSOURHI_ENUM_CLASS_OP(Access);
+
+enum class TextureLayout {
+  Undefined,
+  General,
+  Present,
+  // Attachment
+  ColorAttachment,
+  DepthStencilAttachment,
+  DepthReadonlyStencilAttachment,
+  DepthAttachmentStencilReadonly,
+  DepthStencilReadonly,
+  ShadingRateAttachment,
+  InputAttachment,
+  // Shader Resources
+  ShaderResource,
+  ShaderResourceStorage,
+  // Copy
+  CopySource,
+  CopyDestination,
+  // Resolve
+  ResolveSource,
+  ResolveDestination,
 };
 
 struct StageAccessLayout {
@@ -245,7 +368,8 @@ struct TextureViewDesc {
 
 // forward decl.
 // should be useless one we split files correctly (public interface + backend specific)
-class Device;
+// for class that have a m_Device, m_Label, inherit from a common Base.
+// Base <- Interface (public interface impl) <- Impl ( <- API specific impl)
 class TextureView;
 
 class Texture {
@@ -266,7 +390,7 @@ public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
-  // TODO: implement our own struct...
+  // FIXME: useless? since we shouldn't be tracking the state of the resource from here....
   std::optional<D3D12_TEXTURE_BARRIER> Transition(StageAccessLayout to);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(const TextureViewDesc& desc) const;
@@ -287,6 +411,7 @@ private:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
 
+  // FIXME: This does not belong here... We should have something to track resource per command buffer...
   StageAccessLayout m_CurrentStageAccessLayout;
 };
 
@@ -374,7 +499,7 @@ public: // D3D12 impl specific
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);
 
-  // TODO: implement our own struct...
+  // FIXME: useless? since we shouldn't be tracking the state of the resource from here....
   std::optional<CD3DX12_BUFFER_BARRIER> Transition(StageAccess to);
 
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
@@ -430,6 +555,7 @@ private: // D3D12 impl specific
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 
+  // FIXME: This does not belong here... We should have something to track resource per command buffer...
   StageAccess m_CurrentStageAccess;
 };
 
@@ -439,34 +565,12 @@ enum class ShaderStage : uint32_t {
   Fragment = 1 << 1,
   Compute = 1 << 2,
   Mesh = 1 << 3,
-  Raytracing = 1 << 4
+  RayTracing = 1 << 4
 };
 ISSOURHI_ENUM_CLASS_OP(ShaderStage)
 
 struct ShaderModule {
-  ShaderModule(std::filesystem::path file)
-  {
-    std::ifstream inFile(file, std::ios::in | std::ios::binary | std::ios::ate);
-
-    if (!inFile && file.is_relative()) {
-      inFile.open(GetExecutableDirectory() / file, std::ios::in | std::ios::binary | std::ios::ate);
-    }
-
-    if (!inFile) throw std::runtime_error("Read ShaderModule");
-
-    const std::streampos len = inFile.tellg();
-    if (!inFile) throw std::runtime_error("Read ShaderModule");
-
-    m_Code.resize(size_t(len));
-
-    inFile.seekg(0, std::ios::beg);
-    if (!inFile) throw std::runtime_error("Read ShaderModule");
-
-    inFile.read(reinterpret_cast<char*>(m_Code.data()), len);
-    if (!inFile) throw std::runtime_error("Read ShaderModule");
-
-    inFile.close();
-  }
+  ShaderModule(std::filesystem::path file);
 
   const uint8_t* Data() const { return m_Code.data(); }
 
@@ -479,13 +583,17 @@ private:
 class PipelineBase
 {
 public:
-  virtual ~PipelineBase() = default;
+  PipelineBase(Device* device);
+  virtual ~PipelineBase();
 
-public:  // D3D12 impl specific
-  void Attach(ID3D12PipelineState* pso);
+  virtual void Create() = 0;
 
-private:  // D3D12 impl specific
+public:
+  ID3D12PipelineState* PipelineState() const { return m_Pso.Get(); }
+protected:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
+
+  Device* m_Device;
 };
 
 struct ComputePipelineDesc {
@@ -496,11 +604,24 @@ struct ComputePipelineDesc {
 class ComputePipeline : public PipelineBase
 {
 public:
-  ComputePipeline(Device* device);
+  ComputePipeline(Device* device, const ComputePipelineDesc& desc);
   ~ComputePipeline();
+
+  void Create() override;
 private:
-  Device* m_Device;
+  ComputePipelineDesc m_Desc;
 };
+
+struct RenderPipelineDesc;
+class RenderPipeline;
+
+struct MeshPipelineDesc;
+class MeshPipeline;
+
+struct RayTracingPipelineDesc;
+class RayTracingPipeline;
+
+class Queue;
 
 class Device
 {
@@ -510,10 +631,13 @@ public:
 
   void PrintAdapterInformation();
 
+  Queue* GetQueue() const { return m_Queue.get(); }
+
+  std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc &desc);
   std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
 
-  std::shared_ptr<ComputePipeline> CreateComputePipeline(ComputePipelineDesc& desc);
+  std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
 
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
@@ -527,23 +651,24 @@ public:
   ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
   IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
-  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 
   ID3D12DescriptorHeap* CbvSrvUavDescriptorHeap() const { return m_CbvSrvUavDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
+
+  ID3D12RootSignature* RootSignature() const { return m_RootSignature.Get(); }
+private:
+  std::unique_ptr<Queue> m_Queue;
+
+  DescriptorHeap m_CbvSrvUavDescriptorHeap;
+  DescriptorHeap m_RtvDescriptorHeap;
+  DescriptorHeap m_DsvDescriptorHeap;
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
   Microsoft::WRL::ComPtr<ID3D12Device5> m_Device;
   Microsoft::WRL::ComPtr<D3D12MA::Allocator> m_Allocator;
   // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
   D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
-
-  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: our own Queue class here
-
-  DescriptorHeap m_CbvSrvUavDescriptorHeap;
-  DescriptorHeap m_RtvDescriptorHeap;
-  DescriptorHeap m_DsvDescriptorHeap;
 
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
 };
@@ -594,13 +719,34 @@ private:
 
 class CommandEncoder;
 
-struct CommandBuffer {
-  Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
-  Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList8> commandList;
+class CommandBuffer
+{
+public:
+  CommandBuffer(Device* device);
+  ~CommandBuffer();
 
-  UINT64 fenceValue = 0;
-
+  void Create();
+  void Init();
   void Reset();
+public:
+  void UpdateFenceValue(UINT64 value) { m_FenceValue = value; }
+  UINT64 FenceValue() const { return m_FenceValue; }
+
+  void SetComputeRootSignatureIfNeeded();
+  void SetGraphicsRootSignatureIfNeeded();
+
+  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandList.Get(); }
+private:
+  Device* m_Device;
+private:
+  Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_CommandAllocator;
+  Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList8> m_CommandList;
+
+  UINT64 m_FenceValue = 0;
+  bool m_ComputeRootSignatureSet = false;
+  bool m_GraphicRootSignatureSet = false;
+
+  // TODO: keep track of pso change
 };
 
 class Queue
@@ -609,14 +755,20 @@ public:
   Queue(Device* device);
   ~Queue();
 
+  void Create();
+
   CommandEncoder CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
 
   void Submit(std::span<CommandBuffer*> commandBuffers);
   void WaitForAll();
+public:
+  // TMP: remove this once public API is done
+  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 private:
   CommandBuffer* FindOrCreateCommandBuffer();
   CommandBuffer* CreateCommandBuffer();
   void RecycleCommandBuffers();
+  void InitCommandBuffer(CommandBuffer* commandBuffer);
   void ResetCommandBuffer(CommandBuffer* commandBuffer);
 
   Device* m_Device;
@@ -635,60 +787,122 @@ private:
 
 class ComputePassEncoder;
 class RenderPassEncoder;
-class RaytracingPassEncoder;
+class MeshPassEncoder;
+class RayTracingPassEncoder;
 
-class CommandEncoder
+struct ComputePassDesc;
+struct RenderPassDesc;
+
+class EncoderBase
+{
+public:
+  EncoderBase(CommandBuffer* commandBuffer);
+  virtual ~EncoderBase();
+public:
+  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandBuffer->CommandList(); }
+protected:
+  CommandBuffer* m_CommandBuffer;
+};
+
+class CommandEncoder : public EncoderBase
 {
 public:
   CommandEncoder(std::string label, CommandBuffer* commandBuffer);
   ~CommandEncoder();
 
-  ComputePassEncoder BeginComputePass();
-  RenderPassEncoder BeginRenderPass();
+  ComputePassEncoder BeginComputePass(const ComputePassDesc& desc);
+  RenderPassEncoder BeginRenderPass(const RenderPassDesc& desc);
+  MeshPassEncoder BeginMeshPass(const RenderPassDesc& desc);
+  RayTracingPassEncoder BeginRayTracingPass(const RenderPassDesc& desc);
 
-  void CopyBufferToBuffer();
+  void CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size);
+  void Barrier();
 
   CommandBuffer* Finish();
 private:
   std::string m_Label;
-
-  CommandBuffer* m_CommandBuffer;
 };
 
-class ComputePassEncoder
+struct ComputePassDesc {
+  std::string label;
+  TimestampWrites* timestampWrites;
+};
+
+class ComputePassEncoder : public EncoderBase
 {
 public:
-  ComputePassEncoder();
+  ComputePassEncoder(const ComputePassDesc& desc, CommandBuffer* commandBuffer);
   ~ComputePassEncoder();
 
   void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1);
   void End();
+  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void SetPipeline(ComputePipeline* pipeline);
 private:
-  std::string m_Label;
+  ComputePassDesc m_Desc;
 };
 
-class RenderPassEncoder
+struct Color {
+  float r, g, b, a;
+};
+
+enum class LoadOp { Load, Clear, DontCare };
+// enum class StoreOp { Store, DontCare };
+
+struct ColorAttachment {
+  TextureView* view;
+  uint32_t depthSlice = 0;
+  TextureView* resolveTarget = nullptr;
+  Color clearValue;
+  LoadOp loadOp;
+  // StoreOp storeOp;
+};
+
+struct DepthStencilAttachment {
+  TextureView* view;
+  float depthClearValue;
+  LoadOp depthLoadOp;
+  // StoreOp depthStoreOp;
+  // bool depthReadOnly = false;
+  uint32_t stencilClearValue = 0;
+  LoadOp stencilLoadOp;
+  // StoreOp stencilStoreOp;
+  // bool stencilReadOnly = false;
+};
+
+struct RenderPassDesc {
+  std::string label;
+  ColorAttachment colorAttachment;
+  DepthStencilAttachment depthStencilAttachment;
+  TimestampWrites* timestampWrites;
+};
+
+class RenderPassEncoder : public EncoderBase
 {
 public:
-  RenderPassEncoder();
+  RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
   ~RenderPassEncoder();
 
   void DrawInstanced();
-  void DrawMeshIndirect();
-
   void End();
+  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void SetPipeline(RenderPipeline* pipeline);
 private:
-  std::string m_Label;
+  RenderPassDesc m_Desc;
 };
 
-struct RenderPipelineDesc;
-class RenderPipeline;
+class MeshPassEncoder : public EncoderBase
+{
+public:
+  MeshPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
+  ~MeshPassEncoder();
 
-struct MeshPipelineDesc;
-class MeshPipeline;
-
-struct RaytracingPipelineDesc;
-class RaytracingPipeline;
-
+  void DrawMeshIndirect();
+  void End();
+  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void SetPipeline(MeshPipeline* pipeline);
+private:
+  RenderPassDesc m_Desc;
+};
 
 }  // namespace IssouRHI

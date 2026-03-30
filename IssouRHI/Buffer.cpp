@@ -102,7 +102,7 @@ void Buffer::Unmap()
 
 std::optional<CD3DX12_BUFFER_BARRIER> Buffer::Transition(StageAccess to)
 {
-  // mutex?
+  // mutex? no because we should NOT keep track of state from this class...
   bool accessChanged = m_CurrentStageAccess.access != to.access;
   bool storageBarrier = m_CurrentStageAccess.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 

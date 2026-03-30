@@ -181,7 +181,7 @@ void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresour
 
 std::optional<D3D12_TEXTURE_BARRIER> Texture::Transition(StageAccessLayout to)
 {
-  // mutex?
+  // mutex? no because we should NOT keep track of state from this class...
   bool accessLayoutChanged = m_CurrentStageAccessLayout.access != to.access || m_CurrentStageAccessLayout.layout != to.layout;
   bool storageBarrier = m_CurrentStageAccessLayout.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 

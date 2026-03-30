@@ -174,14 +174,8 @@ Device::Device(const GPUSelection& gpuSelection)
 
   // Create Command Queue
   {
-    D3D12_COMMAND_QUEUE_DESC qDesc{
-        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-    };
-
-    ID3D12CommandQueue* commandQueue = nullptr;
-    CHECK_HR(m_Device->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&commandQueue)));
-    m_CommandQueue.Attach(commandQueue);
+    m_Queue = std::make_unique<Queue>(this);
+    m_Queue->Create();
   }
 
   // Create descriptor heaps
@@ -226,7 +220,6 @@ Device::Device(const GPUSelection& gpuSelection)
 
 Device::~Device()
 {
-  m_CommandQueue.Reset();
   m_RootSignature.Reset();
 
   PrintStatsString(m_Allocator.Get());
@@ -325,6 +318,14 @@ static std::wstring StringToWstring(std::string_view s)
   return ws;
 }
 
+std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc &desc)
+{
+  auto qs = std::make_shared<QuerySet>(this, desc);
+  qs->Create();
+
+  return qs;
+}
+
 std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
 {
   D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
@@ -359,6 +360,7 @@ std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
   resource->SetName(StringToWstring(desc.label).c_str());
 
   auto tex = std::make_shared<Texture>(this, desc);
+  // TODO: use the same Create() pattern as Queue and QuerySet?
   tex->Attach(resource, allocation);
 
   return tex;
@@ -392,26 +394,17 @@ std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
   resource->SetName(StringToWstring(desc.label).c_str());
 
   auto buf = std::make_shared<Buffer>(this, desc);
+  // TODO: use the same Create() pattern as Queue and QuerySet?
   buf->Attach(resource, allocation);
 
   return buf;
 }
 
-std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDesc& desc)
+std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(const ComputePipelineDesc& desc)
 {
-  D3D12_SHADER_BYTECODE computeShader = {desc.module->Data(), desc.module->Size()};
+  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
+  computePipeline->Create();
 
-  D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-    .pRootSignature = m_RootSignature.Get(),
-    .CS = computeShader,
-  };
-
-  ID3D12PipelineState* pipelineStateObject;
-  CHECK_HR(m_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-
-  auto computePipeline = std::make_shared<ComputePipeline>(this);
-
-  computePipeline->Attach(pipelineStateObject);
   return computePipeline;
 }
 

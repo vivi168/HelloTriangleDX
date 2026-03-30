@@ -208,7 +208,6 @@ struct FrameContext {
 
   std::shared_ptr<IssouRHI::Buffer> frameConstantBuffer;
   std::shared_ptr<IssouRHI::Buffer> timestampReadBackBuffer;
-  ComPtr<ID3D12CommandAllocator> commandAllocator;
 
   void UpdateFrameConstants()
   {
@@ -218,7 +217,6 @@ struct FrameContext {
   void Reset() {
     frameConstantBuffer.reset();
     timestampReadBackBuffer.reset();
-    commandAllocator.Reset();
   }
 };
 
@@ -579,7 +577,6 @@ struct MeshStore {
 
 // ========== Static functions declarations
 
-static void InitD3D();
 static void InitFrameResources();
 static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
@@ -605,7 +602,6 @@ static IssouRHI::Surface* g_Surface;
 // swapchain used to switch between render targets
 // container for command lists
 static ID3D12CommandQueue* g_CommandQueue;
-static ComPtr<ID3D12GraphicsCommandList8> g_CommandList;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
@@ -678,9 +674,8 @@ void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Su
   g_Surface = surface.get(); // FIXME: TMP raw ptr!
   g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
-  g_CommandQueue = device->GetNativeQueue();
+  g_CommandQueue = device->GetQueue()->GetNativeQueue();
 
-  InitD3D();
   InitFrameResources();
 }
 
@@ -1090,21 +1085,10 @@ void Render(float time)
 
   Update(ctx, time);
 
-  // we can only reset an allocator once the gpu is done with it. Resetting an
-  // allocator frees the memory that the command list was stored in
-  CHECK_HR(ctx->commandAllocator->Reset());
+  auto queue = g_RhiDevice->GetQueue();
+  auto encoder = queue->CreateCommandEncoder();
 
-  // reset the command list. by resetting the command list we are putting it
-  // into a recording state so we can start recording commands into the command
-  // allocator. The command allocator that we reference here may have multiple
-  // command lists associated with it, but only one can be recording at any
-  // time. Make sure that any other command lists associated to this command
-  // allocator are in the closed state (not recording).
-  CHECK_HR(g_CommandList->Reset(ctx->commandAllocator.Get(), g_PipelineStateObjects[PSO::SkinningCS].Get()));
-
-  // here we start recording commands into the g_CommandList (which all the
-  // commands will be stored in the g_CommandAllocators)
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
 
   {
     std::array transitions{
@@ -1116,7 +1100,7 @@ void Render(float time)
 
     if (nb > 0) {
       D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
-      g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
     }
   }
 
@@ -1125,73 +1109,75 @@ void Render(float time)
   D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
       g_DepthStencilBuffer->CreateView()->DsvDescriptorAlloc().cpuHandle;
 
-  g_CommandList->ClearDepthStencilView(
+  encoder.CommandList()->ClearDepthStencilView(
       dsvHandle,
       D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
   static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
-  g_CommandList->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
+  encoder.CommandList()->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
 
   // Clear the render target by using the ClearRenderTargetView command
   const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-  g_CommandList->ClearRenderTargetView(renderTargetView->RtvDescriptorAlloc().cpuHandle, clearColor, 0, nullptr);
+  encoder.CommandList()->ClearRenderTargetView(renderTargetView->RtvDescriptorAlloc().cpuHandle, clearColor, 0, nullptr);
 
   std::array descriptorHeaps{g_RhiDevice->CbvSrvUavDescriptorHeap()};
-  g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
+  encoder.CommandList()->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
-  g_CommandList->RSSetViewports(1, &viewport);
+  encoder.CommandList()->RSSetViewports(1, &viewport);
 
   D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
-  g_CommandList->RSSetScissorRects(1, &scissorRect);
+  encoder.CommandList()->RSSetScissorRects(1, &scissorRect);
 
-  g_CommandList->SetComputeRootSignature(g_RootSignature.Get());
+  encoder.CommandList()->SetComputeRootSignature(g_RootSignature.Get());
   uint32_t frameConstantsIndex = ctx->frameConstantBuffer->DescriptorIndex({IssouRHI::BufferAccess::Constant, IssouRHI::FullBufferRange, sizeof(FrameConstants)});
 
   // record skinning compute commands if needed
   // TODO: we should also update culling data. And move to Indirect?
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     {
       auto b = g_MeshStore.m_VertexPositions->Transition({D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS});
       if (b) {
         D3D12_BUFFER_BARRIER barriers[] = { b.value() };
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
 
-    g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices, 0);
+    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::SkinningCS].Get());
+
+    encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices, 0);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
-      g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(o), &o, SizeOfInUint(SkinningBuffersDescriptorIndices));
+      encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(o), &o, SizeOfInUint(SkinningBuffersDescriptorIndices));
 
-      g_CommandList->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
+      encoder.CommandList()->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
     }
   }
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
   // record culling commands
   {
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
 
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
+    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
 
-    g_CommandList->SetComputeRoot32BitConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices, 0);
-    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(CullingBuffersDescriptorIndices));
-    g_CommandList->SetComputeRoot32BitConstant(0, g_Scene.numMeshInstances, SizeOfInUint(CullingBuffersDescriptorIndices) + 1);
+    encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices, 0);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(CullingBuffersDescriptorIndices));
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.numMeshInstances, SizeOfInUint(CullingBuffersDescriptorIndices) + 1);
 
     {
       auto b = g_DrawMeshCommands->Transition({D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST});
       if (b) {
         D3D12_BUFFER_BARRIER barriers[] = { b.value() };
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
 
-    g_CommandList->CopyBufferRegion(g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
+    encoder.CommandList()->CopyBufferRegion(g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
                                     g_UAVCounterReset->Resource(), 0, sizeof(UINT));
 
     {
@@ -1199,18 +1185,18 @@ void Render(float time)
       if (b) {
         D3D12_BUFFER_BARRIER barriers[] = { b.value() };
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(_countof(barriers), barriers)};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
 
-    g_CommandList->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
+    encoder.CommandList()->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
   }
 
   // Record drawing commands
   {
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     {
       std::array transitions{
         BufferTransition{g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_VERTEX_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}},
@@ -1221,30 +1207,30 @@ void Render(float time)
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_BufferBarriers.data())};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
 
     auto rtvHandle = g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle;
     // TODO: RenderPass Begin/End
-    g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
+    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
-    g_CommandList->SetGraphicsRootSignature(g_RootSignature.Get());
+    encoder.CommandList()->SetGraphicsRootSignature(g_RootSignature.Get());
 
-    g_CommandList->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
-    g_CommandList->SetGraphicsRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(BuffersDescriptorIndices));
+    encoder.CommandList()->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
+    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(BuffersDescriptorIndices));
 
-    g_CommandList->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
+    encoder.CommandList()->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
                                    0, g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
   }
 
   // Record Fill G-Buffer from Visibility-Buffer commands
   {
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     {
       std::array transitions{
           TextureTransition{g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}},
@@ -1257,10 +1243,10 @@ void Render(float time)
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
+    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read));
     UINT n = SizeOfInUint(c);
@@ -1270,17 +1256,17 @@ void Render(float time)
     // same for SetGraphicsRoot32BitConstant. "bind" everything up front, and be done with it.
     // Only have one "slot", so only one "InitAsConstant" and prepare some enum for the different offsets in the root signature.
     // Also, instead of writing an entire struct to the root signature. have ConstantBuffer and write the cbv to it.
-    g_CommandList->SetComputeRoot32BitConstants(0, n, &c, 0);
-    g_CommandList->SetComputeRoot32BitConstants(0, n2, &ctx->buffersDescriptorsIndices, n);
-    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, n + n2);
+    encoder.CommandList()->SetComputeRoot32BitConstants(0, n, &c, 0);
+    encoder.CommandList()->SetComputeRoot32BitConstants(0, n2, &ctx->buffersDescriptorsIndices, n);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, n + n2);
 
-    g_CommandList->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
+    encoder.CommandList()->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
   }
 
   // Ray trace shadows
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
     {
       std::array transitions{
@@ -1292,16 +1278,16 @@ void Render(float time)
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
 
-    g_CommandList->SetPipelineState1(g_DxrStateObject.Get());
+    encoder.CommandList()->SetPipelineState1(g_DxrStateObject.Get());
 
-    g_CommandList->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
-    g_CommandList->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
-    g_CommandList->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
-    g_CommandList->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
 
     {
       D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
@@ -1321,10 +1307,10 @@ void Render(float time)
       dispatchDesc.Height = g_Height;
       dispatchDesc.Depth = 1;
 
-      g_CommandList->DispatchRays(&dispatchDesc);
+      encoder.CommandList()->DispatchRays(&dispatchDesc);
     }
   }
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
 
   // Record Full screen triangle pass - Compose final image commands
   {
@@ -1338,28 +1324,28 @@ void Render(float time)
 
       if (nb > 0) {
         D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
-        g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+        encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
       }
     }
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
     auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
-    g_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-    g_CommandList->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
+    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
 
-    g_CommandList->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
-    g_CommandList->SetGraphicsRoot32BitConstant(0, g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices));
-    g_CommandList->SetGraphicsRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices) + 1);
+    encoder.CommandList()->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
+    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices));
+    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices) + 1);
 
-    g_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    g_CommandList->DrawInstanced(3, 1, 0, 0);
+    encoder.CommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    encoder.CommandList()->DrawInstanced(3, 1, 0, 0);
 
-    g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeEnd);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeEnd);
   }
 
   ImGui::Render();
-  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), g_CommandList.Get());
+  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), encoder.CommandList());
 
   {
     std::array transitions{
@@ -1370,22 +1356,17 @@ void Render(float time)
 
     if (nb > 0) {
       D3D12_BARRIER_GROUP barrierGroups[] = {CD3DX12_BARRIER_GROUP(nb, g_TextureBarriers.data())};
-      g_CommandList->Barrier(_countof(barrierGroups), barrierGroups);
+      encoder.CommandList()->Barrier(_countof(barrierGroups), barrierGroups);
     }
   }
 
-  g_CommandList->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
+  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
 
-  g_CommandList->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
+  encoder.CommandList()->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
                                   ctx->timestampReadBackBuffer->Resource(), 0);
 
-  CHECK_HR(g_CommandList->Close());
-
-  // ==========
-
-  // execute command list
-  std::array ppCommandLists{static_cast<ID3D12CommandList*>(g_CommandList.Get())};
-  g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
+  IssouRHI::CommandBuffer* cb[] = {encoder.Finish()};
+  queue->Submit(cb);
 
   g_Surface->Present();
 }
@@ -1450,7 +1431,6 @@ void Cleanup()
 
   g_ShadowBuffer.reset();
 
-  g_CommandList.Reset();
   g_TimestampQueryHeap.Reset();
 
   g_DepthStencilBuffer.reset();
@@ -1512,26 +1492,6 @@ UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
 }
 
 // ========== Static functions
-
-static void InitD3D()
-{
-  // Create Command Allocator
-  {
-    for (int i = 0; i < FRAME_BUFFER_COUNT; i++) {
-      ID3D12CommandAllocator* commandAllocator = nullptr;
-      CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-      g_FrameContext[i].commandAllocator.Attach(commandAllocator);
-    }
-
-    // create the command list with the first allocator
-    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_FrameContext[0].commandAllocator.Get(),
-                                         NULL, IID_PPV_ARGS(&g_CommandList)));
-
-    // command lists are created in the recording state. our main loop will set
-    // it up for recording again so close it now
-    g_CommandList->Close();
-  }
-}
 
 static void InitFrameResources()
 {
