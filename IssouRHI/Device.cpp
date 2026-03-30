@@ -186,7 +186,7 @@ Device::Device(const GPUSelection& gpuSelection)
 
   // Create descriptor heaps
   {
-    m_SrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP,
+    m_CbvSrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP,
                                   D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
     m_RtvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, NUM_DESCRIPTORS_PER_HEAP,
                                D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
@@ -417,7 +417,7 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(ComputePipelineDe
 
 DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
 {
-  return m_SrvUavDescriptorHeap.Alloc();
+  return m_CbvSrvUavDescriptorHeap.Alloc();
 }
 
 DescriptorAllocation Device::AllocRtvDescriptor()
@@ -432,7 +432,7 @@ DescriptorAllocation Device::AllocDsvDescriptor()
 
 void Device::FreeSrvUavDescriptor(DescriptorAllocation alloc)
 {
-  m_SrvUavDescriptorHeap.Free(alloc);
+  m_CbvSrvUavDescriptorHeap.Free(alloc);
 }
 
 void Device::FreeRtvDescriptor(DescriptorAllocation alloc)

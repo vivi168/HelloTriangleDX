@@ -1136,7 +1136,7 @@ void Render(float time)
   const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
   g_CommandList->ClearRenderTargetView(renderTargetView->RtvDescriptorAlloc().cpuHandle, clearColor, 0, nullptr);
 
-  std::array descriptorHeaps{g_RhiDevice->SrvUavDescriptorHeap()};
+  std::array descriptorHeaps{g_RhiDevice->CbvSrvUavDescriptorHeap()};
   g_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 
   D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
@@ -1567,7 +1567,7 @@ static void InitFrameResources()
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_RhiDevice->SrvUavDescriptorHeap();
+  initInfo.SrvDescriptorHeap = g_RhiDevice->CbvSrvUavDescriptorHeap();
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {

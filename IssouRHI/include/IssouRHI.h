@@ -529,8 +529,7 @@ public:
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
   ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
 
-  // TODO: rename to CbvSrvUavDescriptorHeap
-  ID3D12DescriptorHeap* SrvUavDescriptorHeap() const { return m_SrvUavDescriptorHeap.Get(); }
+  ID3D12DescriptorHeap* CbvSrvUavDescriptorHeap() const { return m_CbvSrvUavDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
 private:
@@ -542,7 +541,7 @@ private:
 
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;  // TODO: our own Queue class here
 
-  DescriptorHeap m_SrvUavDescriptorHeap;
+  DescriptorHeap m_CbvSrvUavDescriptorHeap;
   DescriptorHeap m_RtvDescriptorHeap;
   DescriptorHeap m_DsvDescriptorHeap;
 
