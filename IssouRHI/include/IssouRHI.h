@@ -390,9 +390,6 @@ public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
-  // FIXME: useless? since we shouldn't be tracking the state of the resource from here....
-  std::optional<D3D12_TEXTURE_BARRIER> Transition(StageAccessLayout to);
-
   D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(const TextureViewDesc& desc) const;
   D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(const TextureViewDesc& desc) const;
   // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
@@ -410,9 +407,6 @@ private:
 private:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
-
-  // FIXME: This does not belong here... We should have something to track resource per command buffer...
-  StageAccessLayout m_CurrentStageAccessLayout;
 };
 
 enum class TextureAccess { Read, ReadWrite };
@@ -499,9 +493,6 @@ public: // D3D12 impl specific
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);
 
-  // FIXME: useless? since we shouldn't be tracking the state of the resource from here....
-  std::optional<CD3DX12_BUFFER_BARRIER> Transition(StageAccess to);
-
   D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
@@ -554,9 +545,6 @@ private: // D3D12 impl specific
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Cbvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
-
-  // FIXME: This does not belong here... We should have something to track resource per command buffer...
-  StageAccess m_CurrentStageAccess;
 };
 
 enum class ShaderStage : uint32_t {
@@ -747,6 +735,7 @@ private:
   bool m_GraphicRootSignatureSet = false;
 
   // TODO: keep track of pso change
+  // TODO: basic resource state tracking?
 };
 
 class Queue
@@ -804,6 +793,30 @@ protected:
   CommandBuffer* m_CommandBuffer;
 };
 
+struct GlobalBarrierDesc {
+  StageAccess from;
+  StageAccess to;
+};
+
+struct BufferBarrierDesc {
+  Buffer* resource;
+  StageAccess from;
+  StageAccess to;
+};
+
+struct TextureBarrierDesc {
+  Texture* resource;
+  StageAccessLayout from;
+  StageAccessLayout to;
+  // SubresourceRange range;
+};
+
+struct BarriersDesc {
+  // std::span<GlobalBarrierDesc> globals{};
+  std::span<BufferBarrierDesc> buffers{};
+  std::span<TextureBarrierDesc> textures{};
+};
+
 class CommandEncoder : public EncoderBase
 {
 public:
@@ -815,8 +828,8 @@ public:
   MeshPassEncoder BeginMeshPass(const RenderPassDesc& desc);
   RayTracingPassEncoder BeginRayTracingPass(const RenderPassDesc& desc);
 
+  void Barrier(const BarriersDesc& desc);
   void CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size);
-  void Barrier();
 
   CommandBuffer* Finish();
 private:

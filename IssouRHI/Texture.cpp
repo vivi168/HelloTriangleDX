@@ -78,13 +78,7 @@ D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(const TextureDesc& desc)
   return D3D12_RESOURCE_DESC1{};
 }
 
-Texture::Texture(Device* device, const TextureDesc& desc) : m_Device(device), m_Desc(desc)
-{
-  m_CurrentStageAccessLayout.stage = D3D12_BARRIER_SYNC_NONE;
-  m_CurrentStageAccessLayout.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
-  // TODO: sync/reuse somehow with CreateTexture#initialLayout
-  m_CurrentStageAccessLayout.layout = D3D12_BARRIER_LAYOUT_COMMON;
-}
+Texture::Texture(Device* device, const TextureDesc& desc) : m_Device(device), m_Desc(desc) {}
 
 Texture::~Texture()
 {
@@ -179,29 +173,6 @@ void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresour
   m_Resource->Unmap(0, nullptr);
 }
 
-std::optional<D3D12_TEXTURE_BARRIER> Texture::Transition(StageAccessLayout to)
-{
-  // mutex? no because we should NOT keep track of state from this class...
-  bool accessLayoutChanged = m_CurrentStageAccessLayout.access != to.access || m_CurrentStageAccessLayout.layout != to.layout;
-  bool storageBarrier = m_CurrentStageAccessLayout.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-
-  if (!accessLayoutChanged && !storageBarrier)
-    return std::nullopt;
-
-  auto barrier = CD3DX12_TEXTURE_BARRIER(m_CurrentStageAccessLayout.stage,
-                                         to.stage,
-                                         m_CurrentStageAccessLayout.access,
-                                         to.access,
-                                         m_CurrentStageAccessLayout.layout,
-                                         to.layout,
-                                         Resource(),
-                                         CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // TODO
-                                         D3D12_TEXTURE_BARRIER_FLAG_NONE);
-  // TODO: should probably update AFTER cmdList->Barrier has been called with the above barrier...
-  // leave that responsability to the future command list class ?
-  m_CurrentStageAccessLayout = to;
-  return barrier;
-}
 
 D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(const TextureViewDesc& desc) const
 {

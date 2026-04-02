@@ -42,6 +42,82 @@ RenderPassEncoder CommandEncoder::BeginRenderPass(const RenderPassDesc& desc)
   return e;
 }
 
+static std::optional<D3D12_BUFFER_BARRIER> Transition(Buffer* buf, StageAccess from, StageAccess to)
+{
+  bool accessChanged = from.access != to.access;
+  bool storageBarrier = from.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+
+  if (!accessChanged && !storageBarrier)
+    return std::nullopt;
+
+  auto barrier = CD3DX12_BUFFER_BARRIER(from.stage,
+                                        to.stage,
+                                        from.access,
+                                        to.access,
+                                        buf->Resource());
+
+  return barrier;
+}
+
+static std::optional<D3D12_TEXTURE_BARRIER> Transition(Texture* tex, StageAccessLayout from, StageAccessLayout to)
+{
+  bool accessLayoutChanged = from.access != to.access || from.layout != to.layout;
+  bool storageBarrier = from.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+
+  if (!accessLayoutChanged && !storageBarrier)
+    return std::nullopt;
+
+  auto barrier = CD3DX12_TEXTURE_BARRIER(from.stage,
+                                         to.stage,
+                                         from.access,
+                                         to.access,
+                                         from.layout,
+                                         to.layout,
+                                         tex->Resource(),
+                                         CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // TODO
+                                         D3D12_TEXTURE_BARRIER_FLAG_NONE);
+
+  return barrier;
+}
+
+// FIXME: make the RHI dumb and leave barrier elision to the app?
+void CommandEncoder::Barrier(const BarriersDesc& desc)
+{
+  std::vector<D3D12_BUFFER_BARRIER> bufferBarriers(desc.buffers.size());
+  std::vector<D3D12_TEXTURE_BARRIER> textureBarriers(desc.textures.size());
+
+  size_t nb = 0;
+  for (auto& b : desc.buffers) {
+    auto barrier = Transition(b.resource, b.from, b.to);
+    if (barrier) {
+      bufferBarriers[nb++] = barrier.value();
+    }
+  }
+
+  size_t nt = 0;
+  for (auto& t : desc.textures) {
+    auto barrier = Transition(t.resource, t.from, t.to);
+    if (barrier) {
+      textureBarriers[nt++] = barrier.value();
+    }
+  }
+
+  D3D12_BARRIER_GROUP barrierGroups[2]; // 3 with Global Barriers
+  UINT n = 0;
+
+  if (nb > 0) {
+    barrierGroups[n++] = CD3DX12_BARRIER_GROUP(nb, bufferBarriers.data());
+  }
+
+  if (nt > 0) {
+    barrierGroups[n++] = CD3DX12_BARRIER_GROUP(nt, textureBarriers.data());
+  }
+
+  if (n > 0) {
+    CommandList()->Barrier(n, barrierGroups);
+  }
+}
+
 void CommandEncoder::CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size)
 {
   // TODO: validate input?

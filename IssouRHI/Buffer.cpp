@@ -3,11 +3,7 @@
 
 namespace IssouRHI
 {
-Buffer::Buffer(Device* device, const BufferDesc& desc) : m_Device(device), m_Desc(desc)
-{
-  m_CurrentStageAccess.stage = D3D12_BARRIER_SYNC_NONE;
-  m_CurrentStageAccess.access = D3D12_BARRIER_ACCESS_NO_ACCESS;
-}
+Buffer::Buffer(Device* device, const BufferDesc& desc) : m_Device(device), m_Desc(desc) {}
 
 Buffer::~Buffer()
 {
@@ -100,25 +96,6 @@ void Buffer::Unmap()
   m_Resource->Unmap(0, nullptr);
 }
 
-std::optional<CD3DX12_BUFFER_BARRIER> Buffer::Transition(StageAccess to)
-{
-  // mutex? no because we should NOT keep track of state from this class...
-  bool accessChanged = m_CurrentStageAccess.access != to.access;
-  bool storageBarrier = m_CurrentStageAccess.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
-
-  if (!accessChanged && !storageBarrier)
-    return std::nullopt;
-
-  auto barrier = CD3DX12_BUFFER_BARRIER(m_CurrentStageAccess.stage,
-                                        to.stage,
-                                        m_CurrentStageAccess.access,
-                                        to.access,
-                                        Resource());
-  // TODO: should probably update AFTER cmdList->Barrier has been called with the above barrier...
-  // leave that responsability to the future command list class ?
-  m_CurrentStageAccess = to;
-  return barrier;
-}
 
 uint32_t Buffer::DescriptorIndex(const BufferViewDesc& desc)
 {
