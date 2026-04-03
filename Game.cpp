@@ -18,6 +18,33 @@ void Game::Init()
 {
   Renderer::SetSceneCamera(&camera);
 
+#ifdef _DEBUG
+#define MINIMAL 1
+#endif
+#define BISTRO 1
+#ifdef MINIMAL
+  yuka.Read("OPTIM_yuka.mdl").Scale(5.f).Translate(15.f, 0.f, 15.f);
+  Renderer::AppendToScene(&yuka);
+
+  terrain.Read("OPTIM_ground.mdl");
+  Renderer::AppendToScene(&terrain);
+
+  cube.Read("OPTIM_issou.mdl").Translate(0.f, 50.f, 0.f).Scale(5.f);
+  Renderer::AppendToScene(&cube);
+
+  brainstem.Read("OPTIM_BrainStem.mdl")
+      .SetCurrentAnimation("animation_1")
+      .Scale(5.f)
+      .Rotate(-XM_PIDIV2, XM_PIDIV2, 0.0f);
+  Renderer::AppendToScene(&brainstem);
+#elif defined(SPONZA)
+  sponza.Read("OPTIM_Sponza.mdl").Scale(5.f).Rotate(0.f, XM_PIDIV2, 0.f);
+  Renderer::AppendToScene(&sponza);
+#elif defined(BISTRO)
+
+  sponza.Read("Bistro.mdl").Rotate(XM_PIDIV2, 0.0f, 0.0f).Scale(0.05f);
+  Renderer::AppendToScene(&sponza);
+#else
   Model3D baseTree;
   baseTree.Read("OPTIM_white_oak.mdl");
 
@@ -55,10 +82,7 @@ void Game::Init()
       .Translate(-10.f, 0.f, 0.f);
   Renderer::AppendToScene(&brainstem);
 
-  cesium.Read("OPTIM_CesiumMan.mdl")
-      .SetCurrentAnimation("animation_1")
-      .Scale(5.f)
-      .Rotate(-XM_PIDIV2, 0.0f, 0.0f);
+  cesium.Read("OPTIM_CesiumMan.mdl").SetCurrentAnimation("animation_1").Scale(5.f).Rotate(-XM_PIDIV2, 0.0f, 0.0f);
   Renderer::AppendToScene(&cesium);
 
   knight.Read("OPTIM_knight.mdl").SetCurrentAnimation("Armature|mixamo.com|Layer0").Translate(10.f, 0, -15.f);
@@ -78,6 +102,7 @@ void Game::Init()
       Renderer::AppendToScene(&knights[i]);
     }
   }
+#endif
 }
 
 void Game::Update(float time, float deltaTime)
