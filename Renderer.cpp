@@ -1055,9 +1055,9 @@ static IssouRHI::StageAccessLayout GetTextureState(IssouRHI::Texture* tex)
   }
 
   IssouRHI::StageAccessLayout state{
-    .stage = D3D12_BARRIER_SYNC_NONE,
-    .access = D3D12_BARRIER_ACCESS_NO_ACCESS,
-    .layout = D3D12_BARRIER_LAYOUT_COMMON,
+    .stage = IssouRHI::PipelineStage::None,
+    .access = IssouRHI::Access::None,
+    .layout = IssouRHI::TextureLayout::General,
   };
   g_TextureStates[tex] = state;
 
@@ -1072,8 +1072,8 @@ static IssouRHI::StageAccess GetBufferState(IssouRHI::Buffer* buf)
   }
 
   IssouRHI::StageAccess state{
-    .stage = D3D12_BARRIER_SYNC_NONE,
-    .access = D3D12_BARRIER_ACCESS_NO_ACCESS,
+    .stage = IssouRHI::PipelineStage::None,
+    .access = IssouRHI::Access::None,
   };
   g_BufferStates[buf] = state;
 
@@ -1127,8 +1127,8 @@ void Render(float time)
 
   {
     std::array transitions{
-        BuildTransition(renderTarget.get(), {D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_LAYOUT_RENDER_TARGET}),
-        BuildTransition(g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_LAYOUT_RENDER_TARGET}),
+        BuildTransition(renderTarget.get(), {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
+        BuildTransition(g_VisibilityBuffer.get(), {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
     };
 
     encoder.Barrier({.textures = transitions});
@@ -1168,7 +1168,7 @@ void Render(float time)
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     {
       std::array transitions{
-        BuildTransition(g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS}),
+        BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
       encoder.Barrier({.buffers = transitions});
@@ -1199,7 +1199,7 @@ void Render(float time)
 
     {
       std::array transitions{
-        BuildTransition(g_DrawMeshCommands.get(), {D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST}),
+        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Copy, IssouRHI::Access::CopyDestination}),
       };
 
       encoder.Barrier({.buffers = transitions});
@@ -1210,7 +1210,7 @@ void Render(float time)
 
     {
       std::array transitions{
-        BuildTransition(g_DrawMeshCommands.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS}),
+        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
       encoder.Barrier({.buffers = transitions});
@@ -1226,8 +1226,8 @@ void Render(float time)
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     {
       std::array transitions{
-        BuildTransition(g_MeshStore.m_VertexPositions.get(), {D3D12_BARRIER_SYNC_VERTEX_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}),
-        BuildTransition(g_DrawMeshCommands.get(), {D3D12_BARRIER_SYNC_EXECUTE_INDIRECT, D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT}),
+        BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::MeshShaders, IssouRHI::Access::ShaderResource}),
+        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Indirect, IssouRHI::Access::ArgumentBuffer}),
       };
 
       encoder.Barrier({.buffers = transitions});
@@ -1255,10 +1255,10 @@ void Render(float time)
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     {
       std::array transitions{
-          BuildTransition(g_VisibilityBuffer.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}),
-          BuildTransition(g_GBuffer.worldPosition.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}),
-          BuildTransition(g_GBuffer.worldNormal.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}),
-          BuildTransition(g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}),
+          BuildTransition(g_VisibilityBuffer.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
+          BuildTransition(g_GBuffer.worldPosition.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage, IssouRHI::TextureLayout::ShaderResourceStorage}),
+          BuildTransition(g_GBuffer.worldNormal.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage, IssouRHI::TextureLayout::ShaderResourceStorage}),
+          BuildTransition(g_GBuffer.baseColor.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage, IssouRHI::TextureLayout::ShaderResourceStorage}),
       };
 
       encoder.Barrier({.textures = transitions});
@@ -1287,8 +1287,8 @@ void Render(float time)
   if (g_EnableRTShadows) {
     {
       std::array transitions{
-          BuildTransition(g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_RAYTRACING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS}),
-          BuildTransition(g_GBuffer.worldPosition.get(), {D3D12_BARRIER_SYNC_RAYTRACING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}),
+          BuildTransition(g_ShadowBuffer.get(), {IssouRHI::PipelineStage::RayTracingShaders, IssouRHI::Access::ShaderResourceStorage, IssouRHI::TextureLayout::ShaderResourceStorage}),
+          BuildTransition(g_GBuffer.worldPosition.get(), {IssouRHI::PipelineStage::RayTracingShaders, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
       };
 
       encoder.Barrier({.textures = transitions});
@@ -1328,8 +1328,8 @@ void Render(float time)
   {
     {
       std::array transitions{
-          BuildTransition(g_ShadowBuffer.get(), {D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}),
-          BuildTransition(g_GBuffer.baseColor.get(), {D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE}),
+          BuildTransition(g_ShadowBuffer.get(), {IssouRHI::PipelineStage::FragmentShader, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
+          BuildTransition(g_GBuffer.baseColor.get(), {IssouRHI::PipelineStage::FragmentShader, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
       };
 
       encoder.Barrier({.textures = transitions});
@@ -1356,7 +1356,7 @@ void Render(float time)
 
   {
     std::array transitions{
-        BuildTransition(renderTarget.get(), {D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_ACCESS_NO_ACCESS, D3D12_BARRIER_LAYOUT_PRESENT}),
+        BuildTransition(renderTarget.get(), {IssouRHI::PipelineStage::None, IssouRHI::Access::None, IssouRHI::TextureLayout::Present}),
     };
 
     encoder.Barrier({.textures = transitions});

@@ -42,18 +42,171 @@ RenderPassEncoder CommandEncoder::BeginRenderPass(const RenderPassDesc& desc)
   return e;
 }
 
+static D3D12_BARRIER_SYNC D3D12BarrierSync(PipelineStage stage)
+{
+  if (stage == PipelineStage::All) {
+    return D3D12_BARRIER_SYNC_ALL;
+  }
+
+  if (stage == PipelineStage::None) {
+    return D3D12_BARRIER_SYNC_NONE;
+  }
+
+  D3D12_BARRIER_SYNC flags = D3D12_BARRIER_SYNC_NONE;
+
+  if (stage & PipelineStage::IndexInput) {
+    flags |= D3D12_BARRIER_SYNC_INDEX_INPUT;
+  }
+  if (stage & (PipelineStage::VertexShader | PipelineStage::MeshShaders)) {
+    flags |= D3D12_BARRIER_SYNC_VERTEX_SHADING;
+  }
+  if (stage & PipelineStage::FragmentShader) {
+    flags |= D3D12_BARRIER_SYNC_PIXEL_SHADING;
+  }
+  if (stage & PipelineStage::DepthStencilAttachment) {
+    flags |= D3D12_BARRIER_SYNC_DEPTH_STENCIL;
+  }
+  if (stage & PipelineStage::ColorAttachment) {
+    flags |= D3D12_BARRIER_SYNC_RENDER_TARGET;
+  }
+  if (stage & PipelineStage::ComputeShader) {
+    flags |= D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+  }
+  if (stage & PipelineStage::RayTracingShaders) {
+    flags |= D3D12_BARRIER_SYNC_RAYTRACING;
+  }
+  if (stage & (PipelineStage::AccelerationStructure | PipelineStage::Micromap)) {
+    flags |= D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE;
+    // D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO ?
+  }
+  if (stage & PipelineStage::Indirect) {
+    flags |= D3D12_BARRIER_SYNC_EXECUTE_INDIRECT;
+  }
+  if (stage & PipelineStage::Copy) {
+    flags |= D3D12_BARRIER_SYNC_COPY;
+  }
+  if (stage & PipelineStage::Resolve) {
+    flags |= D3D12_BARRIER_SYNC_RESOLVE;
+  }
+  if (stage & PipelineStage::ClearStorage) {
+    flags |= D3D12_BARRIER_SYNC_CLEAR_UNORDERED_ACCESS_VIEW;
+  }
+
+  return flags;
+}
+
+static D3D12_BARRIER_ACCESS D3D12BarrierAccess(Access access)
+{
+  if (access == Access::None) {
+    return D3D12_BARRIER_ACCESS_NO_ACCESS;
+  }
+
+  D3D12_BARRIER_ACCESS flags = D3D12_BARRIER_ACCESS_COMMON;
+
+  if (access & Access::IndexBuffer) {
+    flags |= D3D12_BARRIER_ACCESS_INDEX_BUFFER;
+  }
+  if (access & Access::VertexBuffer) {
+    flags |= D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
+  }
+  if (access & Access::ConstantBuffer) {
+    flags |= D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
+  }
+  if (access & Access::ArgumentBuffer) {
+    flags |= D3D12_BARRIER_ACCESS_INDIRECT_ARGUMENT;
+  }
+  if (access & (Access::ScratchBuffer | Access::ShaderResourceStorage | Access::ClearStorage)) {
+    flags |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+  }
+  if (access & (Access::ColorAttachmentRead | Access::ColorAttachmentWrite)) {
+    flags |= D3D12_BARRIER_ACCESS_RENDER_TARGET;
+  }
+  if (access & Access::DepthStencilAttachmentRead) {
+    flags |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ;
+  }
+  if (access & Access::DepthStencilAttachmentWrite) {
+    flags |= D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
+  }
+  if (access & Access::ShadingRateAttachment) {
+    flags |= D3D12_BARRIER_ACCESS_SHADING_RATE_SOURCE;
+  }
+  if (access & (Access::InputAttachment | Access::ShaderResource | Access::ShaderBindingTable)) {
+    flags |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+  }
+  if (access & (Access::AccelerationStructureRead | Access::MicromapRead)) {
+    flags |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_READ;
+  }
+  if (access & (Access::AccelerationStructureWrite | Access::MicromapWrite)) {
+    flags |= D3D12_BARRIER_ACCESS_RAYTRACING_ACCELERATION_STRUCTURE_WRITE;
+  }
+  if (access & Access::CopySource) {
+    flags |= D3D12_BARRIER_ACCESS_COPY_SOURCE;
+  }
+  if (access & Access::CopyDestination) {
+    flags |= D3D12_BARRIER_ACCESS_COPY_DEST;
+  }
+  if (access & Access::ResolveSource) {
+    flags |= D3D12_BARRIER_ACCESS_RESOLVE_SOURCE;
+  }
+  if (access & Access::ResolveDestination) {
+    flags |= D3D12_BARRIER_ACCESS_RESOLVE_DEST;
+  }
+
+  return flags;
+}
+
+static D3D12_BARRIER_LAYOUT D3D12BarrierLayout(TextureLayout layout)
+{
+  switch (layout) {
+    case TextureLayout::Undefined:
+      return D3D12_BARRIER_LAYOUT_UNDEFINED;
+    case TextureLayout::General:
+      return D3D12_BARRIER_LAYOUT_COMMON;
+    case TextureLayout::Present:
+      return D3D12_BARRIER_LAYOUT_PRESENT;
+    case TextureLayout::ColorAttachment:
+      return D3D12_BARRIER_LAYOUT_RENDER_TARGET;
+    case TextureLayout::DepthStencilAttachment:
+    case TextureLayout::DepthReadonlyStencilAttachment:
+    case TextureLayout::DepthAttachmentStencilReadonly:
+      return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
+    case TextureLayout::DepthStencilReadonly:
+      return D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ;
+    case TextureLayout::ShadingRateAttachment:
+      return D3D12_BARRIER_LAYOUT_SHADING_RATE_SOURCE;
+    case TextureLayout::InputAttachment:
+      return D3D12_BARRIER_LAYOUT_RENDER_TARGET;
+    case TextureLayout::ShaderResource:
+      return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
+    case TextureLayout::ShaderResourceStorage:
+      return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
+    case TextureLayout::CopySource:
+      return D3D12_BARRIER_LAYOUT_COPY_SOURCE;
+    case TextureLayout::CopyDestination:
+      return D3D12_BARRIER_LAYOUT_COPY_DEST;
+    case TextureLayout::ResolveSource:
+      return D3D12_BARRIER_LAYOUT_RESOLVE_SOURCE;
+    case TextureLayout::ResolveDestination:
+      return D3D12_BARRIER_LAYOUT_RESOLVE_DEST;
+    default:
+      std::unreachable();
+  }
+}
+
 static std::optional<D3D12_BUFFER_BARRIER> Transition(Buffer* buf, StageAccess from, StageAccess to)
 {
+  auto fromAccess = D3D12BarrierAccess(from.access);
+  auto toAccess = D3D12BarrierAccess(to.access);
   bool accessChanged = from.access != to.access;
-  bool storageBarrier = from.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+  bool storageBarrier = fromAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && toAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 
   if (!accessChanged && !storageBarrier)
     return std::nullopt;
 
-  auto barrier = CD3DX12_BUFFER_BARRIER(from.stage,
-                                        to.stage,
-                                        from.access,
-                                        to.access,
+  auto barrier = CD3DX12_BUFFER_BARRIER(D3D12BarrierSync(from.stage),
+                                        D3D12BarrierSync(to.stage),
+                                        fromAccess,
+                                        toAccess,
                                         buf->Resource());
 
   return barrier;
@@ -61,18 +214,22 @@ static std::optional<D3D12_BUFFER_BARRIER> Transition(Buffer* buf, StageAccess f
 
 static std::optional<D3D12_TEXTURE_BARRIER> Transition(Texture* tex, StageAccessLayout from, StageAccessLayout to)
 {
-  bool accessLayoutChanged = from.access != to.access || from.layout != to.layout;
-  bool storageBarrier = from.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && to.access == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+  auto fromAccess = D3D12BarrierAccess(from.access);
+  auto toAccess = D3D12BarrierAccess(to.access);
+  auto fromLayout = D3D12BarrierLayout(from.layout);
+  auto toLayout = D3D12BarrierLayout(to.layout);
+  bool accessLayoutChanged = fromAccess != toAccess || fromLayout != toLayout;
+  bool storageBarrier = fromAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && toAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 
   if (!accessLayoutChanged && !storageBarrier)
     return std::nullopt;
 
-  auto barrier = CD3DX12_TEXTURE_BARRIER(from.stage,
-                                         to.stage,
-                                         from.access,
-                                         to.access,
-                                         from.layout,
-                                         to.layout,
+  auto barrier = CD3DX12_TEXTURE_BARRIER(D3D12BarrierSync(from.stage),
+                                         D3D12BarrierSync(to.stage),
+                                         fromAccess,
+                                         toAccess,
+                                         fromLayout,
+                                         toLayout,
                                          tex->Resource(),
                                          CD3DX12_BARRIER_SUBRESOURCE_RANGE(0xffffffff),  // TODO
                                          D3D12_TEXTURE_BARRIER_FLAG_NONE);

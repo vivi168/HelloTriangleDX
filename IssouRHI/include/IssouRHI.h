@@ -139,15 +139,23 @@ enum class PipelineStage : uint32_t {
   // Compute
   ComputeShader = ISSOURHI_BIT(7),
   // Ray Tracing
-  RayTracingShader = ISSOURHI_BIT(8),
-  AccelerationStructure = ISSOURHI_BIT(9),
-  MicroMap = ISSOURHI_BIT(10),
+  RaygenShader = ISSOURHI_BIT(8),
+  MissShader = ISSOURHI_BIT(9),
+  IntersectionShader = ISSOURHI_BIT(10),
+  ClosestHitShader = ISSOURHI_BIT(11),
+  AnyHitShader = ISSOURHI_BIT(12),
+  CallableShader = ISSOURHI_BIT(13),
+  AccelerationStructure = ISSOURHI_BIT(14),
+  Micromap = ISSOURHI_BIT(15),
   // Indirect
-  Indirect = ISSOURHI_BIT(11),
+  Indirect = ISSOURHI_BIT(16),
   // Copy, Resolve, Clear
-  Copy = ISSOURHI_BIT(12),
-  Resolve = ISSOURHI_BIT(13),
-  ClearStorage = ISSOURHI_BIT(14),
+  Copy = ISSOURHI_BIT(17),
+  Resolve = ISSOURHI_BIT(18),
+  ClearStorage = ISSOURHI_BIT(19),
+  // Meta
+  MeshShaders = TaskShader | MeshShader,
+  RayTracingShaders = RaygenShader | MissShader | IntersectionShader | ClosestHitShader | AnyHitShader | CallableShader,
 };
 ISSOURHI_ENUM_CLASS_OP(PipelineStage);
 
@@ -212,15 +220,15 @@ enum class TextureLayout {
 
 struct StageAccessLayout {
   // TODO: implement our own enums...
-  D3D12_BARRIER_SYNC stage;
-  D3D12_BARRIER_ACCESS access;
-  D3D12_BARRIER_LAYOUT layout;
+  PipelineStage stage;
+  Access access;
+  TextureLayout layout;
 };
 
 struct StageAccess {
   // TODO: implement our own enums...
-  D3D12_BARRIER_SYNC stage;
-  D3D12_BARRIER_ACCESS access;
+  PipelineStage stage;
+  Access access;
 };
 
 enum class TextureDimension : uint32_t {
