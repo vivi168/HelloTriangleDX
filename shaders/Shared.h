@@ -33,6 +33,7 @@ using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
 struct FrameConstants {
   float Time;
   hlsl_float3 CameraWS;
+  hlsl_float4x4 ViewProj;
   hlsl_float4 FrustumPlanes[6];
   hlsl_float2 ScreenSize;
   hlsl_float2 TwoOverScreenSize;
@@ -114,7 +115,6 @@ ASSERT_SIZE_M16(MeshletData);
 
 struct MeshInstanceData {
   // TODO: keep this separate to minimize data transfer?
-  hlsl_float4x4 worldViewProj;
   hlsl_float4x4 worldMatrix;
   hlsl_float3x3 normalMatrix;
   hlsl_float4 boundingSphere;

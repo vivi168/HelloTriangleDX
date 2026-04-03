@@ -14,8 +14,10 @@ VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint verte
   StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_DescIds.vertexUVsBufferId];
   float2 uv = uvs[mi.firstUV + vertexIndex];
 
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+
   VertexOut vout;
-  vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
+  vout.posCS = mul(float4(position, 1.0f), mul(mi.worldMatrix, g_FrameConstants.ViewProj));
   vout.meshletIndex = meshletIndex;
   vout.textureIndex = textureIndex;
   vout.uv = uv;

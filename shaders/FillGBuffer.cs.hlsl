@@ -38,8 +38,10 @@ Vertex GetVertexAttributes(MeshInstanceData mi, uint vertexIndex)
   StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_DescIds.vertexUVsBufferId];
   float2 uv = uvs[mi.firstUV + vertexIndex];
 
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+
   Vertex vout;
-  vout.posCS = mul(float4(position, 1.0f), mi.worldViewProj);
+  vout.posCS = mul(float4(position, 1.0f), mul(mi.worldMatrix, g_FrameConstants.ViewProj));
   vout.posWS = mul(float4(position, 1.0f), mi.worldMatrix);
   float3 normalWS = mul(normal, mi.normalMatrix);
   float3 tangentWS = mul(tangent.xyz, (float3x3)mi.worldMatrix);  // TODO: pass 3x3 matrix as constant?

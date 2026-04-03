@@ -883,6 +883,7 @@ static void Update(FrameContext* ctx, float time)
 
     // Extract planes for frustum culling
     XMMATRIX vp = XMMatrixTranspose(viewProjection);
+    XMStoreFloat4x4(&ctx->frameConstants.ViewProj, vp);
     std::array<XMVECTOR, 6> planes = {
         XMPlaneNormalize(vp.r[3] + vp.r[0]),  // Left
         XMPlaneNormalize(vp.r[3] - vp.r[0]),  // Right
@@ -924,10 +925,8 @@ static void Update(FrameContext* ctx, float time)
           world = mi->mesh->LocalTransformMatrix() * modelMat;
         }
 
-        XMMATRIX worldViewProjection = world * viewProjection;
         XMMATRIX normalMatrix = XMMatrixInverse(nullptr, world);
 
-        XMStoreFloat4x4(&mi->data.worldViewProj, XMMatrixTranspose(worldViewProjection));
         XMStoreFloat4x4(&mi->data.worldMatrix, XMMatrixTranspose(world));
         XMStoreFloat3x3(&mi->data.normalMatrix, normalMatrix);
         mi->data.boundingSphere =
