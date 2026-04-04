@@ -198,6 +198,8 @@ Device::Device(const GPUSelection& gpuSelection)
     rootParameters[0].InitAsConstants(ConstantCount, 0);
 
     // Static sampler
+    // TODO: this has nothing to do here.
+    // FIXME: get read of static sampler and pass them from app side via sampler descriptor heap
     constexpr UINT StaticSamplerCount = 2;
     CD3DX12_STATIC_SAMPLER_DESC staticSamplers[StaticSamplerCount];
     staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
@@ -220,16 +222,12 @@ Device::Device(const GPUSelection& gpuSelection)
 
 Device::~Device()
 {
-  m_RootSignature.Reset();
-
   PrintStatsString(m_Allocator.Get());
   m_Allocator.Reset();
 
   if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
     assert(g_CpuAllocationCount.load() == 0);
   }
-
-  m_Device.Reset();
 }
 
 void Device::PrintAdapterInformation()

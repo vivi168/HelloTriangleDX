@@ -58,7 +58,6 @@ struct GPUSelection {
 
 void ReportLiveObjects();
 void PrintAdapterList();
-std::filesystem::path GetExecutableDirectory();
 
 struct DescriptorAllocation {
   UINT index;
@@ -566,14 +565,8 @@ enum class ShaderStage : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(ShaderStage)
 
 struct ShaderModule {
-  ShaderModule(std::filesystem::path file);
-
-  const uint8_t* Data() const { return m_Code.data(); }
-
-  size_t Size() const { return m_Code.size(); }
-
-private:
-  std::vector<uint8_t> m_Code;
+  const void* code;
+  size_t size;
 };
 
 class PipelineBase
@@ -594,7 +587,7 @@ protected:  // D3D12 impl specific
 
 struct ComputePipelineDesc {
   std::string label;
-  ShaderModule* module;
+  ShaderModule* shaderModule;
 };
 
 class ComputePipeline : public PipelineBase
@@ -861,6 +854,8 @@ public:
   void SetPipeline(ComputePipeline* pipeline);
 private:
   ComputePassDesc m_Desc;
+  IssouRHI::ComputePipeline* m_CurrentPipeline = nullptr;
+  bool m_Ended = false;
 };
 
 struct Color {

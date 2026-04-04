@@ -1,46 +1,44 @@
 #pragma once
 
-inline std::vector<uint8_t> ReadData(_In_z_ const wchar_t* name)
+inline std::filesystem::path GetExecutableDirectory()
 {
-  std::ifstream inFile(name, std::ios::in | std::ios::binary | std::ios::ate);
-
 #if !defined(WINAPI_FAMILY) || (WINAPI_FAMILY == WINAPI_FAMILY_DESKTOP_APP)
-  if (!inFile) {
-    wchar_t moduleName[_MAX_PATH] = {};
+  wchar_t moduleName[_MAX_PATH] = {};
     if (!GetModuleFileNameW(nullptr, moduleName, _MAX_PATH))
       throw std::system_error(std::error_code(static_cast<int>(GetLastError()), std::system_category()),
                               "GetModuleFileNameW");
-
-    wchar_t drive[_MAX_DRIVE];
-    wchar_t path[_MAX_PATH];
-
-    if (_wsplitpath_s(moduleName, drive, _MAX_DRIVE, path, _MAX_PATH, nullptr, 0, nullptr, 0))
-      throw std::runtime_error("_wsplitpath_s");
-
-    wchar_t filename[_MAX_PATH];
-    if (_wmakepath_s(filename, _MAX_PATH, drive, path, name, nullptr)) throw std::runtime_error("_wmakepath_s");
-
-    inFile.open(filename, std::ios::in | std::ios::binary | std::ios::ate);
-  }
+  return std::filesystem::path(moduleName).parent_path();
+#else
+  // TODO: sorry
+  return std::filesystem::current_path();
 #endif
+}
 
-  if (!inFile) throw std::runtime_error("ReadData");
+inline std::vector<uint8_t> ReadData(std::filesystem::path file)
+{
+  std::ifstream inFile(file, std::ios::in | std::ios::binary | std::ios::ate);
+
+  if (!inFile && file.is_relative()) {
+    inFile.open(GetExecutableDirectory() / file, std::ios::in | std::ios::binary | std::ios::ate);
+  }
+
+  if (!inFile) throw std::runtime_error("Read ShaderModule");
 
   const std::streampos len = inFile.tellg();
-  if (!inFile) throw std::runtime_error("ReadData");
+  if (!inFile) throw std::runtime_error("Read ShaderModule");
 
-  std::vector<uint8_t> blob;
-  blob.resize(size_t(len));
+  std::vector<uint8_t> v;
+  v.resize(size_t(len));
 
   inFile.seekg(0, std::ios::beg);
-  if (!inFile) throw std::runtime_error("ReadData");
+  if (!inFile) throw std::runtime_error("Read ShaderModule");
 
-  inFile.read(reinterpret_cast<char*>(blob.data()), len);
-  if (!inFile) throw std::runtime_error("ReadData");
+  inFile.read(reinterpret_cast<char*>(v.data()), len);
+  if (!inFile) throw std::runtime_error("Read ShaderModule");
 
   inFile.close();
 
-  return blob;
+  return v;
 }
 
 inline void PrintStateObjectDesc(const D3D12_STATE_OBJECT_DESC* desc)

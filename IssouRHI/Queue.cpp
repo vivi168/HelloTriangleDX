@@ -152,6 +152,9 @@ void CommandBuffer::Reset()
 {
   CHECK_HR(m_CommandAllocator->Reset());
   CHECK_HR(m_CommandList->Reset(m_CommandAllocator.Get(), nullptr));
+
+  m_ComputeRootSignatureSet = false;
+  m_GraphicRootSignatureSet = false;
 }
 
 void CommandBuffer::SetComputeRootSignatureIfNeeded()

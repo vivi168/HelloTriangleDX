@@ -299,7 +299,7 @@ ComputePassEncoder::ComputePassEncoder(const ComputePassDesc& desc, CommandBuffe
 
 ComputePassEncoder::~ComputePassEncoder()
 {
-  // assert closed
+  assert(m_Ended);
 }
 
 void ComputePassEncoder::Dispatch(uint32_t x, uint32_t y, uint32_t z)
@@ -309,6 +309,7 @@ void ComputePassEncoder::Dispatch(uint32_t x, uint32_t y, uint32_t z)
 
 void ComputePassEncoder::End()
 {
+  // TODO: think of a way of DRYing this between RenderPass / ComputePass etc
   if (m_Desc.timestampWrites != nullptr && m_Desc.timestampWrites->endOfPassWriteIndex != QuerySetIndexUndefined) {
     // FIXME: validate that index doesn't exceed QuerySet#count
     // and also validate that querySet != nullptr and is QueryType::Timestamp
@@ -316,13 +317,21 @@ void ComputePassEncoder::End()
     CommandList()->EndQuery(m_Desc.timestampWrites->querySet->QueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, m_Desc.timestampWrites->endOfPassWriteIndex);
   }
 
-  // TODO: mark encoder as open = false
+  m_Ended = true;
+}
+
+void ComputePassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
+{
+  CommandList()->SetComputeRoot32BitConstants(0, size, data, offset);
 }
 
 void ComputePassEncoder::SetPipeline(ComputePipeline* pipeline)
 {
-  // FIXME: only if pso changed. track current pso in CommandBuffer
+  // TODO: shouldn't this be tracked on CommandBuffer?
+  if (pipeline == m_CurrentPipeline) return;
+
   CommandList()->SetPipelineState(pipeline->PipelineState());
+  m_CurrentPipeline = pipeline;
 }
 
 RenderPassEncoder::RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}

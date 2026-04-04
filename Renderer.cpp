@@ -612,7 +612,7 @@ static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
-static ComPtr<ID3D12RootSignature> g_RootSignature;
+static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
 static ComPtr<ID3D12StateObject> g_DxrStateObject;
@@ -1159,7 +1159,6 @@ void Render(float time)
   D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
   encoder.CommandList()->RSSetScissorRects(1, &scissorRect);
 
-  encoder.CommandList()->SetComputeRootSignature(g_RootSignature.Get());
   uint32_t frameConstantsIndex = ctx->frameConstantBuffer->DescriptorIndex({IssouRHI::BufferAccess::Constant, IssouRHI::FullBufferRange, sizeof(FrameConstants)});
 
   // record skinning compute commands if needed
@@ -1174,29 +1173,26 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::SkinningCS].Get());
+    auto passEncoder = encoder.BeginComputePass({
+      .label = "Skinning Compute Pass",
+      .timestampWrites = nullptr, // TODO
+    });
 
-    encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices, 0);
+    passEncoder.SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
+    passEncoder.PushConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
-      encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(o), &o, SizeOfInUint(SkinningBuffersDescriptorIndices));
-
-      encoder.CommandList()->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE), 1, 1);
+      passEncoder.PushConstants(SizeOfInUint(SkinningBuffersDescriptorIndices), SizeOfInUint(o), &o);
+      passEncoder.Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE));
     }
+
+    passEncoder.End();
   }
   encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
   // record culling commands
   {
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
-
-    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::InstanceCullingCS].Get());
-
-    encoder.CommandList()->SetComputeRoot32BitConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices, 0);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(CullingBuffersDescriptorIndices));
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.numMeshInstances, SizeOfInUint(CullingBuffersDescriptorIndices) + 1);
-
     {
       std::array transitions{
         BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Copy, IssouRHI::Access::CopyDestination}),
@@ -1205,8 +1201,7 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    encoder.CommandList()->CopyBufferRegion(g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET,
-                                    g_UAVCounterReset->Resource(), 0, sizeof(UINT));
+    encoder.CopyBufferToBuffer(g_UAVCounterReset.get(), 0, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET, sizeof(UINT));
 
     {
       std::array transitions{
@@ -1216,7 +1211,22 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    encoder.CommandList()->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE), 1, 1);
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
+
+    auto passEncoder = encoder.BeginComputePass({
+      .label = "Culling Compute Pass",
+      .timestampWrites = nullptr, // TODO
+    });
+
+    passEncoder.SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
+
+    passEncoder.PushConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices);
+    passEncoder.PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices), 1, &frameConstantsIndex);
+    passEncoder.PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices) + 1, 1, &g_Scene.numMeshInstances);
+
+    passEncoder.Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
+
+    passEncoder.End();
 
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
   }
@@ -1239,7 +1249,7 @@ void Render(float time)
 
     encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
 
-    encoder.CommandList()->SetGraphicsRootSignature(g_RootSignature.Get());
+    encoder.CommandList()->SetGraphicsRootSignature(g_RhiDevice->RootSignature());
 
     encoder.CommandList()->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
     encoder.CommandList()->SetGraphicsRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(BuffersDescriptorIndices));
@@ -1252,7 +1262,6 @@ void Render(float time)
 
   // Record Fill G-Buffer from Visibility-Buffer commands
   {
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
     {
       std::array transitions{
           BuildTransition(g_VisibilityBuffer.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
@@ -1263,7 +1272,15 @@ void Render(float time)
 
       encoder.Barrier({.textures = transitions});
     }
-    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::FillGBufferCS].Get());
+
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
+
+    auto passEncoder = encoder.BeginComputePass({
+      .label = "Fill G-Buffer Compute Pass",
+      .timestampWrites = nullptr, // TODO
+    });
+
+    passEncoder.SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read));
     UINT n = SizeOfInUint(c);
@@ -1273,11 +1290,13 @@ void Render(float time)
     // same for SetGraphicsRoot32BitConstant. "bind" everything up front, and be done with it.
     // Only have one "slot", so only one "InitAsConstant" and prepare some enum for the different offsets in the root signature.
     // Also, instead of writing an entire struct to the root signature. have ConstantBuffer and write the cbv to it.
-    encoder.CommandList()->SetComputeRoot32BitConstants(0, n, &c, 0);
-    encoder.CommandList()->SetComputeRoot32BitConstants(0, n2, &ctx->buffersDescriptorsIndices, n);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, n + n2);
+    passEncoder.PushConstants(0, n, &c);
+    passEncoder.PushConstants(n, n2, &ctx->buffersDescriptorsIndices);
+    passEncoder.PushConstants(n + n2, 1, &frameConstantsIndex);
 
-    encoder.CommandList()->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y), 1);
+    passEncoder.Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
+
+    passEncoder.End();
 
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
   }
@@ -1382,7 +1401,7 @@ void Cleanup()
   g_Surface->WaitForAllFrames();
 
   // TODO: rewrite as a class so we have RAII and can forego calling Reset() manually...
-
+  // Because all of these are static object, their dtor is called too late and ReportLiveObjects raises
   for (auto& [k, tex] : g_Textures) {
     tex.reset();
   }
@@ -1406,11 +1425,13 @@ void Cleanup()
   }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
-  g_PipelineStateObjects[PSO::SkinningCS].Reset();
-  g_PipelineStateObjects[PSO::InstanceCullingCS].Reset();
-  g_PipelineStateObjects[PSO::FillGBufferCS].Reset();
   g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
-  g_RootSignature.Reset();
+
+  // FIXME: because these are static object we must call reset manually or dtor is not called before ~Device
+  g_ComputePipelines[PSO::SkinningCS].reset();
+  g_ComputePipelines[PSO::InstanceCullingCS].reset();
+  g_ComputePipelines[PSO::FillGBufferCS].reset();
+
   g_DrawMeshCommandSignature.Reset();
 
   g_DrawMeshCommands.reset();
@@ -1547,35 +1568,6 @@ static void InitFrameResources()
   };
   ImGui_ImplDX12_Init(&initInfo);
 
-  // Root Signature
-  {
-    // Root parameters
-    // Applications should sort entries in the root signature from most frequently changing to least.
-    std::array<CD3DX12_ROOT_PARAMETER, 1> rootParameters{};
-    rootParameters[0].InitAsConstants(32, 0); // b0
-
-    // Static sampler
-    std::array<CD3DX12_STATIC_SAMPLER_DESC, 2> staticSamplers{};
-    staticSamplers[0].Init(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
-    staticSamplers[1].Init(1, D3D12_FILTER_ANISOTROPIC);
-
-    // Root Signature
-    D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(static_cast<UINT>(rootParameters.size()), rootParameters.data(),
-                                                            static_cast<UINT>(staticSamplers.size()), staticSamplers.data(),
-                                                            flags);
-
-    ComPtr<ID3DBlob> signatureBlob;
-    CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc,
-                                                  &signatureBlob, nullptr));
-
-    ID3D12RootSignature* rootSignature = nullptr;
-    CHECK_HR(g_Device->CreateRootSignature(
-        0, signatureBlob->GetBufferPointer(),
-        signatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
-    g_RootSignature.Attach(rootSignature);
-  }
-
   // Command signature for DrawMeshCommands
   {
     std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2> argDesc{};
@@ -1593,7 +1585,7 @@ static void InitFrameResources()
         .pArgumentDescs = argDesc.data(),
     };
 
-    CHECK_HR(g_Device->CreateCommandSignature(&signatureDesc, g_RootSignature.Get(),
+    CHECK_HR(g_Device->CreateCommandSignature(&signatureDesc, g_RhiDevice->RootSignature(),
                                               IID_PPV_ARGS(&g_DrawMeshCommandSignature)));
   }
 
@@ -1612,7 +1604,7 @@ static void InitFrameResources()
                                          pixelShaderBlob.size()};
 
     D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.pRootSignature = g_RhiDevice->RootSignature();
     psoDesc.AS = amplificationShader;
     psoDesc.MS = meshShader;
     psoDesc.PS = pixelShader;
@@ -1641,46 +1633,46 @@ static void InitFrameResources()
   // Compute skinning pipeline
   {
     auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
-    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
-    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-        .pRootSignature = g_RootSignature.Get(),
-        .CS = computeShader,
+    IssouRHI::ShaderModule sm{
+      .code = computeShaderBlob.data(),
+      .size = computeShaderBlob.size(),
     };
 
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::SkinningCS].Attach(pipelineStateObject);
+    g_ComputePipelines[PSO::SkinningCS] = g_RhiDevice->CreateComputePipeline({
+      .label = "Skinning Pipeline",
+      .shaderModule = &sm,
+    });
   }
 
   // Compute culling pipeline
   {
     auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
-    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
-    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-        .pRootSignature = g_RootSignature.Get(),
-        .CS = computeShader,
+    IssouRHI::ShaderModule sm{
+      .code = computeShaderBlob.data(),
+      .size = computeShaderBlob.size(),
     };
 
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::InstanceCullingCS].Attach(pipelineStateObject);
+    g_ComputePipelines[PSO::InstanceCullingCS] = g_RhiDevice->CreateComputePipeline({
+      .label = "Culling Pipeline",
+      .shaderModule = &sm,
+    });
   }
 
   // Fill G-Buffer pipeline
   {
     auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
-    D3D12_SHADER_BYTECODE computeShader = {computeShaderBlob.data(), computeShaderBlob.size()};
 
-    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-        .pRootSignature = g_RootSignature.Get(),
-        .CS = computeShader,
+    IssouRHI::ShaderModule sm{
+      .code = computeShaderBlob.data(),
+      .size = computeShaderBlob.size(),
     };
 
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::FillGBufferCS].Attach(pipelineStateObject);
+    g_ComputePipelines[PSO::FillGBufferCS] = g_RhiDevice->CreateComputePipeline({
+      .label = "Fill G-Buffer Pipeline",
+      .shaderModule = &sm,
+    });
   }
 
   // Final image composition VS/PS pipeline
@@ -1694,7 +1686,7 @@ static void InitFrameResources()
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout.NumElements = 0;
     psoDesc.InputLayout.pInputElementDescs = nullptr;
-    psoDesc.pRootSignature = g_RootSignature.Get();
+    psoDesc.pRootSignature = g_RhiDevice->RootSignature();
     psoDesc.VS = vertexShader;
     psoDesc.PS = pixelShader;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -1741,7 +1733,7 @@ static void InitFrameResources()
     shaderConfig->Config(payloadSize, attributeSize);
 
     auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-    globalRootSignature->SetRootSignature(g_RootSignature.Get());
+    globalRootSignature->SetRootSignature(g_RhiDevice->RootSignature());
 
     auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
     UINT maxRecursionDepth = 1;
