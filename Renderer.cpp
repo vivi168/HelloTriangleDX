@@ -1644,7 +1644,7 @@ static void InitFrameResources()
 
     g_ComputePipelines[PSO::SkinningCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Skinning Pipeline",
-      .shaderModule = &sm,
+      .computeModule = &sm,
     });
   }
 
@@ -1659,7 +1659,7 @@ static void InitFrameResources()
 
     g_ComputePipelines[PSO::InstanceCullingCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Culling Pipeline",
-      .shaderModule = &sm,
+      .computeModule = &sm,
     });
   }
 
@@ -1674,7 +1674,7 @@ static void InitFrameResources()
 
     g_ComputePipelines[PSO::FillGBufferCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Fill G-Buffer Pipeline",
-      .shaderModule = &sm,
+      .computeModule = &sm,
     });
   }
 

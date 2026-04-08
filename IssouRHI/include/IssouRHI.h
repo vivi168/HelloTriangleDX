@@ -588,7 +588,7 @@ protected:  // D3D12 impl specific
 
 struct ComputePipelineDesc {
   std::string label;
-  ShaderModule* shaderModule;
+  ShaderModule* computeModule;
 };
 
 class ComputePipeline : public PipelineBase

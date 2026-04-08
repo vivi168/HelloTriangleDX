@@ -19,19 +19,21 @@ ComputePipeline::~ComputePipeline()
 
 void ComputePipeline::Create()
 {
-  assert(m_Desc.shaderModule != nullptr);
-  D3D12_SHADER_BYTECODE computeShader = {m_Desc.shaderModule->code, m_Desc.shaderModule->size};
-
-  D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{
-    .pRootSignature = m_Device->RootSignature(),
-    .CS = computeShader,
+  assert(m_Desc.computeModule != nullptr);
+  D3D12_SHADER_BYTECODE computeShader{
+      .pShaderBytecode = m_Desc.computeModule->code,
+      .BytecodeLength = m_Desc.computeModule->size,
   };
+
+  D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+  psoDesc.pRootSignature = m_Device->RootSignature();
+  psoDesc.CS = computeShader;
 
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->GetNativeDevice()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
 
   m_Pso.Attach(pipelineStateObject);
-  m_Desc.shaderModule = nullptr;
+  m_Desc.computeModule = nullptr;
 }
 
 RenderPipeline::RenderPipeline(Device* device, const RenderPipelineDesc& desc) : PipelineBase(device), m_Desc(desc) {}
