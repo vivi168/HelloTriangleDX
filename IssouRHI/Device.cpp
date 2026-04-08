@@ -406,6 +406,14 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(const ComputePipe
   return computePipeline;
 }
 
+std::shared_ptr<RenderPipeline> Device::CreateRenderPipeline(const RenderPipelineDesc& desc)
+{
+  auto renderPipeline = std::make_shared<RenderPipeline>(this, desc);
+  renderPipeline->Create();
+
+  return renderPipeline;
+}
+
 DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
 {
   return m_CbvSrvUavDescriptorHeap.Alloc();

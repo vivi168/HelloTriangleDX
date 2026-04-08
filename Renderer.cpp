@@ -612,6 +612,7 @@ static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
+static std::unordered_map<PSO, std::shared_ptr<IssouRHI::RenderPipeline>> g_RenderPipelines;
 static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
 static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
@@ -1432,6 +1433,8 @@ void Cleanup()
   g_ComputePipelines[PSO::InstanceCullingCS].reset();
   g_ComputePipelines[PSO::FillGBufferCS].reset();
 
+  g_RenderPipelines[PSO::FinalComposeVS].reset();
+
   g_DrawMeshCommandSignature.Reset();
 
   g_DrawMeshCommands.reset();
@@ -1703,6 +1706,25 @@ static void InitFrameResources()
     ID3D12PipelineState* pipelineStateObject;
     CHECK_HR(g_Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     g_PipelineStateObjects[PSO::FinalComposeVS].Attach(pipelineStateObject);
+
+    IssouRHI::ShaderModule vertex{
+      .code = vertexShaderBlob.data(),
+      .size = vertexShaderBlob.size(),
+    };
+    IssouRHI::ShaderModule fragment{
+      .code = pixelShaderBlob.data(),
+      .size = pixelShaderBlob.size(),
+    };
+
+    IssouRHI::ColorTargetState targets[] = {{
+        .format = IssouRHI::TextureFormat::RGBA8Unorm,
+    }};
+    g_RenderPipelines[PSO::FinalComposeVS] = g_RhiDevice->CreateRenderPipeline({
+      .label = "Final Compose",
+      .vertexModule = &vertex,
+      .fragmentModule = &fragment,
+      .targets = targets
+    });
   }
 
   // Ray traced shadow pipeline

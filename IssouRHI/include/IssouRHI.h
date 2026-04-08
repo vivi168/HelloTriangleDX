@@ -261,7 +261,9 @@ enum class TextureAspect : uint32_t {
   StencilOnly,
 };
 
+// TODO: add missing types
 enum class TextureFormat : uint32_t {
+  Undefined,
   BC5Unorm,
   BC7Unorm,
   Depth32Float,
@@ -271,13 +273,14 @@ enum class TextureFormat : uint32_t {
   RGBA8Unorm,
   RGB10A2Unorm,
   RGBA32Float,
-  Undefined,
 };
 
 // TODO: where to put this
 inline DXGI_FORMAT DXGIFormat(TextureFormat format)
 {
   switch (format) {
+  case TextureFormat::Undefined:
+    return DXGI_FORMAT_UNKNOWN;
   case TextureFormat::BC5Unorm:
     return DXGI_FORMAT_BC5_UNORM;
   case TextureFormat::BC7Unorm:
@@ -296,8 +299,6 @@ inline DXGI_FORMAT DXGIFormat(TextureFormat format)
     return DXGI_FORMAT_R10G10B10A2_UNORM;
   case TextureFormat::RGBA32Float:
     return DXGI_FORMAT_R32G32B32A32_FLOAT;
-  case TextureFormat::Undefined:
-    return DXGI_FORMAT_UNKNOWN;
   }
 }
 
@@ -601,8 +602,156 @@ private:
   ComputePipelineDesc m_Desc;
 };
 
-struct RenderPipelineDesc;
-class RenderPipeline;
+enum ColorWriteFlags : uint8_t {
+  Red = ISSOURHI_BIT(0),
+  Green = ISSOURHI_BIT(1),
+  Blue = ISSOURHI_BIT(2),
+  Alpha = ISSOURHI_BIT(3),
+  All = Red | Green | Blue | Alpha,
+};
+ISSOURHI_ENUM_CLASS_OP(ColorWriteFlags)
+
+enum class BlendOperation { Add, Subtract, ReverseSubtract, Min, Max };
+
+enum class BlendFactor {
+  Zero,
+  One,
+  Src,
+  OneMinusSrc,
+  SrcAlpha,
+  OneMinusSrcAlpha,
+  Dst,
+  OneMinusDst,
+  DstAlpha,
+  OneMinusDstAlpha,
+  SrcAlphaSaturated,
+  Constant,
+  OneMinusConstant,
+  Src1,
+  OneMinusSrc1,
+  Src1Alpha,
+  OneMinusSrc1Alpha,
+};
+
+struct BlendComponent {
+  BlendOperation operation = BlendOperation::Add;
+  BlendFactor srcFactor = BlendFactor::One;
+  BlendFactor dstFactor = BlendFactor::Zero;
+};
+
+struct BlendState {
+  BlendComponent color;
+  BlendComponent alpha;
+};
+
+struct ColorTargetState {
+  TextureFormat format;
+  std::optional<BlendState> blend;
+  ColorWriteFlags writeMask = ColorWriteFlags::All;
+};
+
+enum class CompareFunction {
+  Never,
+  Less,
+  Equal,
+  LessEqual,
+  Greater,
+  NotEqual,
+  GreaterEqual,
+  Always,
+};
+
+enum class StencilOperation {
+  Keep,
+  Zero,
+  Replace,
+  Invert,
+  IncrementClamp,
+  DecrementClamp,
+  IncrementWrap,
+  DecrementWrap,
+} ;
+
+struct StencilFaceState {
+  CompareFunction compare = CompareFunction::Always;
+  StencilOperation depthFailOp = StencilOperation::Keep;
+  StencilOperation failOp = StencilOperation::Keep;
+  StencilOperation passOp = StencilOperation::Keep;
+
+  bool Enabled() const
+  {
+    return compare != CompareFunction::Always ||
+           depthFailOp != StencilOperation::Keep ||
+           failOp != StencilOperation::Keep ||
+           passOp != StencilOperation::Keep;
+  }
+};
+
+struct DepthStencilState {
+  TextureFormat format;
+  // Depth
+  int32_t depthBias = 0;
+  float depthBiasClamp = 0.f;
+  float depthBiasSlopeScale = 0.f;
+  CompareFunction depthCompare = CompareFunction::Always;
+  bool depthWriteEnabled = false;
+  // Stencil
+  StencilFaceState stencilFront;
+  StencilFaceState stencilBack;
+  uint32_t stencilReadMask = 0xFFFFFFFF;
+  uint32_t stencilWriteMask = 0xFFFFFFFF;
+};
+
+enum class PrimitiveTopology {
+  PointList,
+  LineList,
+  LineStrip,
+  TriangleList,
+  TriangleStrip,
+};
+
+enum class IndexFormat { Uint16, Uint32 };
+
+enum class FrontFace { CCW, CW };
+
+enum class CullMode { None, Front, Back };
+
+struct PrimitiveState {
+  PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+  IndexFormat stripIndexFormat;
+  FrontFace frontFace = FrontFace::CCW;
+  CullMode cullMode = CullMode::None;
+  bool unclippedDepth = false;
+};
+
+struct MultisampleState {
+  uint32_t count = 1;
+  uint32_t mask = std::numeric_limits<uint32_t>::max();
+  bool alphaToCoverageEnabled = false;
+};
+
+struct RenderPipelineDesc {
+  std::string label;
+  ShaderModule* vertexModule;
+  ShaderModule* fragmentModule;
+  std::span<ColorTargetState> targets;
+  DepthStencilState depthStencil;
+  PrimitiveState primitive;
+  MultisampleState multiSample;
+};
+
+class RenderPipeline : public PipelineBase
+{
+public:
+  RenderPipeline(Device* device, const RenderPipelineDesc& desc);
+  ~RenderPipeline();
+
+  void Create() override;
+private:
+  RenderPipelineDesc m_Desc;
+private:
+  D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
+};
 
 struct MeshPipelineDesc;
 class MeshPipeline;
@@ -627,6 +776,7 @@ public:
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
 
   std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
+  std::shared_ptr<RenderPipeline> CreateRenderPipeline(const RenderPipelineDesc& desc);
 
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
