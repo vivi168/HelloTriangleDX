@@ -310,6 +310,11 @@ struct Extent3D {
   uint32_t width;
   uint32_t height = 1;
   uint32_t depth = 1;
+
+  bool operator == (const Extent3D& other) const
+  {
+    return width == other.width && height == other.height && depth == other.depth;
+  }
 };
 
 struct TextureDesc {
@@ -394,6 +399,8 @@ public:
   Device* GetDevice() const { return m_Device; }
   TextureUsage Usage() const { return m_Desc.usage; }
   TextureFormat Format() const { return m_Desc.format; }
+  Extent3D Size() const { return m_Desc.size; };
+  Extent3D SizeAtMipLevel(uint32_t level) const;
 public: // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
@@ -426,6 +433,8 @@ public:
 
   uint32_t DescriptorIndex(TextureAccess access) const;
   uint64_t DescriptorHandle(TextureAccess access) const;
+
+  Extent3D Size() const { return m_Texture->SizeAtMipLevel(m_Desc.range.baseMipLevel); }
 public: // D3D12 impl specific
   // Internal use
   DescriptorAllocation SrvDescriptorAlloc() const { return m_Srv; }
@@ -747,6 +756,8 @@ public:
   ~RenderPipeline();
 
   void Create() override;
+public:
+  D3D12_PRIMITIVE_TOPOLOGY NativePrimitiveTopology() const { return m_PrimitiveTopology; }
 private:
   RenderPipelineDesc m_Desc;
 private:
@@ -974,14 +985,17 @@ public:
   CommandEncoder(std::string label, CommandBuffer* commandBuffer);
   ~CommandEncoder();
 
+  // TODO: make it so that we can't begin a pass if another one hasn't yet ended
   ComputePassEncoder BeginComputePass(const ComputePassDesc& desc);
   RenderPassEncoder BeginRenderPass(const RenderPassDesc& desc);
   MeshPassEncoder BeginMeshPass(const RenderPassDesc& desc);
   RayTracingPassEncoder BeginRayTracingPass(const RenderPassDesc& desc);
 
+  // TODO: make these uncallable if a pass has begun+not yet ended?
   void Barrier(const BarriersDesc& desc);
   void CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size);
 
+  // TODO: assert that every pass has ended
   CommandBuffer* Finish();
 private:
   std::string m_Label;
@@ -1004,7 +1018,6 @@ public:
   void SetPipeline(ComputePipeline* pipeline);
 private:
   ComputePassDesc m_Desc;
-  IssouRHI::ComputePipeline* m_CurrentPipeline = nullptr;
   bool m_Ended = false;
 };
 
@@ -1012,8 +1025,8 @@ struct Color {
   float r, g, b, a;
 };
 
-enum class LoadOp { Load, Clear, DontCare };
-// enum class StoreOp { Store, DontCare };
+enum class LoadOp { Clear, Load, DontCare };
+// enum class StoreOp { Store, Discard };
 
 struct ColorAttachment {
   TextureView* view;
@@ -1038,7 +1051,7 @@ struct DepthStencilAttachment {
 
 struct RenderPassDesc {
   std::string label;
-  ColorAttachment colorAttachment;
+  std::span<ColorAttachment> colorAttachment;
   DepthStencilAttachment depthStencilAttachment;
   TimestampWrites* timestampWrites;
 };
@@ -1049,12 +1062,13 @@ public:
   RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
   ~RenderPassEncoder();
 
-  void DrawInstanced();
+  void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
   void End();
   void PushConstants(uint32_t offset, uint32_t size, const void *data);
   void SetPipeline(RenderPipeline* pipeline);
 private:
   RenderPassDesc m_Desc;
+  bool m_Ended = false;
 };
 
 class MeshPassEncoder : public EncoderBase

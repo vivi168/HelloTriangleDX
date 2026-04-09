@@ -33,11 +33,75 @@ RenderPassEncoder CommandEncoder::BeginRenderPass(const RenderPassDesc& desc)
   auto e = RenderPassEncoder(desc, m_CommandBuffer);
 
   m_CommandBuffer->SetComputeRootSignatureIfNeeded();
+  std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvHandles;
+  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle{};
+  bool hasReference = false;
+  Extent3D referenceSize;
+  // FIXME: also validate that sampleCount matches between targets
 
-  // TODO ClearRenderTargetView, ClearDepthStencilView
-  // OMSetRenderTargets
-  // RSSetScissorRects, RSSetViewports
-  // etc etc
+  for (auto& colorAttachment : desc.colorAttachment) {
+    if (colorAttachment.view != nullptr) {
+      auto rtvHandle = colorAttachment.view->RtvDescriptorAlloc().cpuHandle;
+      rtvHandles.push_back(rtvHandle);
+
+      if (!hasReference) {
+        referenceSize = colorAttachment.view->Size();
+        hasReference = true;
+      } else {
+        assert(colorAttachment.view->Size() == referenceSize);
+      }
+
+      if (colorAttachment.loadOp == LoadOp::Clear) {
+        const float clearColor[4] = {
+            colorAttachment.clearValue.r,
+            colorAttachment.clearValue.g,
+            colorAttachment.clearValue.b,
+            colorAttachment.clearValue.a,
+        };
+
+        CommandList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+      }
+    }
+  }
+
+  bool hasColorAttachment = rtvHandles.size() > 0;
+  bool hasDepthStencilAttachment = desc.depthStencilAttachment.view != nullptr;
+
+  if (hasDepthStencilAttachment) {
+    dsvHandle = desc.depthStencilAttachment.view->DsvDescriptorAlloc().cpuHandle;
+
+    if (!hasReference) {
+      referenceSize = desc.depthStencilAttachment.view->Size();
+      hasReference = true;
+    } else {
+      assert(desc.depthStencilAttachment.view->Size() == referenceSize);
+    }
+
+    D3D12_CLEAR_FLAGS clearFlags{};
+    if (desc.depthStencilAttachment.depthLoadOp == LoadOp::Clear) {
+      clearFlags |= D3D12_CLEAR_FLAG_DEPTH;
+    }
+    if (desc.depthStencilAttachment.stencilLoadOp == LoadOp::Clear) {
+      clearFlags |= D3D12_CLEAR_FLAG_STENCIL;
+    }
+    assert(desc.depthStencilAttachment.depthClearValue >= 0.f && desc.depthStencilAttachment.depthClearValue <= 1.f);
+
+    CommandList()->ClearDepthStencilView(dsvHandle,
+                                         clearFlags,
+                                         desc.depthStencilAttachment.depthClearValue,
+                                         static_cast<UINT>(desc.depthStencilAttachment.stencilClearValue),
+                                         0, nullptr);
+  }
+
+  CommandList()->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE, hasDepthStencilAttachment ? &dsvHandle : nullptr);
+
+  if (hasReference) {
+    D3D12_VIEWPORT viewport{0.f, 0.f, static_cast<float>(referenceSize.width), static_cast<float>(referenceSize.height), 0.f, 1.f};
+    CommandList()->RSSetViewports(1, &viewport);
+
+    D3D12_RECT scissorRect{0, 0, static_cast<LONG>(referenceSize.width), static_cast<LONG>(referenceSize.height)};
+    CommandList()->RSSetScissorRects(1, &scissorRect);
+  }
 
   return e;
 }
@@ -77,7 +141,7 @@ static D3D12_BARRIER_SYNC D3D12BarrierSync(PipelineStage stage)
   }
   if (stage & (PipelineStage::AccelerationStructure | PipelineStage::Micromap)) {
     flags |= D3D12_BARRIER_SYNC_BUILD_RAYTRACING_ACCELERATION_STRUCTURE | D3D12_BARRIER_SYNC_COPY_RAYTRACING_ACCELERATION_STRUCTURE;
-    // D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO ?
+    // FIXME: what about D3D12_BARRIER_SYNC_EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO ?
   }
   if (stage & PipelineStage::Indirect) {
     flags |= D3D12_BARRIER_SYNC_EXECUTE_INDIRECT;
@@ -327,33 +391,38 @@ void ComputePassEncoder::PushConstants(uint32_t offset, uint32_t size, const voi
 
 void ComputePassEncoder::SetPipeline(ComputePipeline* pipeline)
 {
-  // TODO: shouldn't this be tracked on CommandBuffer?
-  if (pipeline == m_CurrentPipeline) return;
-
   CommandList()->SetPipelineState(pipeline->PipelineState());
-  m_CurrentPipeline = pipeline;
 }
 
 RenderPassEncoder::RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}
 
 RenderPassEncoder::~RenderPassEncoder()
 {
-  // assert closed
+  assert(m_Ended); // TODO: DRY between Passes Encoder
 }
 
-void RenderPassEncoder::DrawInstanced()
+void RenderPassEncoder::Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
 {
-  //
+  CommandList()->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
 void RenderPassEncoder::End()
 {
   // TODO: mark encoder as open = false
+  // TODO: ResolveSubresource if MSAA (resolveTarget)
+
+  m_Ended = true;
+}
+
+void RenderPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
+{
+  CommandList()->SetGraphicsRoot32BitConstants(0, size, data, offset);
 }
 
 void RenderPassEncoder::SetPipeline(RenderPipeline* pipeline)
 {
-  // IASetPrimitiveTopology
+  CommandList()->IASetPrimitiveTopology(pipeline->NativePrimitiveTopology());
+  CommandList()->SetPipelineState(pipeline->PipelineState());
 }
 
 MeshPassEncoder::MeshPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}

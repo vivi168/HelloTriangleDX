@@ -1135,31 +1135,6 @@ void Render(float time)
     encoder.Barrier({.textures = transitions});
   }
 
-  // here we again get the handle to our current render target view so we can
-  // set it as the render target in the output merger stage of the pipeline
-  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-      g_DepthStencilBuffer->CreateView()->DsvDescriptorAlloc().cpuHandle;
-
-  encoder.CommandList()->ClearDepthStencilView(
-      dsvHandle,
-      D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-  static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
-  encoder.CommandList()->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
-
-  // Clear the render target by using the ClearRenderTargetView command
-  const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
-  encoder.CommandList()->ClearRenderTargetView(renderTargetView->RtvDescriptorAlloc().cpuHandle, clearColor, 0, nullptr);
-
-  std::array descriptorHeaps{g_RhiDevice->CbvSrvUavDescriptorHeap()};
-  encoder.CommandList()->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
-
-  D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
-  encoder.CommandList()->RSSetViewports(1, &viewport);
-
-  D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
-  encoder.CommandList()->RSSetScissorRects(1, &scissorRect);
-
   uint32_t frameConstantsIndex = ctx->frameConstantBuffer->DescriptorIndex({IssouRHI::BufferAccess::Constant, IssouRHI::FullBufferRange, sizeof(FrameConstants)});
 
   // record skinning compute commands if needed
@@ -1243,6 +1218,20 @@ void Render(float time)
 
       encoder.Barrier({.buffers = transitions});
     }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+    g_DepthStencilBuffer->CreateView()->DsvDescriptorAlloc().cpuHandle;
+
+    encoder.CommandList()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+    static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    encoder.CommandList()->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
+
+    D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
+    encoder.CommandList()->RSSetViewports(1, &viewport);
+
+    D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
+    encoder.CommandList()->RSSetScissorRects(1, &scissorRect);
 
     auto rtvHandle = g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle;
     // TODO: RenderPass Begin/End
@@ -1356,23 +1345,35 @@ void Render(float time)
     }
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
-    auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
-    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+    IssouRHI::ColorAttachment targets[] = {{
+        .view = renderTargetView.get(),
+        .clearValue = {0.0f, 0.2f, 0.4f, 1.0f},
+    }};
+    auto passEncoder = encoder.BeginRenderPass({
+        .label = "Final Compose Pass",
+        .colorAttachment = targets,
+    });
 
-    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::FinalComposeVS].Get());
-
-    encoder.CommandList()->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
-    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices));
-    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), SizeOfInUint(BuffersDescriptorIndices) + 1);
-
-    encoder.CommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    encoder.CommandList()->DrawInstanced(3, 1, 0, 0);
+    passEncoder.SetPipeline(g_RenderPipelines[PSO::FinalComposeVS].get());
+    uint32_t c[] = {
+        g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+        g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+    };
+    passEncoder.PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
+    passEncoder.PushConstants(SizeOfInUint(BuffersDescriptorIndices), 2, c);
+    passEncoder.Draw(3);
+    passEncoder.End();
 
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeEnd);
   }
 
-  ImGui::Render();
-  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), encoder.CommandList());
+  {
+    auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
+    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    ImGui::Render();
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), encoder.CommandList());
+  }
 
   {
     std::array transitions{
@@ -1426,7 +1427,6 @@ void Cleanup()
   }
 
   g_PipelineStateObjects[PSO::BasicMS].Reset();
-  g_PipelineStateObjects[PSO::FinalComposeVS].Reset();
 
   // FIXME: because these are static object we must call reset manually or dtor is not called before ~Device
   g_ComputePipelines[PSO::SkinningCS].reset();
@@ -1681,31 +1681,7 @@ static void InitFrameResources()
   // Final image composition VS/PS pipeline
   {
     auto vertexShaderBlob = ReadData(L"FullScreenTriangle.vs.cso");
-    D3D12_SHADER_BYTECODE vertexShader = {vertexShaderBlob.data(), vertexShaderBlob.size()};
-
     auto pixelShaderBlob = ReadData(L"FinalCompose.ps.cso");
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(), pixelShaderBlob.size()};
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout.NumElements = 0;
-    psoDesc.InputLayout.pInputElementDescs = nullptr;
-    psoDesc.pRootSignature = g_RhiDevice->RootSignature();
-    psoDesc.VS = vertexShader;
-    psoDesc.PS = pixelShader;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = RENDER_TARGET_FORMAT;
-    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState.DepthEnable = FALSE;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.SampleDesc = DefaultSampleDesc();
-
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::FinalComposeVS].Attach(pipelineStateObject);
 
     IssouRHI::ShaderModule vertex{
       .code = vertexShaderBlob.data(),

@@ -149,6 +149,25 @@ std::shared_ptr<TextureView> Texture::CreateView(const TextureViewDesc& desc)
   return view;
 }
 
+Extent3D Texture::SizeAtMipLevel(uint32_t level) const
+{
+  Extent3D base = Size();
+  Extent3D size{};
+
+  size.width = std::max(base.width >> level, 1u);
+  if (m_Desc.dimension == TextureDimension::Texture1D) {
+    return size;
+  }
+
+  size.height = std::max(base.height >> level, 1u);
+  if (m_Desc.dimension == TextureDimension::Texture2D) {
+    return size;
+  }
+
+  size.depth = std::max(base.depth >> level, 1u);
+  return size;
+}
+
 void Texture::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
 {
   m_Resource.Attach(other);

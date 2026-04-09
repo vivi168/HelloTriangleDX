@@ -144,6 +144,7 @@ void CommandBuffer::Create()
 
 void CommandBuffer::Init()
 {
+  // TODO: also set sampler heap
   std::array descriptorHeaps{m_Device->CbvSrvUavDescriptorHeap()};
   m_CommandList->SetDescriptorHeaps(static_cast<UINT>(descriptorHeaps.size()), descriptorHeaps.data());
 }
