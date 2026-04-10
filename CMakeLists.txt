@@ -1,65 +1,74 @@
 cmake_minimum_required(VERSION 3.30)
 project(HelloTriangleDX)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
+add_library(common INTERFACE)
+target_compile_features(common INTERFACE cxx_std_23)
 if(MSVC)
-    add_compile_options(/W4 /permissive-)
+    target_compile_options(common INTERFACE /W4 /permissive-)
+    target_compile_definitions(common INTERFACE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 endif()
 
+add_subdirectory(third_party/D3D12MemoryAllocator)
 add_subdirectory(third_party/DirectXMesh)
 add_subdirectory(third_party/DirectXTex)
 
-set(IMGUI_SOURCES
-    third_party/imgui/imgui.cpp
-    third_party/imgui/imgui_demo.cpp
-    third_party/imgui/imgui_draw.cpp
-    third_party/imgui/imgui_tables.cpp
-    third_party/imgui/imgui_widgets.cpp
-    third_party/imgui/backends/imgui_impl_dx12.cpp
-    third_party/imgui/backends/imgui_impl_win32.cpp)
-
-set(D3D12MA_SOURCES
-    third_party/D3D12MemoryAllocator/src/D3D12MemAlloc.cpp)
-
-set(ISSOURHI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/IssouRHI)
-set(ISSOURHI_SOURCES
-    ${ISSOURHI_DIR}/Buffer.cpp
-    ${ISSOURHI_DIR}/CommandEncoder.cpp
-    ${ISSOURHI_DIR}/DescriptorHeap.cpp
-    ${ISSOURHI_DIR}/Device.cpp
-    ${ISSOURHI_DIR}/Pipeline.cpp
-    ${ISSOURHI_DIR}/Queue.cpp
-    ${ISSOURHI_DIR}/QuerySet.cpp
-    ${ISSOURHI_DIR}/Utils.cpp
-    ${ISSOURHI_DIR}/Surface.cpp
-    ${ISSOURHI_DIR}/Texture.cpp)
-set(ISSOURHI_HEADERS
-    ${ISSOURHI_DIR}/include/IssouRHI.h)
-
-add_library(IssouRHI
-    ${ISSOURHI_SOURCES}
-    ${ISSOURHI_HEADERS}
-    ${D3D12MA_SOURCES})
-
-target_include_directories(IssouRHI
+add_library(imgui)
+target_sources(imgui
+    PRIVATE
+        third_party/imgui/imgui_demo.cpp
+        third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp
+        third_party/imgui/imgui_widgets.cpp
+        third_party/imgui/imgui.cpp
+        third_party/imgui/backends/imgui_impl_dx12.cpp
+        third_party/imgui/backends/imgui_impl_win32.cpp
+)
+target_include_directories(imgui
     PUBLIC
-    ${ISSOURHI_DIR}/include
-    # PRIVATE # TODO: make these private when we remove these include from IssouRHI.h
-    third_party/DirectX-Headers/include/directx
-    third_party/D3D12MemoryAllocator/include)
+        third_party/imgui
+        third_party/imgui/backends
+)
+target_link_libraries(imgui PRIVATE common)
 
-target_link_libraries(IssouRHI PRIVATE
-    d3d12.lib
-    dxgi.lib
-    dxguid.lib
-    shlwapi.lib)
-
-target_compile_definitions(IssouRHI PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+add_library(IssouRHI)
+target_sources(IssouRHI
+    PRIVATE
+        IssouRHI/Buffer.cpp
+        IssouRHI/CommandEncoder.cpp
+        IssouRHI/DescriptorHeap.cpp
+        IssouRHI/Device.cpp
+        IssouRHI/Pipeline.cpp
+        IssouRHI/QuerySet.cpp
+        IssouRHI/Queue.cpp
+        IssouRHI/Surface.cpp
+        IssouRHI/Texture.cpp
+        IssouRHI/Utils.cpp
+    PUBLIC
+        FILE_SET headers
+        TYPE HEADERS
+        BASE_DIRS
+            IssouRHI/include
+        FILES
+            IssouRHI/include/IssouRHI.h
+)
+target_include_directories(IssouRHI
+    PUBLIC # PRIVATE TODO: make these private when we remove these include from IssouRHI.h
+        third_party/DirectX-Headers/include/directx
+        third_party/D3D12MemoryAllocator/include
+)
+target_link_libraries(IssouRHI
+    PRIVATE
+        common
+        D3D12MemoryAllocator
+        d3d12.lib
+        dxgi.lib
+        dxguid.lib
+        shlwapi.lib
+)
 
 set(SHADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(HLSL_SOURCES
@@ -70,60 +79,55 @@ set(HLSL_SOURCES
     ${SHADERS_DIR}/Meshlet.as.hlsl
     ${SHADERS_DIR}/Meshlet.ms.hlsl
     ${SHADERS_DIR}/Meshlet.ps.hlsl
+    ${SHADERS_DIR}/RayTracing.rt.hlsl
     ${SHADERS_DIR}/Skinning.cs.hlsl
-    ${SHADERS_DIR}/RayTracing.rt.hlsl)
-set(SHARED_HEADERS
-    ${SHADERS_DIR}/Shared.h)
+)
 set(HLSL_HEADERS
     ${SHADERS_DIR}/MeshletCommon.hlsli
-    ${SHADERS_DIR}/VisibilityBufferCommon.hlsli)
+    ${SHADERS_DIR}/VisibilityBufferCommon.hlsli
+)
+set(SHARED_HEADERS
+    ${SHADERS_DIR}/Shared.h
+)
 
-set(SOURCES
-    Camera.cpp
-    Collider.cpp
-    Game.cpp
-    Input.cpp
-    Main.cpp
-    Mesh.cpp
-    Renderer.cpp
-    Win32Application.cpp)
-set(HEADERS
-    Camera.h
-    Collider.h
-    Game.h
-    Input.h
-    Mesh.h
-    Renderer.h
-    RendererHelper.h
-    StepTimer.h
-    Win32Application.h)
-set(STDAFX_HEADER stdafx.h)
-
-add_executable(HelloTriangleDX
-  ${SOURCES}
-  ${HEADERS}
-  ${SHARED_HEADERS}
-  ${IMGUI_SOURCES}
-  ${STDAFX_HEADER})
-
-target_precompile_headers(HelloTriangleDX PRIVATE ${STDAFX_HEADER})
-set_source_files_properties(${IMGUI_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-
-target_include_directories(HelloTriangleDX PRIVATE
-    ${ISSOURHI_DIR}/include
-    third_party/DirectX-Headers/include/directx
-    third_party/DirectXMesh/DirectXMesh
-    third_party/DirectXTex/DirectXTex
-    third_party/imgui
-    third_party/imgui/backends)
-
-target_link_libraries(HelloTriangleDX PRIVATE
-    IssouRHI
-    d3d12.lib # TODO: remove when everything dx12 is done through the rhi
-    DirectXMesh
-    DirectXTex)
-
-target_compile_definitions(HelloTriangleDX PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+add_executable(HelloTriangleDX)
+target_sources(HelloTriangleDX
+    PRIVATE
+        Camera.cpp
+        Collider.cpp
+        Game.cpp
+        Input.cpp
+        Main.cpp
+        Mesh.cpp
+        Renderer.cpp
+        Win32Application.cpp
+        # HEADERS
+        Camera.h
+        Collider.h
+        Game.h
+        Input.h
+        Mesh.h
+        Renderer.h
+        RendererHelper.h
+        StepTimer.h
+        Win32Application.h
+)
+target_precompile_headers(HelloTriangleDX PRIVATE stdafx.h)
+target_include_directories(HelloTriangleDX
+    PRIVATE
+        third_party/DirectX-Headers/include/directx # TODO remove when everything is done through the rhi
+        third_party/DirectXMesh/DirectXMesh
+        third_party/DirectXTex/DirectXTex
+)
+target_link_libraries(HelloTriangleDX
+    PRIVATE
+        common
+        DirectXMesh
+        DirectXTex
+        imgui
+        IssouRHI
+        d3d12.lib # TODO: remove when everything dx12 is done through the rhi
+)
 
 find_program(DXC_EXECUTABLE dxc.exe)
 
