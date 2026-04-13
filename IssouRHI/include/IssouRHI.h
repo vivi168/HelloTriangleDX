@@ -739,8 +739,10 @@ struct MultisampleState {
   bool alphaToCoverageEnabled = false;
 };
 
-struct RenderPipelineDesc {
+struct GraphicPipelineDesc {
   std::string label;
+  ShaderModule* meshModule;
+  ShaderModule* taskModule;
   ShaderModule* vertexModule;
   ShaderModule* fragmentModule;
   std::span<ColorTargetState> targets;
@@ -749,23 +751,38 @@ struct RenderPipelineDesc {
   MultisampleState multiSample;
 };
 
-class RenderPipeline : public PipelineBase
+class GraphicPipeline : public PipelineBase
 {
+protected:
+    enum class Type { Render, Mesh };
+    GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type);
 public:
-  RenderPipeline(Device* device, const RenderPipelineDesc& desc);
-  ~RenderPipeline();
+  ~GraphicPipeline() override;
 
   void Create() override;
-public:
+
   D3D12_PRIMITIVE_TOPOLOGY NativePrimitiveTopology() const { return m_PrimitiveTopology; }
-private:
-  RenderPipelineDesc m_Desc;
-private:
+protected:
+  GraphicPipelineDesc m_Desc;
+
+  Type m_Type;
+protected:
   D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
 };
 
-struct MeshPipelineDesc;
-class MeshPipeline;
+class RenderPipeline : public GraphicPipeline
+{
+public:
+  RenderPipeline(Device* device, const GraphicPipelineDesc& desc);
+  ~RenderPipeline() override;
+};
+
+class MeshPipeline : public GraphicPipeline
+{
+public:
+  MeshPipeline(Device* device, const GraphicPipelineDesc& desc);
+  ~MeshPipeline() override;
+};
 
 struct RayTracingPipelineDesc;
 class RayTracingPipeline;
@@ -787,7 +804,8 @@ public:
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
 
   std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
-  std::shared_ptr<RenderPipeline> CreateRenderPipeline(const RenderPipelineDesc& desc);
+  std::shared_ptr<RenderPipeline> CreateRenderPipeline(const GraphicPipelineDesc& desc);
+  std::shared_ptr<MeshPipeline> CreateMeshPipeline(const GraphicPipelineDesc& desc);
 
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();

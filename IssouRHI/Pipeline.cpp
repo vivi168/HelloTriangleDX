@@ -36,9 +36,9 @@ void ComputePipeline::Create()
   m_Desc.computeModule = nullptr;
 }
 
-RenderPipeline::RenderPipeline(Device* device, const RenderPipelineDesc& desc) : PipelineBase(device), m_Desc(desc) {}
+GraphicPipeline::GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type) : PipelineBase(device), m_Desc(desc), m_Type(type) {}
 
-RenderPipeline::~RenderPipeline()
+GraphicPipeline::~GraphicPipeline()
 {
   // TODO
 }
@@ -229,103 +229,160 @@ static D3D12_BLEND_OP D3D12BlendOperation(BlendOperation operation)
   }
 }
 
-void RenderPipeline::Create()
+void GraphicPipeline::Create()
 {
-  D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-  psoDesc.pRootSignature = m_Device->RootSignature();
+  const auto fillPsoDesc = [&](auto& psoDesc)
+  {
+    psoDesc.pRootSignature = m_Device->RootSignature();
 
-  assert(m_Desc.vertexModule != nullptr);
-  D3D12_SHADER_BYTECODE vertexShader{
-      .pShaderBytecode = m_Desc.vertexModule->code,
-      .BytecodeLength = m_Desc.vertexModule->size,
-  };
-  psoDesc.VS = vertexShader;
-
-  if (m_Desc.fragmentModule != nullptr) {
-    D3D12_SHADER_BYTECODE pixelShader{
-        .pShaderBytecode = m_Desc.fragmentModule->code,
-        .BytecodeLength = m_Desc.fragmentModule->size,
-    };
-    psoDesc.PS = pixelShader;
-  }
-
-  psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-  psoDesc.BlendState.AlphaToCoverageEnable = m_Desc.multiSample.alphaToCoverageEnabled;
-  psoDesc.BlendState.IndependentBlendEnable = TRUE;
-
-  psoDesc.SampleMask = m_Desc.multiSample.mask;
-
-  // RasterizerState
-  psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-  psoDesc.RasterizerState.CullMode = D3D12CullMode(m_Desc.primitive.cullMode);
-  psoDesc.RasterizerState.FrontCounterClockwise = m_Desc.primitive.frontFace == FrontFace::CCW;
-  psoDesc.RasterizerState.DepthBias = m_Desc.depthStencil.depthBias;
-  psoDesc.RasterizerState.DepthBiasClamp = m_Desc.depthStencil.depthBiasClamp;
-  psoDesc.RasterizerState.SlopeScaledDepthBias = m_Desc.depthStencil.depthBiasSlopeScale;
-  psoDesc.RasterizerState.DepthClipEnable = !m_Desc.primitive.unclippedDepth;
-  psoDesc.RasterizerState.MultisampleEnable = m_Desc.multiSample.count > 1;
-  psoDesc.RasterizerState.AntialiasedLineEnable = FALSE;
-  psoDesc.RasterizerState.ForcedSampleCount = 0;
-  psoDesc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-  // DepthStencilState
-  psoDesc.DepthStencilState.DepthEnable = m_Desc.depthStencil.depthWriteEnabled || m_Desc.depthStencil.depthCompare != CompareFunction::Always;
-  psoDesc.DepthStencilState.DepthWriteMask = m_Desc.depthStencil.depthWriteEnabled ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
-  psoDesc.DepthStencilState.DepthFunc = D3D12ComparisonFunc(m_Desc.depthStencil.depthCompare);
-
-  psoDesc.DepthStencilState.StencilEnable = m_Desc.depthStencil.stencilFront.Enabled() || m_Desc.depthStencil.stencilBack.Enabled();
-  psoDesc.DepthStencilState.StencilReadMask = static_cast<UINT8>(m_Desc.depthStencil.stencilReadMask);
-  psoDesc.DepthStencilState.StencilWriteMask = static_cast<UINT8>(m_Desc.depthStencil.stencilWriteMask);
-  psoDesc.DepthStencilState.FrontFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilFront);
-  psoDesc.DepthStencilState.BackFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilBack);
-
-  psoDesc.InputLayout = {
-      .pInputElementDescs = nullptr,
-      .NumElements = 0,
-  };
-
-  // psoDesc.IBStripCutValue; // TODO
-
-  psoDesc.PrimitiveTopologyType = D3D12PrimitiveTopologyType(m_Desc.primitive.topology);
-  m_PrimitiveTopology = D3D12PrimitiveTopology(m_Desc.primitive.topology);
-
-  psoDesc.DSVFormat = DXGIFormat(m_Desc.depthStencil.format);
-  assert(!(psoDesc.DepthStencilState.DepthEnable || psoDesc.DepthStencilState.StencilEnable) || psoDesc.DSVFormat != DXGI_FORMAT_UNKNOWN);
-
-  psoDesc.SampleDesc = {
-      .Count = m_Desc.multiSample.count,
-      .Quality = 0,
-  };
-
-  assert(m_Desc.targets.size() <= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT);
-  psoDesc.NumRenderTargets = m_Desc.targets.size();
-
-  for (size_t i = 0; i < psoDesc.NumRenderTargets; i++) {
-    auto& target = m_Desc.targets[i];
-    psoDesc.RTVFormats[i] = DXGIFormat(target.format);
-
-    auto& blendDesc = psoDesc.BlendState.RenderTarget[i];
-    blendDesc.BlendEnable = target.blend.has_value();
-    if (blendDesc.BlendEnable) {
-      auto& blend = target.blend.value();
-      blendDesc.SrcBlend = D3D12Blend(blend.color.srcFactor);
-      blendDesc.SrcBlendAlpha = D3D12BlendAlpha(blend.alpha.srcFactor);
-
-      blendDesc.DestBlend = D3D12Blend(blend.color.dstFactor);
-      blendDesc.DestBlendAlpha = D3D12BlendAlpha(blend.alpha.dstFactor);
-
-      blendDesc.BlendOp = D3D12BlendOperation(blend.color.operation);
-      blendDesc.BlendOpAlpha = D3D12BlendOperation(blend.alpha.operation);
+    if (m_Desc.fragmentModule != nullptr) {
+      D3D12_SHADER_BYTECODE pixelShader{
+          .pShaderBytecode = m_Desc.fragmentModule->code,
+          .BytecodeLength = m_Desc.fragmentModule->size,
+      };
+      psoDesc.PS = pixelShader;
     }
-    blendDesc.RenderTargetWriteMask = static_cast<uint8_t>(target.writeMask);
-  }
+
+    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState.AlphaToCoverageEnable = m_Desc.multiSample.alphaToCoverageEnabled;
+    psoDesc.BlendState.IndependentBlendEnable = TRUE;
+
+    psoDesc.SampleMask = m_Desc.multiSample.mask;
+
+    // RasterizerState
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12CullMode(m_Desc.primitive.cullMode);
+    psoDesc.RasterizerState.FrontCounterClockwise = m_Desc.primitive.frontFace == FrontFace::CCW;
+    psoDesc.RasterizerState.DepthBias = m_Desc.depthStencil.depthBias;
+    psoDesc.RasterizerState.DepthBiasClamp = m_Desc.depthStencil.depthBiasClamp;
+    psoDesc.RasterizerState.SlopeScaledDepthBias = m_Desc.depthStencil.depthBiasSlopeScale;
+    psoDesc.RasterizerState.DepthClipEnable = !m_Desc.primitive.unclippedDepth;
+    psoDesc.RasterizerState.MultisampleEnable = m_Desc.multiSample.count > 1;
+    psoDesc.RasterizerState.AntialiasedLineEnable = FALSE;
+    psoDesc.RasterizerState.ForcedSampleCount = 0;
+    psoDesc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+    // DepthStencilState
+    psoDesc.DepthStencilState.DepthEnable = m_Desc.depthStencil.depthWriteEnabled || m_Desc.depthStencil.depthCompare != CompareFunction::Always;
+    psoDesc.DepthStencilState.DepthWriteMask = m_Desc.depthStencil.depthWriteEnabled ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+    psoDesc.DepthStencilState.DepthFunc = D3D12ComparisonFunc(m_Desc.depthStencil.depthCompare);
+
+    psoDesc.DepthStencilState.StencilEnable = m_Desc.depthStencil.stencilFront.Enabled() || m_Desc.depthStencil.stencilBack.Enabled();
+    psoDesc.DepthStencilState.StencilReadMask = static_cast<UINT8>(m_Desc.depthStencil.stencilReadMask);
+    psoDesc.DepthStencilState.StencilWriteMask = static_cast<UINT8>(m_Desc.depthStencil.stencilWriteMask);
+    psoDesc.DepthStencilState.FrontFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilFront);
+    psoDesc.DepthStencilState.BackFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilBack);
+
+    psoDesc.PrimitiveTopologyType = D3D12PrimitiveTopologyType(m_Desc.primitive.topology);
+
+    psoDesc.DSVFormat = DXGIFormat(m_Desc.depthStencil.format);
+    assert(!(psoDesc.DepthStencilState.DepthEnable || psoDesc.DepthStencilState.StencilEnable) || psoDesc.DSVFormat != DXGI_FORMAT_UNKNOWN);
+
+    psoDesc.SampleDesc = {
+        .Count = m_Desc.multiSample.count,
+        .Quality = 0,
+    };
+
+    assert(m_Desc.targets.size() <= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT);
+    psoDesc.NumRenderTargets = m_Desc.targets.size();
+
+    for (size_t i = 0; i < psoDesc.NumRenderTargets; i++) {
+      auto& target = m_Desc.targets[i];
+      psoDesc.RTVFormats[i] = DXGIFormat(target.format);
+
+      auto& blendDesc = psoDesc.BlendState.RenderTarget[i];
+      blendDesc.BlendEnable = target.blend.has_value();
+      if (blendDesc.BlendEnable) {
+        auto& blend = target.blend.value();
+        blendDesc.SrcBlend = D3D12Blend(blend.color.srcFactor);
+        blendDesc.SrcBlendAlpha = D3D12BlendAlpha(blend.alpha.srcFactor);
+
+        blendDesc.DestBlend = D3D12Blend(blend.color.dstFactor);
+        blendDesc.DestBlendAlpha = D3D12BlendAlpha(blend.alpha.dstFactor);
+
+        blendDesc.BlendOp = D3D12BlendOperation(blend.color.operation);
+        blendDesc.BlendOpAlpha = D3D12BlendOperation(blend.alpha.operation);
+      }
+      blendDesc.RenderTargetWriteMask = static_cast<uint8_t>(target.writeMask);
+    }
+  };
 
   ID3D12PipelineState* pipelineStateObject;
-  CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+
+  switch (m_Type) {
+  case Type::Render: {
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+
+    assert(m_Desc.vertexModule != nullptr);
+    assert(m_Desc.meshModule == nullptr);
+    assert(m_Desc.taskModule == nullptr);
+
+    D3D12_SHADER_BYTECODE vertexShader{
+        .pShaderBytecode = m_Desc.vertexModule->code,
+        .BytecodeLength = m_Desc.vertexModule->size,
+    };
+    psoDesc.VS = vertexShader;
+
+    fillPsoDesc(psoDesc);
+
+    psoDesc.InputLayout = {
+      .pInputElementDescs = nullptr,
+      .NumElements = 0,
+    };
+
+    CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+
+    m_Desc.vertexModule = nullptr;
+    break;
+  }
+  case Type::Mesh: {
+    D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
+
+    assert(m_Desc.vertexModule == nullptr);
+    assert(m_Desc.meshModule != nullptr);
+
+    D3D12_SHADER_BYTECODE meshShader{
+        .pShaderBytecode = m_Desc.meshModule->code,
+        .BytecodeLength = m_Desc.meshModule->size,
+    };
+    psoDesc.MS = meshShader;
+
+    if (m_Desc.taskModule != nullptr) {
+      D3D12_SHADER_BYTECODE amplificationShader{
+          .pShaderBytecode = m_Desc.taskModule->code,
+          .BytecodeLength = m_Desc.taskModule->size,
+      };
+      psoDesc.AS = amplificationShader;
+    }
+
+    fillPsoDesc(psoDesc);
+
+    auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
+    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
+    streamDesc.pPipelineStateSubobjectStream = &psoStream;
+    streamDesc.SizeInBytes = sizeof(psoStream);
+
+    CHECK_HR(m_Device->GetNativeDevice()->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pipelineStateObject)));
+
+    m_Desc.meshModule = nullptr;
+    m_Desc.taskModule = nullptr;
+    break;
+  }
+  default:
+    std::unreachable();
+  }
 
   m_Pso.Attach(pipelineStateObject);
-  m_Desc.vertexModule = nullptr;
+  m_PrimitiveTopology = D3D12PrimitiveTopology(m_Desc.primitive.topology);
   m_Desc.fragmentModule = nullptr;
 }
+
+RenderPipeline::RenderPipeline(Device* device, const GraphicPipelineDesc& desc) : GraphicPipeline(device, desc, GraphicPipeline::Type::Render) {}
+
+RenderPipeline::~RenderPipeline() = default;
+
+MeshPipeline::MeshPipeline(Device* device, const GraphicPipelineDesc& desc) : GraphicPipeline(device, desc, GraphicPipeline::Type::Mesh) {}
+
+MeshPipeline::~MeshPipeline() = default;
 
 }  // namespace IssouRHI

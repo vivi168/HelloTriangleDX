@@ -406,12 +406,20 @@ std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(const ComputePipe
   return computePipeline;
 }
 
-std::shared_ptr<RenderPipeline> Device::CreateRenderPipeline(const RenderPipelineDesc& desc)
+std::shared_ptr<RenderPipeline> Device::CreateRenderPipeline(const GraphicPipelineDesc& desc)
 {
   auto renderPipeline = std::make_shared<RenderPipeline>(this, desc);
   renderPipeline->Create();
 
   return renderPipeline;
+}
+
+std::shared_ptr<MeshPipeline> Device::CreateMeshPipeline(const GraphicPipelineDesc& desc)
+{
+  auto meshPipeline = std::make_shared<MeshPipeline>(this, desc);
+  meshPipeline->Create();
+
+  return meshPipeline;
 }
 
 DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
