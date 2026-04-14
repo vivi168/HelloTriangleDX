@@ -3,6 +3,9 @@
 cbuffer PushConstants : register(b0) {
   BuffersDescriptorIndices g_DescIds;
   uint FrameConstantsIndex;
+}
+
+cbuffer IndirectArgumentConstants : register(b1) {
   uint InstanceIndex;
 }
 

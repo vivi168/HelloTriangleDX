@@ -825,6 +825,10 @@ public:
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
 
   ID3D12RootSignature* RootSignature() const { return m_RootSignature.Get(); }
+  ID3D12CommandSignature* DispatchSignature() const { return m_DispatchSignature.Get(); }
+  ID3D12CommandSignature* DrawCommandSignature() const { return m_DrawCommandSignature.Get(); }
+  ID3D12CommandSignature* DrawIndirectCommandSignature() const { return m_DrawIndirectCommandSignature.Get(); }
+  ID3D12CommandSignature* DispatchMeshCommandSignature() const { return m_DispatchMeshCommandSignature.Get(); }
 private:
   std::unique_ptr<Queue> m_Queue;
 
@@ -839,6 +843,11 @@ private:
   D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
 
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
+  // For ExecuteIndirect
+  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DispatchSignature;
+  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DrawCommandSignature;
+  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DrawIndirectCommandSignature;
+  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DispatchMeshCommandSignature;
 };
 
 struct SurfaceConfiguration {
@@ -900,9 +909,10 @@ public:
   void SetComputeRootSignatureIfNeeded();
   void SetGraphicsRootSignatureIfNeeded();
 
-  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandList.Get(); }
-private:
+public:
   Device* m_Device;
+  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandList.Get(); }
+
 private:
   Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_CommandAllocator;
   Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList8> m_CommandList;
@@ -957,15 +967,18 @@ class MeshPassEncoder;
 class RayTracingPassEncoder;
 
 struct ComputePassDesc;
-struct RenderPassDesc;
+struct GraphicPassDesc;
 
 class EncoderBase
 {
 public:
   EncoderBase(CommandBuffer* commandBuffer);
   virtual ~EncoderBase();
+
+  Device* GetDevice() const { return m_CommandBuffer->m_Device; }
 public:
   ID3D12GraphicsCommandList8* CommandList() const { return m_CommandBuffer->CommandList(); }
+
 protected:
   CommandBuffer* m_CommandBuffer;
 };
@@ -1002,9 +1015,9 @@ public:
 
   // TODO: make it so that we can't begin a pass if another one hasn't yet ended
   ComputePassEncoder BeginComputePass(const ComputePassDesc& desc);
-  RenderPassEncoder BeginRenderPass(const RenderPassDesc& desc);
-  MeshPassEncoder BeginMeshPass(const RenderPassDesc& desc);
-  RayTracingPassEncoder BeginRayTracingPass(const RenderPassDesc& desc);
+  RenderPassEncoder BeginRenderPass(const GraphicPassDesc& desc);
+  MeshPassEncoder BeginMeshPass(const GraphicPassDesc& desc);
+  RayTracingPassEncoder BeginRayTracingPass(const GraphicPassDesc& desc);
 
   // TODO: make these uncallable if a pass has begun+not yet ended?
   void Barrier(const BarriersDesc& desc);
@@ -1013,6 +1026,7 @@ public:
   // TODO: assert that every pass has ended
   CommandBuffer* Finish();
 private:
+  void BeginGraphicPass(const GraphicPassDesc& desc);
   std::string m_Label;
 };
 
@@ -1028,6 +1042,7 @@ public:
   ~ComputePassEncoder();
 
   void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1);
+  // DispatchIndirect(indirectBuffer, indirectOffset)
   void End();
   void PushConstants(uint32_t offset, uint32_t size, const void *data);
   void SetPipeline(ComputePipeline* pipeline);
@@ -1064,40 +1079,49 @@ struct DepthStencilAttachment {
   // bool stencilReadOnly = false;
 };
 
-struct RenderPassDesc {
+struct GraphicPassDesc {
   std::string label;
   std::span<ColorAttachment> colorAttachment;
   DepthStencilAttachment depthStencilAttachment;
   TimestampWrites* timestampWrites;
 };
 
-class RenderPassEncoder : public EncoderBase
+class GraphicPassEncoder : public EncoderBase
 {
+protected:
+  GraphicPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
 public:
-  RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
-  ~RenderPassEncoder();
-
-  void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
+  ~GraphicPassEncoder() override;
+public:
   void End();
   void PushConstants(uint32_t offset, uint32_t size, const void *data);
-  void SetPipeline(RenderPipeline* pipeline);
-private:
-  RenderPassDesc m_Desc;
+protected:
+  GraphicPassDesc m_Desc;
   bool m_Ended = false;
 };
 
-class MeshPassEncoder : public EncoderBase
+class RenderPassEncoder : public GraphicPassEncoder
 {
 public:
-  MeshPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
-  ~MeshPassEncoder();
+  RenderPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
+  ~RenderPassEncoder() override;
 
-  void DrawMeshIndirect();
-  void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
+  // DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
+  // DrawIndirect(indirectBuffer, indirectOffset)
+  // DrawIndexedIndirect(indirectBuffer, indirectOffset)
+  void SetPipeline(RenderPipeline* pipeline);
+};
+
+class MeshPassEncoder : public GraphicPassEncoder
+{
+public:
+  MeshPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
+  ~MeshPassEncoder() override;
+
+  // DrawMesh();
+  void DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer = nullptr, uint64_t countOffset = 0);
   void SetPipeline(MeshPipeline* pipeline);
-private:
-  RenderPassDesc m_Desc;
 };
 
 }  // namespace IssouRHI

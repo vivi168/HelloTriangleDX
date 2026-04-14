@@ -191,11 +191,14 @@ Device::Device(const GPUSelection& gpuSelection)
   // Create root signature
   {
     // Root parameters
-    constexpr UINT RootParameterCount = 1;
+    constexpr UINT RootParameterCount = 2;
     constexpr UINT ConstantCount = 32;
+    constexpr UINT IndirectArgumentConstantCount = 1;
 
-    CD3DX12_ROOT_PARAMETER rootParameters[RootParameterCount] = {};
+    CD3DX12_ROOT_PARAMETER rootParameters[RootParameterCount]{};
     rootParameters[0].InitAsConstants(ConstantCount, 0);
+    // DX12 only CHEAT: inject indirect command buffer payload in the second root parameter. accessible via cbuffer (b1)
+    rootParameters[1].InitAsConstants(IndirectArgumentConstantCount, 1);
 
     // Static sampler
     // TODO: this has nothing to do here.
@@ -217,6 +220,56 @@ Device::Device(const GPUSelection& gpuSelection)
     CHECK_HR(device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(),
                                          IID_PPV_ARGS(&rootSignature)));
     m_RootSignature.Attach(rootSignature);
+
+    // Command Signatures
+    {
+      constexpr UINT NumArgumentDescs = 2;
+      D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[NumArgumentDescs]{};
+      argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+      argumentDescs[0].Constant = {
+          .RootParameterIndex = 1,
+          .DestOffsetIn32BitValues = 0,
+          .Num32BitValuesToSet = IndirectArgumentConstantCount,
+      };
+      D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc{};
+      commandSignatureDesc.NumArgumentDescs = NumArgumentDescs;
+      commandSignatureDesc.pArgumentDescs = argumentDescs;
+
+      constexpr size_t ConstantSize = sizeof(UINT) * IndirectArgumentConstantCount;
+
+      // Dispatch
+      {
+        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+        commandSignatureDesc.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS) + ConstantSize;
+
+        CHECK_HR(m_Device->CreateCommandSignature(&commandSignatureDesc, RootSignature(), IID_PPV_ARGS(&m_DispatchSignature)));
+      }
+
+      // Draw
+      {
+        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+        commandSignatureDesc.ByteStride = sizeof(D3D12_DRAW_ARGUMENTS) + ConstantSize;
+
+        CHECK_HR(m_Device->CreateCommandSignature(&commandSignatureDesc, RootSignature(), IID_PPV_ARGS(&m_DrawCommandSignature)));
+      }
+
+      // DrawIndexed
+      {
+        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+        commandSignatureDesc.ByteStride = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS) + ConstantSize;
+
+        CHECK_HR(m_Device->CreateCommandSignature(&commandSignatureDesc, RootSignature(), IID_PPV_ARGS(&m_DrawIndirectCommandSignature)));
+      }
+
+      // DispatchMesh
+      {
+        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+
+        commandSignatureDesc.ByteStride = sizeof(D3D12_DISPATCH_MESH_ARGUMENTS) + ConstantSize;
+
+        CHECK_HR(m_Device->CreateCommandSignature(&commandSignatureDesc, RootSignature(), IID_PPV_ARGS(&m_DispatchMeshCommandSignature)));
+      }
+    }
   }
 }
 
@@ -338,6 +391,7 @@ std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
   D3D12_CLEAR_VALUE zero{};
   zero.Format = textureDesc.Format;
 
+  // TODO: how to allow for another clear value / any value for .clearValue of ColorAttachment?
   D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr;
   if (textureDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
     pOptimizedClearValue = &zero;

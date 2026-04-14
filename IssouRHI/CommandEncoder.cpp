@@ -28,11 +28,24 @@ ComputePassEncoder CommandEncoder::BeginComputePass(const ComputePassDesc& desc)
   return ComputePassEncoder(desc, m_CommandBuffer);
 }
 
-RenderPassEncoder CommandEncoder::BeginRenderPass(const RenderPassDesc& desc)
+RenderPassEncoder CommandEncoder::BeginRenderPass(const GraphicPassDesc& desc)
 {
-  auto e = RenderPassEncoder(desc, m_CommandBuffer);
+  BeginGraphicPass(desc);
 
-  m_CommandBuffer->SetComputeRootSignatureIfNeeded();
+  return RenderPassEncoder(desc, m_CommandBuffer);
+}
+
+MeshPassEncoder CommandEncoder::BeginMeshPass(const GraphicPassDesc& desc)
+{
+  BeginGraphicPass(desc);
+
+  return MeshPassEncoder(desc, m_CommandBuffer);
+}
+
+void CommandEncoder::BeginGraphicPass(const GraphicPassDesc& desc)
+{
+  m_CommandBuffer->SetGraphicsRootSignatureIfNeeded();
+
   std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvHandles;
   D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle{};
   bool hasReference = false;
@@ -102,8 +115,6 @@ RenderPassEncoder CommandEncoder::BeginRenderPass(const RenderPassDesc& desc)
     D3D12_RECT scissorRect{0, 0, static_cast<LONG>(referenceSize.width), static_cast<LONG>(referenceSize.height)};
     CommandList()->RSSetScissorRects(1, &scissorRect);
   }
-
-  return e;
 }
 
 static D3D12_BARRIER_SYNC D3D12BarrierSync(PipelineStage stage)
@@ -304,6 +315,7 @@ static std::optional<D3D12_TEXTURE_BARRIER> Transition(Texture* tex, StageAccess
 // FIXME: make the RHI dumb and leave barrier elision to the app?
 void CommandEncoder::Barrier(const BarriersDesc& desc)
 {
+  // FIXME: use a small vector or something instead of doing heap allocation here?
   std::vector<D3D12_BUFFER_BARRIER> bufferBarriers(desc.buffers.size());
   std::vector<D3D12_TEXTURE_BARRIER> textureBarriers(desc.textures.size());
 
@@ -394,19 +406,14 @@ void ComputePassEncoder::SetPipeline(ComputePipeline* pipeline)
   CommandList()->SetPipelineState(pipeline->PipelineState());
 }
 
-RenderPassEncoder::RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}
+GraphicPassEncoder::GraphicPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}
 
-RenderPassEncoder::~RenderPassEncoder()
+GraphicPassEncoder::~GraphicPassEncoder()
 {
-  assert(m_Ended); // TODO: DRY between Passes Encoder
+  assert(m_Ended);
 }
 
-void RenderPassEncoder::Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
-{
-  CommandList()->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
-}
-
-void RenderPassEncoder::End()
+void GraphicPassEncoder::End()
 {
   // TODO: mark encoder as open = false
   // TODO: ResolveSubresource if MSAA (resolveTarget)
@@ -414,9 +421,18 @@ void RenderPassEncoder::End()
   m_Ended = true;
 }
 
-void RenderPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
+void GraphicPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
 {
   CommandList()->SetGraphicsRoot32BitConstants(0, size, data, offset);
+}
+
+RenderPassEncoder::RenderPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer) : GraphicPassEncoder(desc, commandBuffer) {}
+
+RenderPassEncoder::~RenderPassEncoder() = default;
+
+void RenderPassEncoder::Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
+{
+  CommandList()->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
 void RenderPassEncoder::SetPipeline(RenderPipeline* pipeline)
@@ -425,25 +441,23 @@ void RenderPassEncoder::SetPipeline(RenderPipeline* pipeline)
   CommandList()->SetPipelineState(pipeline->PipelineState());
 }
 
-MeshPassEncoder::MeshPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}
+MeshPassEncoder::MeshPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer) : GraphicPassEncoder(desc, commandBuffer) {}
 
-MeshPassEncoder::~MeshPassEncoder()
+MeshPassEncoder::~MeshPassEncoder() = default;
+
+void MeshPassEncoder::DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer, uint64_t countOffset)
 {
-  // assert closed
+  ID3D12Resource* pCountBuffer = nullptr;
+  if (countBuffer != nullptr) {
+    pCountBuffer = countBuffer->Resource();
+  }
+
+  CommandList()->ExecuteIndirect(GetDevice()->DispatchMeshCommandSignature(), maxDrawCount, indirectBuffer->Resource(), indirectOffset, pCountBuffer, countOffset);
 }
 
-void MeshPassEncoder::DrawMeshIndirect()
-{
-  //
-}
-
-void MeshPassEncoder::End()
-{
-  //
-}
-
+// FIXME: all SetPipeline are the same... DRY?
 void MeshPassEncoder::SetPipeline(MeshPipeline* pipeline)
 {
-  //
+  CommandList()->SetPipelineState(pipeline->PipelineState());
 }
 }

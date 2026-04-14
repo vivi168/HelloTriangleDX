@@ -18,20 +18,10 @@ namespace Renderer
 // ========== Constants
 
 static constexpr size_t MESH_INSTANCE_COUNT = 10'000;
-static constexpr UINT NUM_DESCRIPTORS_PER_HEAP = 16384;
-
-static constexpr DXGI_FORMAT VISIBILITY_BUFFER_FORMAT = DXGI_FORMAT_R32_UINT;
-static constexpr DXGI_FORMAT SHADOW_BUFFER_FORMAT = DXGI_FORMAT_R8_UNORM;
-static constexpr DXGI_FORMAT GBUFFER_WORLD_POSITION_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
-static constexpr DXGI_FORMAT GBUFFER_WORLD_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;
-static constexpr DXGI_FORMAT GBUFFER_BASE_COLOR_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static constexpr DXGI_FORMAT GBUFFER_METALLIC_ROUGHNESS_FORMAT = DXGI_FORMAT_R8G8_UNORM;
-static constexpr DXGI_FORMAT RENDER_TARGET_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static constexpr DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D32_FLOAT;
 
 // ========== Enums
 
-enum class PSO { BasicMS, SkinningCS, InstanceCullingCS, FillGBufferCS, FinalComposeVS };
+enum class PSO { SkinningCS, InstanceCullingCS, FillGBufferCS };
 
 namespace Timestamp
 {
@@ -578,7 +568,6 @@ struct MeshStore {
 // ========== Static functions declarations
 
 static void InitFrameResources();
-static std::wstring GetAssetFullPath(LPCWSTR assetName);
 static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh);
 static UINT CreateTexture(std::filesystem::path filename);
 
@@ -612,9 +601,9 @@ static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
-static std::unordered_map<PSO, std::shared_ptr<IssouRHI::RenderPipeline>> g_RenderPipelines;
+static std::shared_ptr<IssouRHI::RenderPipeline> g_RenderPipeline;
+static std::shared_ptr<IssouRHI::MeshPipeline> g_MeshPipeline;
 static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
-static ComPtr<ID3D12CommandSignature> g_DrawMeshCommandSignature;
 
 static ComPtr<ID3D12StateObject> g_DxrStateObject;
 static std::shared_ptr<IssouRHI::Buffer> g_RayGenShaderTable;
@@ -656,8 +645,6 @@ static MeshStore g_MeshStore;
 static std::unordered_map<std::wstring, std::shared_ptr<Material>> g_MaterialMap;
 static std::unordered_map<std::wstring, std::shared_ptr<IssouRHI::Texture>> g_Textures;
 static Scene g_Scene;
-
-static std::atomic<size_t> g_CpuAllocationCount{0};
 
 // ========== Public functions
 
@@ -1209,7 +1196,6 @@ void Render(float time)
 
   // Record drawing commands
   {
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
     {
       std::array transitions{
         BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::MeshShaders, IssouRHI::Access::ShaderResource}),
@@ -1219,33 +1205,29 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-    g_DepthStencilBuffer->CreateView()->DsvDescriptorAlloc().cpuHandle;
+    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
 
-    encoder.CommandList()->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+    IssouRHI::ColorAttachment targets[] = {{
+        .view = g_VisibilityBuffer->CreateView().get(),
+        .clearValue = {0.0f, 0.0f, 0.0f, 0.0f},
+    }};
+    auto passEncoder = encoder.BeginMeshPass({
+        .label = "Visibilty Buffer Pass",
+        .colorAttachment = targets,
+        .depthStencilAttachment = {
+            .view = g_DepthStencilBuffer->CreateView().get(),
+            .depthClearValue = 1.0f,
+        },
+    });
 
-    static constexpr float visBufferClearColor[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    encoder.CommandList()->ClearRenderTargetView(g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle, visBufferClearColor, 0, nullptr);
+    passEncoder.SetPipeline(g_MeshPipeline.get());
 
-    D3D12_VIEWPORT viewport{0.f, 0.f, (float)g_Width, (float)g_Height, 0.f, 1.f};
-    encoder.CommandList()->RSSetViewports(1, &viewport);
+    passEncoder.PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
+    passEncoder.PushConstants(SizeOfInUint(BuffersDescriptorIndices), 1, &frameConstantsIndex);
 
-    D3D12_RECT scissorRect{0, 0, static_cast<LONG>(g_Width), static_cast<LONG>(g_Height)};
-    encoder.CommandList()->RSSetScissorRects(1, &scissorRect);
+    passEncoder.DrawMeshIndirect(g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
-    auto rtvHandle = g_VisibilityBuffer->CreateView()->RtvDescriptorAlloc().cpuHandle;
-    // TODO: RenderPass Begin/End
-    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-    encoder.CommandList()->SetPipelineState(g_PipelineStateObjects[PSO::BasicMS].Get());
-
-    encoder.CommandList()->SetGraphicsRootSignature(g_RhiDevice->RootSignature());
-
-    encoder.CommandList()->SetGraphicsRoot32BitConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices, 0);
-    encoder.CommandList()->SetGraphicsRoot32BitConstant(0, frameConstantsIndex, SizeOfInUint(BuffersDescriptorIndices));
-
-    encoder.CommandList()->ExecuteIndirect(g_DrawMeshCommandSignature.Get(), MESH_INSTANCE_COUNT, g_DrawMeshCommands->Resource(),
-                                   0, g_DrawMeshCommands->Resource(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+    passEncoder.End();
 
     encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
   }
@@ -1354,7 +1336,7 @@ void Render(float time)
         .colorAttachment = targets,
     });
 
-    passEncoder.SetPipeline(g_RenderPipelines[PSO::FinalComposeVS].get());
+    passEncoder.SetPipeline(g_RenderPipeline.get());
     uint32_t c[] = {
         g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
         g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
@@ -1426,16 +1408,13 @@ void Cleanup()
     }
   }
 
-  g_PipelineStateObjects[PSO::BasicMS].Reset();
-
   // FIXME: because these are static object we must call reset manually or dtor is not called before ~Device
   g_ComputePipelines[PSO::SkinningCS].reset();
   g_ComputePipelines[PSO::InstanceCullingCS].reset();
   g_ComputePipelines[PSO::FillGBufferCS].reset();
 
-  g_RenderPipelines[PSO::FinalComposeVS].reset();
-
-  g_DrawMeshCommandSignature.Reset();
+  g_RenderPipeline.reset();
+  g_MeshPipeline.reset();
 
   g_DrawMeshCommands.reset();
   g_UAVCounterReset.reset();
@@ -1571,66 +1550,42 @@ static void InitFrameResources()
   };
   ImGui_ImplDX12_Init(&initInfo);
 
-  // Command signature for DrawMeshCommands
+  // Mesh Shader pipeline
   {
-    std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2> argDesc{};
-    argDesc[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-    argDesc[0].Constant = {
-        .RootParameterIndex = 0,
-        .DestOffsetIn32BitValues = SizeOfInUint(BuffersDescriptorIndices) + 1,
-        .Num32BitValuesToSet = SizeOfInUint(DrawMeshCommand::constants),
-    };
-    argDesc[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
-
-    D3D12_COMMAND_SIGNATURE_DESC signatureDesc = {
-        .ByteStride = sizeof(DrawMeshCommand),
-        .NumArgumentDescs = static_cast<UINT>(argDesc.size()),
-        .pArgumentDescs = argDesc.data(),
-    };
-
-    CHECK_HR(g_Device->CreateCommandSignature(&signatureDesc, g_RhiDevice->RootSignature(),
-                                              IID_PPV_ARGS(&g_DrawMeshCommandSignature)));
-  }
-
-  // Mesh Shader Pipeline State for static objects
-  {
-    // Mesh Shader
     auto amplificationShaderBlob = ReadData(L"Meshlet.as.cso");
-    D3D12_SHADER_BYTECODE amplificationShader = {amplificationShaderBlob.data(), amplificationShaderBlob.size()};
-
     auto meshShaderBlob = ReadData(L"Meshlet.ms.cso");
-    D3D12_SHADER_BYTECODE meshShader = {meshShaderBlob.data(),
-                                        meshShaderBlob.size()};
-
     auto pixelShaderBlob = ReadData(L"Meshlet.ps.cso");
-    D3D12_SHADER_BYTECODE pixelShader = {pixelShaderBlob.data(),
-                                         pixelShaderBlob.size()};
 
-    D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = g_RhiDevice->RootSignature();
-    psoDesc.AS = amplificationShader;
-    psoDesc.MS = meshShader;
-    psoDesc.PS = pixelShader;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = VISIBILITY_BUFFER_FORMAT;
-    psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.RasterizerState.FrontCounterClockwise = TRUE;
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.SampleDesc = DefaultSampleDesc();
-
-    auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
-    streamDesc.pPipelineStateSubobjectStream = &psoStream;
-    streamDesc.SizeInBytes = sizeof(psoStream);
-
-    // create the pso
-    ID3D12PipelineState* pipelineStateObject;
-    CHECK_HR(g_Device->CreatePipelineState(&streamDesc,
-                                           IID_PPV_ARGS(&pipelineStateObject)));
-    g_PipelineStateObjects[PSO::BasicMS].Attach(pipelineStateObject);
+    IssouRHI::ShaderModule mesh{
+      .code = meshShaderBlob.data(),
+      .size = meshShaderBlob.size(),
+    };
+    IssouRHI::ShaderModule task{
+      .code = amplificationShaderBlob.data(),
+      .size = amplificationShaderBlob.size(),
+    };
+    IssouRHI::ShaderModule fragment{
+      .code = pixelShaderBlob.data(),
+      .size = pixelShaderBlob.size(),
+    };
+    IssouRHI::ColorTargetState targets[] = {{
+        .format = IssouRHI::TextureFormat::R32Uint,
+    }};
+    g_MeshPipeline = g_RhiDevice->CreateMeshPipeline({
+      .label = "Vis buffer",
+      .meshModule = &mesh,
+      .taskModule = &task,
+      .fragmentModule = &fragment,
+      .targets = targets,
+      .depthStencil = {
+        .format = IssouRHI::TextureFormat::Depth32Float,
+        .depthCompare = IssouRHI::CompareFunction::Less,
+        .depthWriteEnabled = true,
+      },
+      .primitive = {
+        .cullMode = IssouRHI::CullMode::Back,
+      },
+    });
   }
 
   // Compute skinning pipeline
@@ -1695,7 +1650,7 @@ static void InitFrameResources()
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::RGBA8Unorm,
     }};
-    g_RenderPipelines[PSO::FinalComposeVS] = g_RhiDevice->CreateRenderPipeline({
+    g_RenderPipeline = g_RhiDevice->CreateRenderPipeline({
       .label = "Final Compose",
       .vertexModule = &vertex,
       .fragmentModule = &fragment,
