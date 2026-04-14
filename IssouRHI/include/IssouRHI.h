@@ -858,30 +858,27 @@ public:
   void Configure(SurfaceConfiguration& config);
   std::shared_ptr<Texture> GetCurrentTexture();
   void Present();
-  void WaitForAllFrames();
 
-  UINT CurrentFrameIndex() const { return m_FrameIndex; }
+  uint32_t CurrentFrameIndex() const { return m_FrameIndex; }
 
 private:
   void CreateSwapChain(SurfaceConfiguration& config);
   void CreateTextures(SurfaceConfiguration& config);
 
-  void WaitFor(UINT64 fenceValue);
+  Device* m_Device;
+  std::vector<std::shared_ptr<Texture>> m_Textures;
 
+  uint32_t m_FrameIndex;
   bool m_EnableVsync = false;
   bool m_Configured = false;
 
+private:
   HWND m_Handle;
   Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
-  Device* m_Device;
-  ID3D12CommandQueue* m_CommandQueue; // TODO: make this our Queue not native queue
 
-  UINT m_FrameIndex;
   Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
   HANDLE m_FenceEvent = nullptr;
   UINT64 m_NextFenceValue = 0;
-
-  std::vector<std::shared_ptr<Texture>> m_Textures;
   std::vector<UINT64> m_FenceValues;
 };
 

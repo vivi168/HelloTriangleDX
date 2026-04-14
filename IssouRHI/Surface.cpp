@@ -6,10 +6,8 @@ using Microsoft::WRL::ComPtr;
 namespace IssouRHI
 {
 
-Surface::Surface(Device* device, HWND hwnd) : m_Handle(hwnd), m_Device(device)
+Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
 {
-  m_CommandQueue = device->GetQueue()->GetNativeQueue();
-
   // Fence
   {
     ID3D12Fence* fence = nullptr;
@@ -23,7 +21,6 @@ Surface::Surface(Device* device, HWND hwnd) : m_Handle(hwnd), m_Device(device)
 
 Surface::~Surface()
 {
-  // WaitForAllFrames();
   CloseHandle(m_FenceEvent);
 }
 
@@ -63,7 +60,7 @@ void Surface::CreateSwapChain(SurfaceConfiguration& config)
   CHECK_HR(m_Device->GetAdapter()->GetParent(IID_PPV_ARGS(&dxgiFactory)));
 
   IDXGISwapChain* swapChain = nullptr;
-  CHECK_HR(dxgiFactory->CreateSwapChain(m_CommandQueue, &swapChainDesc, &swapChain));
+  CHECK_HR(dxgiFactory->CreateSwapChain(m_Device->GetQueue()->GetNativeQueue(), &swapChainDesc, &swapChain));
   m_SwapChain.Attach(static_cast<IDXGISwapChain3*>(swapChain));
 
   m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
@@ -101,7 +98,10 @@ std::shared_ptr<Texture> Surface::GetCurrentTexture()
   auto texture = m_Textures[m_FrameIndex];
 
   UINT64 fenceValue = m_FenceValues[m_FrameIndex];
-  WaitFor(fenceValue);
+  if (m_Fence->GetCompletedValue() < fenceValue) {
+    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
+    WaitForSingleObject(m_FenceEvent, INFINITE);
+  }
 
   return texture;
 }
@@ -110,28 +110,8 @@ void Surface::Present()
 {
   CHECK_HR(m_SwapChain->Present(m_EnableVsync ? 1 : 0, 0));
 
-  CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), ++m_NextFenceValue));
+  CHECK_HR(m_Device->GetQueue()->GetNativeQueue()->Signal(m_Fence.Get(), ++m_NextFenceValue));
   m_FenceValues[m_FrameIndex] = m_NextFenceValue;
-}
-
-// TODO: useless here? as part of the Queue?
-void Surface::WaitForAllFrames()
-{
-  const UINT64 fenceValue = m_NextFenceValue++;
-  CHECK_HR(m_CommandQueue->Signal(m_Fence.Get(), fenceValue));
-  WaitFor(fenceValue);
-
-  for (auto& fv : m_FenceValues) {
-    fv = fenceValue;
-  }
-}
-
-void Surface::WaitFor(UINT64 fenceValue)
-{
-  if (m_Fence->GetCompletedValue() < fenceValue) {
-    CHECK_HR(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent));
-    WaitForSingleObject(m_FenceEvent, INFINITE);
-  }
 }
 
 }

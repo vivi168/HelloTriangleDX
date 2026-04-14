@@ -1400,7 +1400,7 @@ void Cleanup()
   ImGui_ImplWin32_Shutdown();
   ImGui::DestroyContext();
 
-  g_Surface->WaitForAllFrames();
+  g_RhiDevice->GetQueue()->WaitForAll();
 
   // TODO: rewrite as a class so we have RAII and can forego calling Reset() manually...
   // Because all of these are static object, their dtor is called too late and ReportLiveObjects raises
