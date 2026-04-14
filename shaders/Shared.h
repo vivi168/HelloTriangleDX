@@ -139,4 +139,12 @@ struct MeshInstanceData {
 };
 ASSERT_SIZE_M16(MeshInstanceData);
 
+struct DrawMeshCommand {
+  hlsl_uint instanceIndex;
+
+  hlsl_uint threadGroupCountX;
+  hlsl_uint threadGroupCountY;
+  hlsl_uint threadGroupCountZ;
+};
+
 #endif

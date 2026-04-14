@@ -6,14 +6,6 @@ cbuffer PushConstants : register(b0) {
   uint NumInstances;
 }
 
-struct DrawMeshCommand {
-  uint instanceIndex;
-
-  uint threadGroupCountX;
-  uint threadGroupCountY;
-  uint threadGroupCountZ;
-};
-
 [NumThreads(COMPUTE_GROUP_SIZE, 1, 1)]
 void main(uint dtid : SV_DispatchThreadID)
 {

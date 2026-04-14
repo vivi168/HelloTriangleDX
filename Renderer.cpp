@@ -46,13 +46,6 @@ enum Timestamps : size_t {
 
 // ========== Structs
 
-struct DrawMeshCommand {
-  struct {
-    UINT instanceIndex;
-  } constants;
-  D3D12_DISPATCH_MESH_ARGUMENTS args;
-};
-
 static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommand);
 static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
