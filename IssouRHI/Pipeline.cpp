@@ -223,6 +223,24 @@ static D3D12_BLEND_OP D3D12BlendOperation(BlendOperation operation)
   }
 }
 
+static D3D12_INDEX_BUFFER_STRIP_CUT_VALUE D3D12IndexBufferStripCutValue(PrimitiveTopology topology, IndexFormat indexFormat)
+{
+  if (topology != PrimitiveTopology::LineStrip || topology != PrimitiveTopology::TriangleStrip) {
+    return D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
+  }
+
+  switch (indexFormat) {
+    case IndexFormat::Undefined:
+      return D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
+    case IndexFormat::Uint16:
+      return D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF;
+    case IndexFormat::Uint32:
+      return D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFFFFFF;
+    default:
+      std::unreachable();
+  }
+}
+
 void GraphicPipeline::Create()
 {
   const auto fillPsoDesc = [&](auto& psoDesc)
@@ -312,6 +330,8 @@ void GraphicPipeline::Create()
       .pInputElementDescs = nullptr,
       .NumElements = 0,
     };
+
+    psoDesc.IBStripCutValue = D3D12IndexBufferStripCutValue(m_Desc.primitive.topology, m_Desc.primitive.stripIndexFormat);
 
     CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
     break;

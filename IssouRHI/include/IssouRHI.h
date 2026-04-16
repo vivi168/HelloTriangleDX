@@ -720,7 +720,7 @@ enum class PrimitiveTopology {
   TriangleStrip,
 };
 
-enum class IndexFormat { Uint16, Uint32 };
+enum class IndexFormat { Undefined, Uint16, Uint32 };
 
 enum class FrontFace { CCW, CW };
 
@@ -728,7 +728,7 @@ enum class CullMode { None, Front, Back };
 
 struct PrimitiveState {
   PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-  IndexFormat stripIndexFormat;
+  IndexFormat stripIndexFormat = IndexFormat::Undefined;
   FrontFace frontFace = FrontFace::CCW;
   CullMode cullMode = CullMode::None;
   bool unclippedDepth = false;
