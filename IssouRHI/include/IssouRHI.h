@@ -577,7 +577,7 @@ struct ShaderModule {
   ShaderStage stage;
   const void* code;
   size_t size;
-  std::optional<std::string> entryPointName;
+  std::optional<std::string> entryPointName = std::nullopt;
 };
 
 class PipelineBase
@@ -656,7 +656,7 @@ struct BlendState {
 
 struct ColorTargetState {
   TextureFormat format;
-  std::optional<BlendState> blend;
+  std::optional<BlendState> blend = std::nullopt;
   ColorWriteFlags writeMask = ColorWriteFlags::All;
 };
 
@@ -706,8 +706,8 @@ struct DepthStencilState {
   CompareFunction depthCompare = CompareFunction::Always;
   bool depthWriteEnabled = false;
   // Stencil
-  StencilFaceState stencilFront;
-  StencilFaceState stencilBack;
+  StencilFaceState stencilFront{};
+  StencilFaceState stencilBack{};
   uint32_t stencilReadMask = 0xFFFFFFFF;
   uint32_t stencilWriteMask = 0xFFFFFFFF;
 };
@@ -744,9 +744,9 @@ struct GraphicPipelineDesc {
   std::string label;
   std::span<ShaderModule> shaders;
   std::span<ColorTargetState> targets;
-  DepthStencilState depthStencil;
-  PrimitiveState primitive;
-  MultisampleState multiSample;
+  DepthStencilState depthStencil{};
+  PrimitiveState primitive{};
+  MultisampleState multiSample{};
 };
 
 class GraphicPipeline : public PipelineBase
@@ -1030,7 +1030,7 @@ private:
 
 struct ComputePassDesc {
   std::string label;
-  TimestampWrites* timestampWrites;
+  TimestampWrites* timestampWrites = nullptr;
 };
 
 class ComputePassEncoder : public EncoderBase
@@ -1061,18 +1061,18 @@ struct ColorAttachment {
   uint32_t depthSlice = 0;
   TextureView* resolveTarget = nullptr;
   Color clearValue;
-  LoadOp loadOp;
+  LoadOp loadOp = LoadOp::Clear;
   // StoreOp storeOp;
 };
 
 struct DepthStencilAttachment {
-  TextureView* view;
+  TextureView* view = nullptr;
   float depthClearValue;
-  LoadOp depthLoadOp;
+  LoadOp depthLoadOp = LoadOp::Clear;
   // StoreOp depthStoreOp;
   // bool depthReadOnly = false;
   uint32_t stencilClearValue = 0;
-  LoadOp stencilLoadOp;
+  LoadOp stencilLoadOp = LoadOp::Clear;
   // StoreOp stencilStoreOp;
   // bool stencilReadOnly = false;
 };
@@ -1080,8 +1080,8 @@ struct DepthStencilAttachment {
 struct GraphicPassDesc {
   std::string label;
   std::span<ColorAttachment> colorAttachment;
-  DepthStencilAttachment depthStencilAttachment;
-  TimestampWrites* timestampWrites;
+  DepthStencilAttachment depthStencilAttachment{};
+  TimestampWrites* timestampWrites = nullptr;
 };
 
 class GraphicPassEncoder : public EncoderBase

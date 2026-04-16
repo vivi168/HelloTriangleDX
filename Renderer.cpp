@@ -1547,22 +1547,10 @@ static void InitFrameResources()
     auto meshShaderBlob = ReadData(L"Meshlet.ms.cso");
     auto pixelShaderBlob = ReadData(L"Meshlet.ps.cso");
 
-    IssouRHI::ShaderModule mesh{
-      .code = meshShaderBlob.data(),
-      .size = meshShaderBlob.size(),
-    };
-    IssouRHI::ShaderModule task{
-      .code = amplificationShaderBlob.data(),
-      .size = amplificationShaderBlob.size(),
-    };
-    IssouRHI::ShaderModule fragment{
-      .code = pixelShaderBlob.data(),
-      .size = pixelShaderBlob.size(),
-    };
     IssouRHI::ShaderModule shaderModules[] = {
-      { .stage = IssouRHI::ShaderStage::Mesh, .code = meshShaderBlob.data(), .size = meshShaderBlob.size() },
-      { .stage = IssouRHI::ShaderStage::Task, .code = amplificationShaderBlob.data(), .size = amplificationShaderBlob.size() },
-      { .stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size() },
+        {.stage = IssouRHI::ShaderStage::Mesh, .code = meshShaderBlob.data(), .size = meshShaderBlob.size()},
+        {.stage = IssouRHI::ShaderStage::Task, .code = amplificationShaderBlob.data(), .size = amplificationShaderBlob.size()},
+        {.stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size()},
     };
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::R32Uint,
