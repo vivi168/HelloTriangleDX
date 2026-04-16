@@ -5,43 +5,37 @@ namespace IssouRHI
 {
 PipelineBase::PipelineBase(Device* device) : m_Device(device) {}
 
-PipelineBase::~PipelineBase()
+PipelineBase::~PipelineBase() = default;
+
+static D3D12_SHADER_BYTECODE D3D12ShaderByteCode(const ShaderModule& shader)
 {
-  // TODO
+  return D3D12_SHADER_BYTECODE{
+      .pShaderBytecode = shader.code,
+      .BytecodeLength = shader.size,
+  };
 }
 
 ComputePipeline::ComputePipeline(Device* device, const ComputePipelineDesc& desc) : PipelineBase(device), m_Desc(desc) {}
 
-ComputePipeline::~ComputePipeline()
-{
-  // TODO
-}
+ComputePipeline::~ComputePipeline() = default;
 
 void ComputePipeline::Create()
 {
-  assert(m_Desc.computeModule != nullptr);
-  D3D12_SHADER_BYTECODE computeShader{
-      .pShaderBytecode = m_Desc.computeModule->code,
-      .BytecodeLength = m_Desc.computeModule->size,
-  };
-
   D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
   psoDesc.pRootSignature = m_Device->RootSignature();
-  psoDesc.CS = computeShader;
+
+  assert(m_Desc.shader.stage == ShaderStage::Compute);
+  psoDesc.CS = D3D12ShaderByteCode(m_Desc.shader);
 
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->GetNativeDevice()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
 
   m_Pso.Attach(pipelineStateObject);
-  m_Desc.computeModule = nullptr;
 }
 
 GraphicPipeline::GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type) : PipelineBase(device), m_Desc(desc), m_Type(type) {}
 
-GraphicPipeline::~GraphicPipeline()
-{
-  // TODO
-}
+GraphicPipeline::~GraphicPipeline() = default;
 
 static D3D12_CULL_MODE D3D12CullMode(CullMode mode)
 {
@@ -235,14 +229,6 @@ void GraphicPipeline::Create()
   {
     psoDesc.pRootSignature = m_Device->RootSignature();
 
-    if (m_Desc.fragmentModule != nullptr) {
-      D3D12_SHADER_BYTECODE pixelShader{
-          .pShaderBytecode = m_Desc.fragmentModule->code,
-          .BytecodeLength = m_Desc.fragmentModule->size,
-      };
-      psoDesc.PS = pixelShader;
-    }
-
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     psoDesc.BlendState.AlphaToCoverageEnable = m_Desc.multiSample.alphaToCoverageEnabled;
     psoDesc.BlendState.IndependentBlendEnable = TRUE;
@@ -312,18 +298,15 @@ void GraphicPipeline::Create()
   switch (m_Type) {
   case Type::Render: {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-
-    assert(m_Desc.vertexModule != nullptr);
-    assert(m_Desc.meshModule == nullptr);
-    assert(m_Desc.taskModule == nullptr);
-
-    D3D12_SHADER_BYTECODE vertexShader{
-        .pShaderBytecode = m_Desc.vertexModule->code,
-        .BytecodeLength = m_Desc.vertexModule->size,
-    };
-    psoDesc.VS = vertexShader;
-
     fillPsoDesc(psoDesc);
+
+    for (const auto& shader : m_Desc.shaders) {
+      if (shader.stage == ShaderStage::Fragment) {
+        psoDesc.PS = D3D12ShaderByteCode(shader);
+      } else if(shader.stage == ShaderStage::Vertex) {
+        psoDesc.VS = D3D12ShaderByteCode(shader);
+      }
+    }
 
     psoDesc.InputLayout = {
       .pInputElementDescs = nullptr,
@@ -331,31 +314,21 @@ void GraphicPipeline::Create()
     };
 
     CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-
-    m_Desc.vertexModule = nullptr;
     break;
   }
   case Type::Mesh: {
     D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
-
-    assert(m_Desc.vertexModule == nullptr);
-    assert(m_Desc.meshModule != nullptr);
-
-    D3D12_SHADER_BYTECODE meshShader{
-        .pShaderBytecode = m_Desc.meshModule->code,
-        .BytecodeLength = m_Desc.meshModule->size,
-    };
-    psoDesc.MS = meshShader;
-
-    if (m_Desc.taskModule != nullptr) {
-      D3D12_SHADER_BYTECODE amplificationShader{
-          .pShaderBytecode = m_Desc.taskModule->code,
-          .BytecodeLength = m_Desc.taskModule->size,
-      };
-      psoDesc.AS = amplificationShader;
-    }
-
     fillPsoDesc(psoDesc);
+
+    for (const auto& shader : m_Desc.shaders) {
+      if(shader.stage == ShaderStage::Fragment) {
+        psoDesc.PS = D3D12ShaderByteCode(shader);
+      } else if(shader.stage == ShaderStage::Mesh) {
+        psoDesc.MS = D3D12ShaderByteCode(shader);
+      } else if(shader.stage == ShaderStage::Task) {
+        psoDesc.AS = D3D12ShaderByteCode(shader);
+      }
+    }
 
     auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
     D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
@@ -363,9 +336,6 @@ void GraphicPipeline::Create()
     streamDesc.SizeInBytes = sizeof(psoStream);
 
     CHECK_HR(m_Device->GetNativeDevice()->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pipelineStateObject)));
-
-    m_Desc.meshModule = nullptr;
-    m_Desc.taskModule = nullptr;
     break;
   }
   default:
@@ -374,7 +344,6 @@ void GraphicPipeline::Create()
 
   m_Pso.Attach(pipelineStateObject);
   m_PrimitiveTopology = D3D12PrimitiveTopology(m_Desc.primitive.topology);
-  m_Desc.fragmentModule = nullptr;
 }
 
 RenderPipeline::RenderPipeline(Device* device, const GraphicPipelineDesc& desc) : GraphicPipeline(device, desc, GraphicPipeline::Type::Render) {}

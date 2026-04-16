@@ -1561,14 +1561,17 @@ static void InitFrameResources()
       .code = pixelShaderBlob.data(),
       .size = pixelShaderBlob.size(),
     };
+    IssouRHI::ShaderModule shaderModules[] = {
+      { .stage = IssouRHI::ShaderStage::Mesh, .code = meshShaderBlob.data(), .size = meshShaderBlob.size() },
+      { .stage = IssouRHI::ShaderStage::Task, .code = amplificationShaderBlob.data(), .size = amplificationShaderBlob.size() },
+      { .stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size() },
+    };
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::R32Uint,
     }};
     g_MeshPipeline = g_RhiDevice->CreateMeshPipeline({
       .label = "Vis buffer",
-      .meshModule = &mesh,
-      .taskModule = &task,
-      .fragmentModule = &fragment,
+      .shaders = shaderModules,
       .targets = targets,
       .depthStencil = {
         .format = IssouRHI::TextureFormat::Depth32Float,
@@ -1585,14 +1588,13 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
 
-    IssouRHI::ShaderModule sm{
-      .code = computeShaderBlob.data(),
-      .size = computeShaderBlob.size(),
-    };
-
     g_ComputePipelines[PSO::SkinningCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Skinning Pipeline",
-      .computeModule = &sm,
+      .shader = {
+          .stage = IssouRHI::ShaderStage::Compute,
+          .code = computeShaderBlob.data(),
+          .size = computeShaderBlob.size(),
+      },
     });
   }
 
@@ -1600,14 +1602,13 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
 
-    IssouRHI::ShaderModule sm{
-      .code = computeShaderBlob.data(),
-      .size = computeShaderBlob.size(),
-    };
-
     g_ComputePipelines[PSO::InstanceCullingCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Culling Pipeline",
-      .computeModule = &sm,
+      .shader = {
+          .stage = IssouRHI::ShaderStage::Compute,
+          .code = computeShaderBlob.data(),
+          .size = computeShaderBlob.size(),
+      },
     });
   }
 
@@ -1615,14 +1616,13 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
 
-    IssouRHI::ShaderModule sm{
-      .code = computeShaderBlob.data(),
-      .size = computeShaderBlob.size(),
-    };
-
     g_ComputePipelines[PSO::FillGBufferCS] = g_RhiDevice->CreateComputePipeline({
       .label = "Fill G-Buffer Pipeline",
-      .computeModule = &sm,
+      .shader = {
+          .stage = IssouRHI::ShaderStage::Compute,
+          .code = computeShaderBlob.data(),
+          .size = computeShaderBlob.size(),
+      },
     });
   }
 
@@ -1631,23 +1631,18 @@ static void InitFrameResources()
     auto vertexShaderBlob = ReadData(L"FullScreenTriangle.vs.cso");
     auto pixelShaderBlob = ReadData(L"FinalCompose.ps.cso");
 
-    IssouRHI::ShaderModule vertex{
-      .code = vertexShaderBlob.data(),
-      .size = vertexShaderBlob.size(),
+    IssouRHI::ShaderModule shaderModules[] = {
+      { .stage = IssouRHI::ShaderStage::Vertex, .code = vertexShaderBlob.data(), .size = vertexShaderBlob.size() },
+      { .stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size() },
     };
-    IssouRHI::ShaderModule fragment{
-      .code = pixelShaderBlob.data(),
-      .size = pixelShaderBlob.size(),
-    };
-
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::RGBA8Unorm,
     }};
+
     g_RenderPipeline = g_RhiDevice->CreateRenderPipeline({
       .label = "Final Compose",
-      .vertexModule = &vertex,
-      .fragmentModule = &fragment,
-      .targets = targets
+      .shaders = shaderModules,
+      .targets = targets,
     });
   }
 

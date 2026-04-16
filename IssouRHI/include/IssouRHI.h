@@ -564,19 +564,20 @@ private: // D3D12 impl specific
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 };
 
-enum class ShaderStage : uint32_t {
-  None = 0,
-  Vertex = 1 << 0,
-  Fragment = 1 << 1,
-  Compute = 1 << 2,
-  Mesh = 1 << 3,
-  RayTracing = 1 << 4
+enum class ShaderStage {
+  Compute,
+  Fragment,
+  Vertex,
+  Mesh,
+  Task,
+  RayTracing,
 };
-ISSOURHI_ENUM_CLASS_OP(ShaderStage)
 
 struct ShaderModule {
+  ShaderStage stage;
   const void* code;
   size_t size;
+  std::optional<std::string> entryPointName;
 };
 
 class PipelineBase
@@ -597,7 +598,7 @@ protected:  // D3D12 impl specific
 
 struct ComputePipelineDesc {
   std::string label;
-  ShaderModule* computeModule;
+  ShaderModule shader;
 };
 
 class ComputePipeline : public PipelineBase
@@ -741,10 +742,7 @@ struct MultisampleState {
 
 struct GraphicPipelineDesc {
   std::string label;
-  ShaderModule* meshModule;
-  ShaderModule* taskModule;
-  ShaderModule* vertexModule;
-  ShaderModule* fragmentModule;
+  std::span<ShaderModule> shaders;
   std::span<ColorTargetState> targets;
   DepthStencilState depthStencil;
   PrimitiveState primitive;

@@ -139,6 +139,7 @@ struct MeshInstanceData {
 };
 ASSERT_SIZE_M16(MeshInstanceData);
 
+// TODO: should this (and other indirect command struct) be defined in the RHI?
 struct DrawMeshCommand {
   hlsl_uint instanceIndex;
 
