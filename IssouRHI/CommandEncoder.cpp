@@ -52,7 +52,7 @@ void CommandEncoder::BeginGraphicPass(const GraphicPassDesc& desc)
   Extent3D referenceSize;
   // FIXME: also validate that sampleCount matches between targets
 
-  for (auto& colorAttachment : desc.colorAttachment) {
+  for (const auto& colorAttachment : desc.colorAttachment) {
     if (colorAttachment.view != nullptr) {
       auto rtvHandle = colorAttachment.view->RtvDescriptorAlloc().cpuHandle;
       rtvHandles.push_back(rtvHandle);
@@ -320,7 +320,7 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
   std::vector<D3D12_TEXTURE_BARRIER> textureBarriers(desc.textures.size());
 
   size_t nb = 0;
-  for (auto& b : desc.buffers) {
+  for (const auto& b : desc.buffers) {
     auto barrier = Transition(b.resource, b.from, b.to);
     if (barrier) {
       bufferBarriers[nb++] = barrier.value();
@@ -328,7 +328,7 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
   }
 
   size_t nt = 0;
-  for (auto& t : desc.textures) {
+  for (const auto& t : desc.textures) {
     auto barrier = Transition(t.resource, t.from, t.to);
     if (barrier) {
       textureBarriers[nt++] = barrier.value();

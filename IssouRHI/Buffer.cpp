@@ -7,11 +7,11 @@ Buffer::Buffer(Device* device, const BufferDesc& desc) : m_Device(device), m_Des
 
 Buffer::~Buffer()
 {
-  for (auto& [_, alloc] : m_Srvs) {
+  for (const auto& [_, alloc] : m_Srvs) {
     m_Device->FreeSrvUavDescriptor(alloc);
   }
 
-  for (auto& [_, alloc] : m_Uavs) {
+  for (const auto& [_, alloc] : m_Uavs) {
     m_Device->FreeSrvUavDescriptor(alloc);
   }
 
