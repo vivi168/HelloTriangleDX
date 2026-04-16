@@ -576,9 +576,8 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static ID3D12Device5* g_Device;
 static D3D12MA::Allocator* g_Allocator;
-static IssouRHI::Device* g_RhiDevice;
+static IssouRHI::Device* g_Device;
 static IssouRHI::Surface* g_Surface;
 
 // swapchain used to switch between render targets
@@ -651,9 +650,8 @@ void InitWindow(UINT width, UINT height, std::wstring name)
 
 void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface)
 {
-  g_RhiDevice = device.get();  // FIXME: TMP raw ptr!
+  g_Device = device.get();  // FIXME: TMP raw ptr!
   g_Surface = surface.get(); // FIXME: TMP raw ptr!
-  g_Device = device->GetNativeDevice();
   g_Allocator = device->GetAllocator();
   g_CommandQueue = device->GetQueue()->GetNativeQueue();
 
@@ -674,6 +672,7 @@ void LoadAssets()
   }
 
   // RayTracing acceleration structures setup
+  auto device = g_Device->GetNativeDevice();
   ComPtr<ID3D12CommandAllocator> commandAllocator;
   ComPtr<ID3D12GraphicsCommandList4> commandList;
   ComPtr<ID3D12Fence> fence;
@@ -681,13 +680,12 @@ void LoadAssets()
   HANDLE fenceEvent = nullptr;
 
   {
-    CHECK_HR(g_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-    CHECK_HR(g_Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), NULL,
-                                         IID_PPV_ARGS(&commandList)));
+    CHECK_HR(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+    CHECK_HR(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), NULL, IID_PPV_ARGS(&commandList)));
     // Command lists are created in the recording state; close until needed.
     CHECK_HR(commandList->Close());
 
-    CHECK_HR(g_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    CHECK_HR(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
     fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     assert(fenceEvent);
   }
@@ -739,10 +737,10 @@ void LoadAssets()
                               .pGeometryDescs = &geometries[i]};
 
       D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
-      g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
+      device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
       assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
-      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_RhiDevice);
+      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_Device);
 
       // assign blas buffer address to each instances of this mesh
       for (auto& inst : g_Scene.meshInstanceMap[mesh->name]) {
@@ -803,7 +801,7 @@ void LoadAssets()
       .size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size(),
       .usage = IssouRHI::BufferUsage::MapWrite,
     };
-    g_Scene.rtInstanceDescBuffer = g_RhiDevice->CreateBuffer(desc);
+    g_Scene.rtInstanceDescBuffer = g_Device->CreateBuffer(desc);
     g_Scene.rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
   }
 
@@ -818,11 +816,11 @@ void LoadAssets()
     };
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
-    g_Device->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &sizeInfo);
+    device->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &sizeInfo);
     assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
 
     // Allocate buffer for scene tlas
-    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_RhiDevice);
+    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_Device);
 
     CHECK_HR(commandAllocator->Reset());
     CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
@@ -1101,7 +1099,7 @@ void Render(float time)
 
   Update(ctx, time);
 
-  auto queue = g_RhiDevice->GetQueue();
+  auto queue = g_Device->GetQueue();
   auto encoder = queue->CreateCommandEncoder();
 
   encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
@@ -1282,7 +1280,7 @@ void Render(float time)
 
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_RhiDevice), 2);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_Device), 2);
     encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
 
     {
@@ -1375,7 +1373,7 @@ void Cleanup()
   ImGui_ImplWin32_Shutdown();
   ImGui::DestroyContext();
 
-  g_RhiDevice->GetQueue()->WaitForAll();
+  g_Device->GetQueue()->WaitForAll();
 
   // TODO: rewrite as a class so we have RAII and can forego calling Reset() manually...
   // Because all of these are static object, their dtor is called too late and ReportLiveObjects raises
@@ -1503,7 +1501,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::Depth32Float,
       .usage = IssouRHI::TextureUsage::RenderAttachment,
     };
-    g_DepthStencilBuffer = g_RhiDevice->CreateTexture(desc);
+    g_DepthStencilBuffer = g_Device->CreateTexture(desc);
   }
 
   // Query heap
@@ -1512,12 +1510,12 @@ static void InitFrameResources()
         .Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
         .Count = Timestamp::Count,
     };
-    g_Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&g_TimestampQueryHeap));
+    g_Device->GetNativeDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&g_TimestampQueryHeap));
   }
 
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
-  initInfo.Device = g_Device;
+  initInfo.Device = g_Device->GetNativeDevice();
   initInfo.CommandQueue = g_CommandQueue;
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
   initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1525,11 +1523,11 @@ static void InitFrameResources()
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_RhiDevice->CbvSrvUavDescriptorHeap();
+  initInfo.SrvDescriptorHeap = g_Device->CbvSrvUavDescriptorHeap();
   initInfo.SrvDescriptorAllocFn =
       [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
          D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
-        IssouRHI::DescriptorAllocation alloc = g_RhiDevice->AllocCbvSrvUavDescriptor();
+        IssouRHI::DescriptorAllocation alloc = g_Device->AllocCbvSrvUavDescriptor();
         *outCpuHandle = alloc.cpuHandle;
         *outGpuHandle = alloc.gpuHandle;
       };
@@ -1539,7 +1537,7 @@ static void InitFrameResources()
     IssouRHI::DescriptorAllocation alloc{};
     alloc.cpuHandle = cpuHandle;
     alloc.gpuHandle = gpuHandle;
-    g_RhiDevice->FreeSrvUavDescriptor(alloc);
+    g_Device->FreeSrvUavDescriptor(alloc);
   };
   ImGui_ImplDX12_Init(&initInfo);
 
@@ -1569,7 +1567,7 @@ static void InitFrameResources()
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::R32Uint,
     }};
-    g_MeshPipeline = g_RhiDevice->CreateMeshPipeline({
+    g_MeshPipeline = g_Device->CreateMeshPipeline({
       .label = "Vis buffer",
       .shaders = shaderModules,
       .targets = targets,
@@ -1588,7 +1586,7 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
 
-    g_ComputePipelines[PSO::SkinningCS] = g_RhiDevice->CreateComputePipeline({
+    g_ComputePipelines[PSO::SkinningCS] = g_Device->CreateComputePipeline({
       .label = "Skinning Pipeline",
       .shader = {
           .stage = IssouRHI::ShaderStage::Compute,
@@ -1602,7 +1600,7 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
 
-    g_ComputePipelines[PSO::InstanceCullingCS] = g_RhiDevice->CreateComputePipeline({
+    g_ComputePipelines[PSO::InstanceCullingCS] = g_Device->CreateComputePipeline({
       .label = "Culling Pipeline",
       .shader = {
           .stage = IssouRHI::ShaderStage::Compute,
@@ -1616,7 +1614,7 @@ static void InitFrameResources()
   {
     auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
 
-    g_ComputePipelines[PSO::FillGBufferCS] = g_RhiDevice->CreateComputePipeline({
+    g_ComputePipelines[PSO::FillGBufferCS] = g_Device->CreateComputePipeline({
       .label = "Fill G-Buffer Pipeline",
       .shader = {
           .stage = IssouRHI::ShaderStage::Compute,
@@ -1639,7 +1637,7 @@ static void InitFrameResources()
         .format = IssouRHI::TextureFormat::RGBA8Unorm,
     }};
 
-    g_RenderPipeline = g_RhiDevice->CreateRenderPipeline({
+    g_RenderPipeline = g_Device->CreateRenderPipeline({
       .label = "Final Compose",
       .shaders = shaderModules,
       .targets = targets,
@@ -1674,7 +1672,7 @@ static void InitFrameResources()
     shaderConfig->Config(payloadSize, attributeSize);
 
     auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-    globalRootSignature->SetRootSignature(g_RhiDevice->RootSignature());
+    globalRootSignature->SetRootSignature(g_Device->RootSignature());
 
     auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
     UINT maxRecursionDepth = 1;
@@ -1684,7 +1682,7 @@ static void InitFrameResources()
     PrintStateObjectDesc(raytracingPipeline);
 #endif
 
-    CHECK_HR(g_Device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&g_DxrStateObject)));
+    CHECK_HR(g_Device->GetNativeDevice()->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&g_DxrStateObject)));
 
     // Shader Table
     // TODO: ShaderTable class in RHI
@@ -1701,7 +1699,7 @@ static void InitFrameResources()
         .size = numShaderRecords * shaderIdentifierSize,
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
-      g_RayGenShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_RayGenShaderTable = g_Device->CreateBuffer(desc);
       g_RayGenShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
@@ -1713,7 +1711,7 @@ static void InitFrameResources()
         .size = numShaderRecords * shaderIdentifierSize,
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
-      g_MissShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_MissShaderTable = g_Device->CreateBuffer(desc);
       g_MissShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
 
@@ -1725,13 +1723,13 @@ static void InitFrameResources()
         .size = numShaderRecords * shaderIdentifierSize,
         .usage = IssouRHI::BufferUsage::MapWrite,
       };
-      g_HitGroupShaderTable = g_RhiDevice->CreateBuffer(desc);
+      g_HitGroupShaderTable = g_Device->CreateBuffer(desc);
       g_HitGroupShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
     }
   }
 
   // MeshStore
-  g_MeshStore.Init(g_RhiDevice);
+  g_MeshStore.Init(g_Device);
 
   // Draw Meshlets commands
   {
@@ -1740,7 +1738,7 @@ static void InitFrameResources()
       .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
       .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
     };
-    g_DrawMeshCommands = g_RhiDevice->CreateBuffer(desc);
+    g_DrawMeshCommands = g_Device->CreateBuffer(desc);
   }
 
   // Buffer containg just a UINT (0) used to reset UAV counter.
@@ -1752,7 +1750,7 @@ static void InitFrameResources()
       .size = bufSiz,
       .usage = IssouRHI::BufferUsage::MapWrite,
     };
-    g_UAVCounterReset = g_RhiDevice->CreateBuffer(desc);
+    g_UAVCounterReset = g_Device->CreateBuffer(desc);
     g_UAVCounterReset->Clear({0, bufSiz});
   }
 
@@ -1766,7 +1764,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::R32Uint,
       .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding,
     };
-    g_VisibilityBuffer = g_RhiDevice->CreateTexture(desc);
+    g_VisibilityBuffer = g_Device->CreateTexture(desc);
   }
 
   // G-Buffer output
@@ -1779,7 +1777,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::RGBA32Float,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
-    g_GBuffer.worldPosition = g_RhiDevice->CreateTexture(desc);
+    g_GBuffer.worldPosition = g_Device->CreateTexture(desc);
   }
   {
     IssouRHI::TextureDesc desc{
@@ -1790,7 +1788,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::RGB10A2Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
-    g_GBuffer.worldNormal = g_RhiDevice->CreateTexture(desc);
+    g_GBuffer.worldNormal = g_Device->CreateTexture(desc);
   }
   {
     IssouRHI::TextureDesc desc{
@@ -1801,7 +1799,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::RGBA8Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
-    g_GBuffer.baseColor = g_RhiDevice->CreateTexture(desc);
+    g_GBuffer.baseColor = g_Device->CreateTexture(desc);
   }
   // Shadow buffer output
   {
@@ -1813,7 +1811,7 @@ static void InitFrameResources()
       .format = IssouRHI::TextureFormat::R8Unorm,
       .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
-    g_ShadowBuffer = g_RhiDevice->CreateTexture(desc);
+    g_ShadowBuffer = g_Device->CreateTexture(desc);
   }
 
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
@@ -1834,7 +1832,7 @@ static void InitFrameResources()
       .size = AlignUp(sizeof(FrameConstants), 256), // constant buffer alignment
       .usage = IssouRHI::BufferUsage::MapWrite,
     };
-    g_FrameContext[i].frameConstantBuffer = g_RhiDevice->CreateBuffer(desc);
+    g_FrameContext[i].frameConstantBuffer = g_Device->CreateBuffer(desc);
   }
 
   // timestamp readback buffer
@@ -1844,7 +1842,7 @@ static void InitFrameResources()
       .size = sizeof(UINT64) * Timestamp::Count,
       .usage = IssouRHI::BufferUsage::MapRead,
     };
-    g_FrameContext[i].timestampReadBackBuffer = g_RhiDevice->CreateBuffer(desc);
+    g_FrameContext[i].timestampReadBackBuffer = g_Device->CreateBuffer(desc);
   }
 }
 
@@ -2013,10 +2011,10 @@ static UINT CreateTexture(std::filesystem::path filename)
       .format = texFormat(),
       .usage = IssouRHI::TextureUsage::CopyDst | IssouRHI::TextureUsage::TextureBinding,
   };
-  auto tex = g_RhiDevice->CreateTexture(textureDesc);
+  auto tex = g_Device->CreateTexture(textureDesc);
 
   std::vector<D3D12_SUBRESOURCE_DATA> subresources;
-  CHECK_HR(PrepareUpload(g_Device, image.GetImages(), image.GetImageCount(), metadata, subresources));
+  CHECK_HR(PrepareUpload(g_Device->GetNativeDevice(), image.GetImages(), image.GetImageCount(), metadata, subresources));
 
   tex->WriteToSubresource(subresources.data(), static_cast<UINT>(subresources.size()));
 
