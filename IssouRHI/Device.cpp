@@ -7,7 +7,6 @@ using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
 {
-
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS = true;
 static const bool ENABLE_CPU_ALLOCATION_CALLBACKS_PRINT = true;
 static void* const CUSTOM_ALLOCATION_PRIVATE_DATA = (void*)(uintptr_t)0xDEADC0DE;
@@ -180,12 +179,9 @@ Device::Device(const GPUSelection& gpuSelection)
 
   // Create descriptor heaps
   {
-    m_CbvSrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP,
-                                  D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-    m_RtvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, NUM_DESCRIPTORS_PER_HEAP,
-                               D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-    m_DsvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP,
-                               D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_CbvSrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+    m_RtvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, NUM_DESCRIPTORS_PER_HEAP, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_DsvDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, NUM_DESCRIPTORS_PER_HEAP, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
   }
 
   // Create root signature
@@ -210,15 +206,13 @@ Device::Device(const GPUSelection& gpuSelection)
 
     // Root Signature
     D3D12_ROOT_SIGNATURE_FLAGS flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(RootParameterCount, rootParameters, StaticSamplerCount,
-                                                            staticSamplers, flags);
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(RootParameterCount, rootParameters, StaticSamplerCount, staticSamplers, flags);
 
     ID3DBlob* signatureBlobPtr;
     CHECK_HR(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlobPtr, nullptr));
 
     ID3D12RootSignature* rootSignature = nullptr;
-    CHECK_HR(device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(),
-                                         IID_PPV_ARGS(&rootSignature)));
+    CHECK_HR(device->CreateRootSignature(0, signatureBlobPtr->GetBufferPointer(), signatureBlobPtr->GetBufferSize(), IID_PPV_ARGS(&rootSignature)));
     m_RootSignature.Attach(rootSignature);
 
     // Command Signatures
@@ -296,12 +290,9 @@ void Device::PrintAdapterInformation()
   wprintf(L"    DeviceId = 0x%X\n", adapterDesc.DeviceId);
   wprintf(L"    SubSysId = 0x%X\n", adapterDesc.SubSysId);
   wprintf(L"    Revision = 0x%X\n", adapterDesc.Revision);
-  wprintf(L"    DedicatedVideoMemory = %zu B (%s)\n", adapterDesc.DedicatedVideoMemory,
-          SizeToStr(adapterDesc.DedicatedVideoMemory).c_str());
-  wprintf(L"    DedicatedSystemMemory = %zu B (%s)\n", adapterDesc.DedicatedSystemMemory,
-          SizeToStr(adapterDesc.DedicatedSystemMemory).c_str());
-  wprintf(L"    SharedSystemMemory = %zu B (%s)\n", adapterDesc.SharedSystemMemory,
-          SizeToStr(adapterDesc.SharedSystemMemory).c_str());
+  wprintf(L"    DedicatedVideoMemory = %zu B (%s)\n", adapterDesc.DedicatedVideoMemory, SizeToStr(adapterDesc.DedicatedVideoMemory).c_str());
+  wprintf(L"    DedicatedSystemMemory = %zu B (%s)\n", adapterDesc.DedicatedSystemMemory, SizeToStr(adapterDesc.DedicatedSystemMemory).c_str());
+  wprintf(L"    SharedSystemMemory = %zu B (%s)\n", adapterDesc.SharedSystemMemory, SizeToStr(adapterDesc.SharedSystemMemory).c_str());
 
   const D3D12_FEATURE_DATA_D3D12_OPTIONS& options = m_Allocator->GetD3D12Options();
   wprintf(L"D3D12_FEATURE_DATA_D3D12_OPTIONS:\n");
@@ -325,20 +316,16 @@ void Device::PrintAdapterInformation()
     wprintf(L"DXGI_QUERY_VIDEO_MEMORY_INFO:\n");
 
     for (UINT groupIndex = 0; groupIndex < 2; ++groupIndex) {
-      const DXGI_MEMORY_SEGMENT_GROUP group =
-          groupIndex == 0 ? DXGI_MEMORY_SEGMENT_GROUP_LOCAL : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL;
-      const wchar_t* const groupName =
-          groupIndex == 0 ? L"DXGI_MEMORY_SEGMENT_GROUP_LOCAL" : L"DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL";
+      const DXGI_MEMORY_SEGMENT_GROUP group = groupIndex == 0 ? DXGI_MEMORY_SEGMENT_GROUP_LOCAL : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL;
+      const wchar_t* const groupName = groupIndex == 0 ? L"DXGI_MEMORY_SEGMENT_GROUP_LOCAL" : L"DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL";
       DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
       CHECK_HR(adapter3->QueryVideoMemoryInfo(0, group, &info));
 
       wprintf(L"    %s:\n", groupName);
       wprintf(L"        Budget = %llu B (%s)\n", info.Budget, SizeToStr(info.Budget).c_str());
       wprintf(L"        CurrentUsage = %llu B (%s)\n", info.CurrentUsage, SizeToStr(info.CurrentUsage).c_str());
-      wprintf(L"        AvailableForReservation = %llu B (%s)\n", info.AvailableForReservation,
-              SizeToStr(info.AvailableForReservation).c_str());
-      wprintf(L"        CurrentReservation = %llu B (%s)\n", info.CurrentReservation,
-              SizeToStr(info.CurrentReservation).c_str());
+      wprintf(L"        AvailableForReservation = %llu B (%s)\n", info.AvailableForReservation, SizeToStr(info.AvailableForReservation).c_str());
+      wprintf(L"        CurrentReservation = %llu B (%s)\n", info.CurrentReservation, SizeToStr(info.CurrentReservation).c_str());
     }
   }
 
@@ -369,7 +356,7 @@ static std::wstring StringToWstring(std::string_view s)
   return ws;
 }
 
-std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc &desc)
+std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc& desc)
 {
   auto qs = std::make_shared<QuerySet>(this, desc);
   qs->Create();
@@ -406,8 +393,7 @@ std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
-  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &textureDesc, initialLayout, pOptimizedClearValue, 0, nullptr,
-                                        &allocation, IID_PPV_ARGS(&resource)));
+  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &textureDesc, initialLayout, pOptimizedClearValue, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
 
   resource->SetName(StringToWstring(desc.label).c_str());
 
@@ -441,8 +427,7 @@ std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
 
   ID3D12Resource* resource;
   D3D12MA::Allocation* allocation;
-  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
-                                        &allocation, IID_PPV_ARGS(&resource)));
+  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
   resource->SetName(StringToWstring(desc.label).c_str());
 
   auto buf = std::make_shared<Buffer>(this, desc);

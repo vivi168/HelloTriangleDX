@@ -58,22 +58,23 @@ struct AccelerationStructure {
   void AllocBuffers(size_t resultDataSize, size_t scratchSize, IssouRHI::Device* device)
   {
     IssouRHI::BufferDesc scratchDesc{
-      .label = "Acceleration structure Scratch Resource",
-      .size = scratchSize,
-      .usage = IssouRHI::BufferUsage::Storage,
+        .label = "Acceleration structure Scratch Resource",
+        .size = scratchSize,
+        .usage = IssouRHI::BufferUsage::Storage,
     };
     scratch = device->CreateBuffer(scratchDesc);
 
     IssouRHI::BufferDesc resultDesc{
-      .label = "Acceleration structure Result Resource",
-      .size = resultDataSize,
-      .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
+        .label = "Acceleration structure Result Resource",
+        .size = resultDataSize,
+        .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
     };
     resultData = device->CreateBuffer(resultDesc);
   }
 
   // FIXME: quick TMP hack, create a AccelerationStructure class on rhi side
-  UINT ResultDataSrvDescriptorIndex(IssouRHI::Device* device) {
+  UINT ResultDataSrvDescriptorIndex(IssouRHI::Device* device)
+  {
     if (srv) return srv.index;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
@@ -146,7 +147,7 @@ struct Scene {
   struct SceneNode {
     Model3D* model;
     std::vector<std::shared_ptr<MeshInstance>> meshInstances;
-    std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances; // should be per Skin, not per Model...
+    std::vector<std::shared_ptr<SkinnedMeshInstance>> skinnedMeshInstances;  // should be per Skin, not per Model...
   };
 
   std::vector<SceneNode> nodes;
@@ -197,7 +198,8 @@ struct FrameContext {
     frameConstantBuffer->Write(IssouRHI::FullBufferRange, &frameConstants);
   }
 
-  void Reset() {
+  void Reset()
+  {
     frameConstantBuffer.reset();
     timestampReadBackBuffer.reset();
   }
@@ -399,9 +401,9 @@ struct MeshStore {
     // Positions buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Positions Store",
-        .size = numVertices * sizeof(XMFLOAT3),
-        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+          .label = "Positions Store",
+          .size = numVertices * sizeof(XMFLOAT3),
+          .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
       };
       m_VertexPositions = device->CreateBuffer(desc);
     }
@@ -409,9 +411,9 @@ struct MeshStore {
     // Normals buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Normals Store",
-        .size = numVertices * sizeof(XMFLOAT3),
-        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+          .label = "Normals Store",
+          .size = numVertices * sizeof(XMFLOAT3),
+          .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
       };
       m_VertexNormals = device->CreateBuffer(desc);
     }
@@ -419,9 +421,9 @@ struct MeshStore {
     // Tangents buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Tangents Store",
-        .size = numVertices * sizeof(XMFLOAT4),
-        .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
+          .label = "Tangents Store",
+          .size = numVertices * sizeof(XMFLOAT4),
+          .usage = IssouRHI::BufferUsage::MapWrite | IssouRHI::BufferUsage::Storage,
       };
       m_VertexTangents = device->CreateBuffer(desc);
     }
@@ -429,9 +431,9 @@ struct MeshStore {
     // UVs buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "UVs Store",
-        .size = numVertices * sizeof(XMFLOAT2),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "UVs Store",
+          .size = numVertices * sizeof(XMFLOAT2),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_VertexUVs = device->CreateBuffer(desc);
     }
@@ -439,9 +441,9 @@ struct MeshStore {
     // Blend weights/indices buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Blend weights/indices Store",
-        .size = numVertices * sizeof(XMUINT2),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Blend weights/indices Store",
+          .size = numVertices * sizeof(XMUINT2),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_VertexBlendWeightsAndIndices = device->CreateBuffer(desc);
     }
@@ -449,9 +451,9 @@ struct MeshStore {
     // Vertex indices
     {
       IssouRHI::BufferDesc desc{
-        .label = "Vertex indices Store",
-        .size = numIndices * sizeof(UINT),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Vertex indices Store",
+          .size = numIndices * sizeof(UINT),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_VertexIndices = device->CreateBuffer(desc);
     }
@@ -459,9 +461,9 @@ struct MeshStore {
     // Meshlets buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Meshlets buffer",
-        .size = numMeshlets * sizeof(MeshletData),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Meshlets buffer",
+          .size = numMeshlets * sizeof(MeshletData),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_Meshlets = device->CreateBuffer(desc);
     }
@@ -469,9 +471,9 @@ struct MeshStore {
     // Meshlet unique vertex indices buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Meshlets indices buffer",
-        .size = numIndices * sizeof(UINT),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Meshlets indices buffer",
+          .size = numIndices * sizeof(UINT),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_MeshletUniqueIndices = device->CreateBuffer(desc);
     }
@@ -479,9 +481,9 @@ struct MeshStore {
     // Meshlet primitives buffer (packed 10|10|10|2)
     {
       IssouRHI::BufferDesc desc{
-        .label = "Primitives Store",
-        .size = numPrimitives * sizeof(MeshletTriangle),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Primitives Store",
+          .size = numPrimitives * sizeof(MeshletTriangle),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_MeshletPrimitives = device->CreateBuffer(desc);
     }
@@ -489,9 +491,9 @@ struct MeshStore {
     // Materials buffer
     {
       IssouRHI::BufferDesc desc{
-        .label = "Materials Store",
-        .size = numMaterials * sizeof(Material::m_GpuData),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Materials Store",
+          .size = numMaterials * sizeof(Material::m_GpuData),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_Materials = device->CreateBuffer(desc);
     }
@@ -499,9 +501,9 @@ struct MeshStore {
     // Instances buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       IssouRHI::BufferDesc desc{
-        .label = std::format("Instances Store {}", i),
-        .size = numInstances * sizeof(MeshInstance::data),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = std::format("Instances Store {}", i),
+          .size = numInstances * sizeof(MeshInstance::data),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_Instances[i] = device->CreateBuffer(desc);
     }
@@ -509,9 +511,9 @@ struct MeshStore {
     // Bone Matrices buffer
     for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
       IssouRHI::BufferDesc desc{
-        .label = std::format("Bone Matrices Store {}", i),
-        .size = numMatrices * sizeof(XMFLOAT4X4),
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = std::format("Bone Matrices Store {}", i),
+          .size = numMatrices * sizeof(XMFLOAT4X4),
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       m_BoneMatrices[i] = device->CreateBuffer(desc);
     }
@@ -523,7 +525,7 @@ struct MeshStore {
   std::shared_ptr<IssouRHI::Buffer> m_VertexUVs;
   std::shared_ptr<IssouRHI::Buffer> m_VertexBlendWeightsAndIndices;
 
-  std::shared_ptr<IssouRHI::Buffer> m_VertexIndices; // needed for BLAS
+  std::shared_ptr<IssouRHI::Buffer> m_VertexIndices;  // needed for BLAS
 
   std::shared_ptr<IssouRHI::Buffer> m_Meshlets;
   std::shared_ptr<IssouRHI::Buffer> m_MeshletUniqueIndices;
@@ -601,7 +603,7 @@ static std::shared_ptr<IssouRHI::Buffer> g_RayGenShaderTable;
 static std::shared_ptr<IssouRHI::Buffer> g_MissShaderTable;
 static std::shared_ptr<IssouRHI::Buffer> g_HitGroupShaderTable;
 
-static std::shared_ptr<IssouRHI::Buffer> g_DrawMeshCommands;      // written by compute shader
+static std::shared_ptr<IssouRHI::Buffer> g_DrawMeshCommands;  // written by compute shader
 static std::shared_ptr<IssouRHI::Buffer> g_UAVCounterReset;
 
 static std::shared_ptr<IssouRHI::Texture> g_VisibilityBuffer;
@@ -649,8 +651,8 @@ void InitWindow(UINT width, UINT height, std::wstring name)
 
 void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface)
 {
-  g_Device = device.get();  // FIXME: TMP raw ptr!
-  g_Surface = surface.get(); // FIXME: TMP raw ptr!
+  g_Device = device.get();    // FIXME: TMP raw ptr!
+  g_Surface = surface.get();  // FIXME: TMP raw ptr!
   g_Allocator = device->GetAllocator();
   g_CommandQueue = device->GetQueue()->GetNativeQueue();
 
@@ -659,8 +661,8 @@ void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Su
 
 void LoadAssets()
 {
-  for (auto &node : g_Scene.nodes) {
-    for (auto &mesh : node.model->meshes) {
+  for (auto& node : g_Scene.nodes) {
+    for (auto& mesh : node.model->meshes) {
       auto mi = LoadMesh3D(mesh);
 
       node.meshInstances.push_back(mi);
@@ -796,9 +798,9 @@ void LoadAssets()
   // RT instance descriptors buffer
   {
     IssouRHI::BufferDesc desc{
-      .label = "RT Instance Desc Buffer",
-      .size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size(),
-      .usage = IssouRHI::BufferUsage::MapWrite,
+        .label = "RT Instance Desc Buffer",
+        .size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size(),
+        .usage = IssouRHI::BufferUsage::MapWrite,
     };
     g_Scene.rtInstanceDescBuffer = g_Device->CreateBuffer(desc);
     g_Scene.rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
@@ -879,10 +881,10 @@ static void Update(FrameContext* ctx, float time)
       auto model = node.model;
 
       if (model->HasCurrentAnimation()) {
-        for (auto &[k, skin] : model->skins) {
+        for (auto& [k, skin] : model->skins) {
           std::vector<XMFLOAT4X4> matrices = model->currentAnimation.BoneTransforms(time, skin.get());
 
-          for (auto &smi : node.skinnedMeshInstances) {
+          for (auto& smi : node.skinnedMeshInstances) {
             // TODO: should reuse bone matrice buffer for meshes of same model which share skin
             // TODO: should also update the collision data...
             std::copy(matrices.begin(), matrices.end(), tmpBoneMatrices.begin() + smi->offsets.boneMatricesBuffer);
@@ -971,7 +973,7 @@ static void Update(FrameContext* ctx, float time)
 
     auto GetTime = [&frequency, &timestamps](size_t i) {
       UINT64 begin = timestamps[i];
-      UINT64 end = timestamps[i+1];
+      UINT64 end = timestamps[i + 1];
       UINT64 delta = end - begin;
 
       return static_cast<double>(delta) / frequency * 1000.0;
@@ -1033,9 +1035,9 @@ static IssouRHI::StageAccessLayout GetTextureState(IssouRHI::Texture* tex)
   }
 
   IssouRHI::StageAccessLayout state{
-    .stage = IssouRHI::PipelineStage::None,
-    .access = IssouRHI::Access::None,
-    .layout = IssouRHI::TextureLayout::General,
+      .stage = IssouRHI::PipelineStage::None,
+      .access = IssouRHI::Access::None,
+      .layout = IssouRHI::TextureLayout::General,
   };
   g_TextureStates[tex] = state;
 
@@ -1050,8 +1052,8 @@ static IssouRHI::StageAccess GetBufferState(IssouRHI::Buffer* buf)
   }
 
   IssouRHI::StageAccess state{
-    .stage = IssouRHI::PipelineStage::None,
-    .access = IssouRHI::Access::None,
+      .stage = IssouRHI::PipelineStage::None,
+      .access = IssouRHI::Access::None,
   };
   g_BufferStates[buf] = state;
 
@@ -1064,9 +1066,9 @@ static IssouRHI::BufferBarrierDesc BuildTransition(IssouRHI::Buffer* buf, IssouR
   auto from = GetBufferState(buf);
 
   IssouRHI::BufferBarrierDesc desc{
-    .resource = buf,
-    .from = from,
-    .to = to,
+      .resource = buf,
+      .from = from,
+      .to = to,
   };
 
   g_BufferStates[buf] = to;
@@ -1080,9 +1082,9 @@ static IssouRHI::TextureBarrierDesc BuildTransition(IssouRHI::Texture* tex, Isso
   auto from = GetTextureState(tex);
 
   IssouRHI::TextureBarrierDesc desc{
-    .resource = tex,
-    .from = from,
-    .to = to,
+      .resource = tex,
+      .from = from,
+      .to = to,
   };
 
   g_TextureStates[tex] = to;
@@ -1119,19 +1121,19 @@ void Render(float time)
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     {
       std::array transitions{
-        BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
+          BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
       encoder.Barrier({.buffers = transitions});
     }
 
     auto passEncoder = encoder.BeginComputePass({
-      .label = "Skinning Compute Pass",
-      .timestampWrites = IssouRHI::TimestampWrites{
-          .beginningOfPassWriteIndex = Timestamp::SkinBegin,
-          .endOfPassWriteIndex = Timestamp::SkinEnd,
-          .querySet = g_TimestampQuerySet.get(),
-      },
+        .label = "Skinning Compute Pass",
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::SkinBegin,
+            .endOfPassWriteIndex = Timestamp::SkinEnd,
+            .querySet = g_TimestampQuerySet.get(),
+        },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
@@ -1153,7 +1155,7 @@ void Render(float time)
   {
     {
       std::array transitions{
-        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Copy, IssouRHI::Access::CopyDestination}),
+          BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Copy, IssouRHI::Access::CopyDestination}),
       };
 
       encoder.Barrier({.buffers = transitions});
@@ -1163,19 +1165,19 @@ void Render(float time)
 
     {
       std::array transitions{
-        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
+          BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
       encoder.Barrier({.buffers = transitions});
     }
 
     auto passEncoder = encoder.BeginComputePass({
-      .label = "Culling Compute Pass",
-      .timestampWrites = IssouRHI::TimestampWrites{
-          .beginningOfPassWriteIndex = Timestamp::CullBegin,
-          .endOfPassWriteIndex = Timestamp::CullEnd,
-          .querySet = g_TimestampQuerySet.get(),
-      },
+        .label = "Culling Compute Pass",
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::CullBegin,
+            .endOfPassWriteIndex = Timestamp::CullEnd,
+            .querySet = g_TimestampQuerySet.get(),
+        },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
@@ -1193,18 +1195,18 @@ void Render(float time)
   {
     {
       std::array transitions{
-        BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::MeshShaders, IssouRHI::Access::ShaderResource}),
-        BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Indirect, IssouRHI::Access::ArgumentBuffer}),
+          BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::MeshShaders, IssouRHI::Access::ShaderResource}),
+          BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Indirect, IssouRHI::Access::ArgumentBuffer}),
       };
 
       encoder.Barrier({.buffers = transitions});
     }
 
     std::array targets{
-      IssouRHI::ColorAttachment{
-        .view = g_VisibilityBuffer->CreateView().get(),
-        .clearValue = {0.0f, 0.0f, 0.0f, 0.0f},
-      }
+        IssouRHI::ColorAttachment{
+            .view = g_VisibilityBuffer->CreateView().get(),
+            .clearValue = {0.0f, 0.0f, 0.0f, 0.0f},
+        },
     };
     auto passEncoder = encoder.BeginMeshPass({
         .label = "Visibilty Buffer Pass",
@@ -1244,12 +1246,12 @@ void Render(float time)
     }
 
     auto passEncoder = encoder.BeginComputePass({
-      .label = "Fill G-Buffer Compute Pass",
-      .timestampWrites = IssouRHI::TimestampWrites{
-          .beginningOfPassWriteIndex = Timestamp::FillGBufferBegin,
-          .endOfPassWriteIndex = Timestamp::FillGBufferEnd,
-          .querySet = g_TimestampQuerySet.get(),
-      },
+        .label = "Fill G-Buffer Compute Pass",
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::FillGBufferBegin,
+            .endOfPassWriteIndex = Timestamp::FillGBufferEnd,
+            .querySet = g_TimestampQuerySet.get(),
+        },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
@@ -1325,10 +1327,10 @@ void Render(float time)
     }
 
     std::array targets{
-      IssouRHI::ColorAttachment{
-        .view = renderTargetView.get(),
-        .clearValue = {0.0f, 0.2f, 0.4f, 1.0f},
-      }
+        IssouRHI::ColorAttachment{
+            .view = renderTargetView.get(),
+            .clearValue = {0.0f, 0.2f, 0.4f, 1.0f},
+        },
     };
     auto passEncoder = encoder.BeginRenderPass({
         .label = "Final Compose Pass",
@@ -1420,7 +1422,7 @@ void Cleanup()
   g_UAVCounterReset.reset();
 
   g_Scene.rtInstanceDescBuffer.reset();
-  for (auto &as : g_Scene.blasBuffers) {
+  for (auto& as : g_Scene.blasBuffers) {
     as.Reset();
   }
   g_Scene.tlasBuffer.Reset();
@@ -1503,12 +1505,12 @@ static void InitFrameResources()
   // DSV
   {
     IssouRHI::TextureDesc desc{
-      .label = "Depth Stencil Buffer",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::Depth32Float,
-      .usage = IssouRHI::TextureUsage::RenderAttachment,
+        .label = "Depth Stencil Buffer",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::Depth32Float,
+        .usage = IssouRHI::TextureUsage::RenderAttachment,
     };
     g_DepthStencilBuffer = g_Device->CreateTexture(desc);
   }
@@ -1565,17 +1567,17 @@ static void InitFrameResources()
         .format = IssouRHI::TextureFormat::R32Uint,
     }};
     g_MeshPipeline = g_Device->CreateMeshPipeline({
-      .label = "Vis buffer",
-      .shaders = shaderModules,
-      .targets = targets,
-      .depthStencil = {
-        .format = IssouRHI::TextureFormat::Depth32Float,
-        .depthCompare = IssouRHI::CompareFunction::Less,
-        .depthWriteEnabled = true,
-      },
-      .primitive = {
-        .cullMode = IssouRHI::CullMode::Back,
-      },
+        .label = "Vis buffer",
+        .shaders = shaderModules,
+        .targets = targets,
+        .depthStencil = {
+            .format = IssouRHI::TextureFormat::Depth32Float,
+            .depthCompare = IssouRHI::CompareFunction::Less,
+            .depthWriteEnabled = true,
+        },
+        .primitive = {
+            .cullMode = IssouRHI::CullMode::Back,
+        },
     });
   }
 
@@ -1584,12 +1586,12 @@ static void InitFrameResources()
     auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
 
     g_ComputePipelines[PSO::SkinningCS] = g_Device->CreateComputePipeline({
-      .label = "Skinning Pipeline",
-      .shader = {
-          .stage = IssouRHI::ShaderStage::Compute,
-          .code = computeShaderBlob.data(),
-          .size = computeShaderBlob.size(),
-      },
+        .label = "Skinning Pipeline",
+        .shader = {
+            .stage = IssouRHI::ShaderStage::Compute,
+            .code = computeShaderBlob.data(),
+            .size = computeShaderBlob.size(),
+        },
     });
   }
 
@@ -1598,12 +1600,12 @@ static void InitFrameResources()
     auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
 
     g_ComputePipelines[PSO::InstanceCullingCS] = g_Device->CreateComputePipeline({
-      .label = "Culling Pipeline",
-      .shader = {
-          .stage = IssouRHI::ShaderStage::Compute,
-          .code = computeShaderBlob.data(),
-          .size = computeShaderBlob.size(),
-      },
+        .label = "Culling Pipeline",
+        .shader = {
+            .stage = IssouRHI::ShaderStage::Compute,
+            .code = computeShaderBlob.data(),
+            .size = computeShaderBlob.size(),
+        },
     });
   }
 
@@ -1612,12 +1614,12 @@ static void InitFrameResources()
     auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
 
     g_ComputePipelines[PSO::FillGBufferCS] = g_Device->CreateComputePipeline({
-      .label = "Fill G-Buffer Pipeline",
-      .shader = {
-          .stage = IssouRHI::ShaderStage::Compute,
-          .code = computeShaderBlob.data(),
-          .size = computeShaderBlob.size(),
-      },
+        .label = "Fill G-Buffer Pipeline",
+        .shader = {
+            .stage = IssouRHI::ShaderStage::Compute,
+            .code = computeShaderBlob.data(),
+            .size = computeShaderBlob.size(),
+        },
     });
   }
 
@@ -1627,17 +1629,17 @@ static void InitFrameResources()
     auto pixelShaderBlob = ReadData(L"FinalCompose.ps.cso");
 
     IssouRHI::ShaderModule shaderModules[] = {
-      { .stage = IssouRHI::ShaderStage::Vertex, .code = vertexShaderBlob.data(), .size = vertexShaderBlob.size() },
-      { .stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size() },
+        {.stage = IssouRHI::ShaderStage::Vertex, .code = vertexShaderBlob.data(), .size = vertexShaderBlob.size()},
+        {.stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size()},
     };
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::RGBA8Unorm,
     }};
 
     g_RenderPipeline = g_Device->CreateRenderPipeline({
-      .label = "Final Compose",
-      .shaders = shaderModules,
-      .targets = targets,
+        .label = "Final Compose",
+        .shaders = shaderModules,
+        .targets = targets,
     });
   }
 
@@ -1692,9 +1694,9 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(RaygenShaderName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
-        .label = "RayGen Shader Table",
-        .size = numShaderRecords * shaderIdentifierSize,
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "RayGen Shader Table",
+          .size = numShaderRecords * shaderIdentifierSize,
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_RayGenShaderTable = g_Device->CreateBuffer(desc);
       g_RayGenShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
@@ -1704,9 +1706,9 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(MissShaderName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
-        .label = "Miss Shader Table",
-        .size = numShaderRecords * shaderIdentifierSize,
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "Miss Shader Table",
+          .size = numShaderRecords * shaderIdentifierSize,
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_MissShaderTable = g_Device->CreateBuffer(desc);
       g_MissShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
@@ -1716,9 +1718,9 @@ static void InitFrameResources()
       void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(HitGroupName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
-        .label = "HitGroup Shader Table",
-        .size = numShaderRecords * shaderIdentifierSize,
-        .usage = IssouRHI::BufferUsage::MapWrite,
+          .label = "HitGroup Shader Table",
+          .size = numShaderRecords * shaderIdentifierSize,
+          .usage = IssouRHI::BufferUsage::MapWrite,
       };
       g_HitGroupShaderTable = g_Device->CreateBuffer(desc);
       g_HitGroupShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
@@ -1731,9 +1733,9 @@ static void InitFrameResources()
   // Draw Meshlets commands
   {
     IssouRHI::BufferDesc desc{
-      .label = "Draw Meshlets command buffer",
-      .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
-      .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
+        .label = "Draw Meshlets command buffer",
+        .size = DRAW_MESH_CMDS_COUNTER_OFFSET + sizeof(UINT),  // counter,
+        .usage = IssouRHI::BufferUsage::CopyDst | IssouRHI::BufferUsage::Indirect | IssouRHI::BufferUsage::Storage,
     };
     g_DrawMeshCommands = g_Device->CreateBuffer(desc);
   }
@@ -1743,9 +1745,9 @@ static void InitFrameResources()
     size_t bufSiz = sizeof(UINT);
 
     IssouRHI::BufferDesc desc{
-      .label = "UAV Reset counter",
-      .size = bufSiz,
-      .usage = IssouRHI::BufferUsage::MapWrite,
+        .label = "UAV Reset counter",
+        .size = bufSiz,
+        .usage = IssouRHI::BufferUsage::MapWrite,
     };
     g_UAVCounterReset = g_Device->CreateBuffer(desc);
     g_UAVCounterReset->Clear({0, bufSiz});
@@ -1754,12 +1756,12 @@ static void InitFrameResources()
   // Vis Buffer output
   {
     IssouRHI::TextureDesc desc{
-      .label = "Visibility Buffer",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::R32Uint,
-      .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding,
+        .label = "Visibility Buffer",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::R32Uint,
+        .usage = IssouRHI::TextureUsage::RenderAttachment | IssouRHI::TextureUsage::TextureBinding,
     };
     g_VisibilityBuffer = g_Device->CreateTexture(desc);
   }
@@ -1767,46 +1769,46 @@ static void InitFrameResources()
   // G-Buffer output
   {
     IssouRHI::TextureDesc desc{
-      .label = "G-Buffer world position",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::RGBA32Float,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+        .label = "G-Buffer world position",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::RGBA32Float,
+        .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
     g_GBuffer.worldPosition = g_Device->CreateTexture(desc);
   }
   {
     IssouRHI::TextureDesc desc{
-      .label = "G-Buffer world normal",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::RGB10A2Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+        .label = "G-Buffer world normal",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::RGB10A2Unorm,
+        .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
     g_GBuffer.worldNormal = g_Device->CreateTexture(desc);
   }
   {
     IssouRHI::TextureDesc desc{
-      .label = "G-Buffer base color",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::RGBA8Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+        .label = "G-Buffer base color",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::RGBA8Unorm,
+        .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
     g_GBuffer.baseColor = g_Device->CreateTexture(desc);
   }
   // Shadow buffer output
   {
     IssouRHI::TextureDesc desc{
-      .label = "Shadow buffer",
-      .size = {.width = g_Width, .height = g_Height},
-      .mipLevelCount = 1,
-      .dimension = IssouRHI::TextureDimension::Texture2D,
-      .format = IssouRHI::TextureFormat::R8Unorm,
-      .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
+        .label = "Shadow buffer",
+        .size = {.width = g_Width, .height = g_Height},
+        .mipLevelCount = 1,
+        .dimension = IssouRHI::TextureDimension::Texture2D,
+        .format = IssouRHI::TextureFormat::R8Unorm,
+        .usage = IssouRHI::TextureUsage::TextureBinding | IssouRHI::TextureUsage::StorageBinding,
     };
     g_ShadowBuffer = g_Device->CreateTexture(desc);
   }
@@ -1825,9 +1827,9 @@ static void InitFrameResources()
   // frame constants buffer
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     IssouRHI::BufferDesc desc{
-      .label = std::format("Frame constants buffer {}", i),
-      .size = AlignUp(sizeof(FrameConstants), 256), // constant buffer alignment
-      .usage = IssouRHI::BufferUsage::MapWrite,
+        .label = std::format("Frame constants buffer {}", i),
+        .size = AlignUp(sizeof(FrameConstants), 256),  // constant buffer alignment
+        .usage = IssouRHI::BufferUsage::MapWrite,
     };
     g_FrameContext[i].frameConstantBuffer = g_Device->CreateBuffer(desc);
   }
@@ -1835,9 +1837,9 @@ static void InitFrameResources()
   // timestamp readback buffer
   for (size_t i = 0; i < FRAME_BUFFER_COUNT; i++) {
     IssouRHI::BufferDesc desc{
-      .label = std::format("Timestamp Readback Buffer {}", i),
-      .size = sizeof(UINT64) * Timestamp::Count,
-      .usage = IssouRHI::BufferUsage::MapRead,
+        .label = std::format("Timestamp Readback Buffer {}", i),
+        .size = sizeof(UINT64) * Timestamp::Count,
+        .usage = IssouRHI::BufferUsage::MapRead,
     };
     g_FrameContext[i].timestampReadBackBuffer = g_Device->CreateBuffer(desc);
   }
@@ -1862,7 +1864,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
   {
     auto it = g_Scene.meshInstanceMap.find(mesh->name);
-    if (it == std::end(g_Scene.meshInstanceMap)) { // first time seeing this mesh
+    if (it == std::end(g_Scene.meshInstanceMap)) {  // first time seeing this mesh
       // CreateGeometry
       // vertex data
       if (mesh->Skinned()) {
@@ -1893,7 +1895,7 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
 
         g_Scene.skinnedMeshInstances.push_back(smi);
         g_Scene.numBoneMatrices += smi->numBoneMatrices;
-      } else { // if not skinned
+      } else /* if not skinned */ {
         mi->data.firstPosition =
             g_MeshStore.WritePositions(mesh->positions.data(), mesh->PositionsBufferSize()) / sizeof(XMFLOAT3);
         mi->data.firstNormal =
@@ -1915,8 +1917,10 @@ static std::shared_ptr<MeshInstance> LoadMesh3D(std::shared_ptr<Mesh3D> mesh)
           g_MeshStore.WriteMeshletPrimitives(mesh->primitiveIndices.data(), mesh->MeshletPrimitiveBufferSize()) /
           sizeof(UINT);
 
-      if (!mesh->Skinned()) g_Scene.uniqueMeshInstances.push_back(mi); // TODO: only non skinned mesh for now
-    } else { // an instance for this mesh already exists
+      if (!mesh->Skinned()) {
+        g_Scene.uniqueMeshInstances.push_back(mi);  // TODO: only non skinned mesh for now
+      }
+    } else /* if an instance for this mesh already exists */ {
       auto i = it->second[0];
       mi->data.firstPosition = i->data.firstPosition;
       mi->data.firstNormal = i->data.firstNormal;
@@ -1999,9 +2003,9 @@ static UINT CreateTexture(std::filesystem::path filename)
   IssouRHI::TextureDesc textureDesc{
       .label = filename.string().c_str(),
       .size = {
-        .width = static_cast<uint32_t>(metadata.width),
-        .height = static_cast<uint32_t>(metadata.height),
-        .depth = static_cast<uint32_t>(metadata.arraySize),
+          .width = static_cast<uint32_t>(metadata.width),
+          .height = static_cast<uint32_t>(metadata.height),
+          .depth = static_cast<uint32_t>(metadata.arraySize),
       },
       .mipLevelCount = static_cast<uint32_t>(metadata.mipLevels),
       .dimension = texDimension(),

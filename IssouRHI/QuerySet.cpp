@@ -27,4 +27,4 @@ void QuerySet::Create()
 
   // FIXME: don't forget to SetName as well...
 }
-}
+}  // namespace IssouRHI

@@ -243,8 +243,7 @@ static D3D12_INDEX_BUFFER_STRIP_CUT_VALUE D3D12IndexBufferStripCutValue(Primitiv
 
 void GraphicPipeline::Create()
 {
-  const auto fillPsoDesc = [&](auto& psoDesc)
-  {
+  const auto fillPsoDesc = [&](auto& psoDesc) {
     psoDesc.pRootSignature = m_Device->RootSignature();
 
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -313,52 +312,52 @@ void GraphicPipeline::Create()
   ID3D12PipelineState* pipelineStateObject;
 
   switch (m_Type) {
-  case Type::Render: {
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-    fillPsoDesc(psoDesc);
+    case Type::Render: {
+      D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+      fillPsoDesc(psoDesc);
 
-    for (const auto& shader : m_Desc.shaders) {
-      if (shader.stage == ShaderStage::Fragment) {
-        psoDesc.PS = D3D12ShaderByteCode(shader);
-      } else if(shader.stage == ShaderStage::Vertex) {
-        psoDesc.VS = D3D12ShaderByteCode(shader);
+      for (const auto& shader : m_Desc.shaders) {
+        if (shader.stage == ShaderStage::Fragment) {
+          psoDesc.PS = D3D12ShaderByteCode(shader);
+        } else if (shader.stage == ShaderStage::Vertex) {
+          psoDesc.VS = D3D12ShaderByteCode(shader);
+        }
       }
+
+      psoDesc.InputLayout = {
+          .pInputElementDescs = nullptr,
+          .NumElements = 0,
+      };
+
+      psoDesc.IBStripCutValue = D3D12IndexBufferStripCutValue(m_Desc.primitive.topology, m_Desc.primitive.stripIndexFormat);
+
+      CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
+      break;
     }
+    case Type::Mesh: {
+      D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
+      fillPsoDesc(psoDesc);
 
-    psoDesc.InputLayout = {
-      .pInputElementDescs = nullptr,
-      .NumElements = 0,
-    };
-
-    psoDesc.IBStripCutValue = D3D12IndexBufferStripCutValue(m_Desc.primitive.topology, m_Desc.primitive.stripIndexFormat);
-
-    CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    break;
-  }
-  case Type::Mesh: {
-    D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
-    fillPsoDesc(psoDesc);
-
-    for (const auto& shader : m_Desc.shaders) {
-      if(shader.stage == ShaderStage::Fragment) {
-        psoDesc.PS = D3D12ShaderByteCode(shader);
-      } else if(shader.stage == ShaderStage::Mesh) {
-        psoDesc.MS = D3D12ShaderByteCode(shader);
-      } else if(shader.stage == ShaderStage::Task) {
-        psoDesc.AS = D3D12ShaderByteCode(shader);
+      for (const auto& shader : m_Desc.shaders) {
+        if (shader.stage == ShaderStage::Fragment) {
+          psoDesc.PS = D3D12ShaderByteCode(shader);
+        } else if (shader.stage == ShaderStage::Mesh) {
+          psoDesc.MS = D3D12ShaderByteCode(shader);
+        } else if (shader.stage == ShaderStage::Task) {
+          psoDesc.AS = D3D12ShaderByteCode(shader);
+        }
       }
+
+      auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
+      D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
+      streamDesc.pPipelineStateSubobjectStream = &psoStream;
+      streamDesc.SizeInBytes = sizeof(psoStream);
+
+      CHECK_HR(m_Device->GetNativeDevice()->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pipelineStateObject)));
+      break;
     }
-
-    auto psoStream = CD3DX12_PIPELINE_MESH_STATE_STREAM(psoDesc);
-    D3D12_PIPELINE_STATE_STREAM_DESC streamDesc;
-    streamDesc.pPipelineStateSubobjectStream = &psoStream;
-    streamDesc.SizeInBytes = sizeof(psoStream);
-
-    CHECK_HR(m_Device->GetNativeDevice()->CreatePipelineState(&streamDesc, IID_PPV_ARGS(&pipelineStateObject)));
-    break;
-  }
-  default:
-    std::unreachable();
+    default:
+      std::unreachable();
   }
 
   m_Pso.Attach(pipelineStateObject);

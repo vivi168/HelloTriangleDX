@@ -6,7 +6,7 @@ CommandEncoder::CommandEncoder(std::string label, CommandBuffer* commandBuffer) 
 
 CommandEncoder::~CommandEncoder()
 {
-  assert(m_CommandBuffer == nullptr); // Forgot to call Finish()
+  assert(m_CommandBuffer == nullptr);  // Forgot to call Finish()
   // or instead of assert'ing simply close cmd list and recycle cmd buffer since it was not used?
 }
 
@@ -353,7 +353,7 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
     }
   }
 
-  D3D12_BARRIER_GROUP barrierGroups[2]; // 3 with Global Barriers
+  D3D12_BARRIER_GROUP barrierGroups[2];  // 3 with Global Barriers
   UINT n = 0;
 
   if (nb > 0) {
@@ -384,7 +384,6 @@ void CommandEncoder::WriteTimestamp(QuerySet* querySet, uint32_t index)
 {
   D3D12WriteTimestamp(CommandList(), querySet, index);
 }
-
 
 CommandBuffer* CommandEncoder::Finish()
 {
@@ -421,7 +420,7 @@ void ComputePassEncoder::End()
   m_Ended = true;
 }
 
-void ComputePassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
+void ComputePassEncoder::PushConstants(uint32_t offset, uint32_t size, const void* data)
 {
   CommandList()->SetComputeRoot32BitConstants(0, size, data, offset);
 }
@@ -450,7 +449,7 @@ void GraphicPassEncoder::End()
   m_Ended = true;
 }
 
-void GraphicPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void *data)
+void GraphicPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void* data)
 {
   CommandList()->SetGraphicsRoot32BitConstants(0, size, data, offset);
 }
@@ -489,4 +488,4 @@ void MeshPassEncoder::SetPipeline(MeshPipeline* pipeline)
 {
   CommandList()->SetPipelineState(pipeline->PipelineState());
 }
-}
+}  // namespace IssouRHI
