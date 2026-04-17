@@ -10,6 +10,24 @@ CommandEncoder::~CommandEncoder()
   // or instead of assert'ing simply close cmd list and recycle cmd buffer since it was not used?
 }
 
+static D3D12_QUERY_TYPE D3D12QueryType(QueryType type)
+{
+  switch (type) {
+    case QueryType::Timestamp:
+      return D3D12_QUERY_TYPE_TIMESTAMP;
+    default:
+      std::unreachable();
+  };
+}
+
+static void D3D12WriteTimestamp(ID3D12GraphicsCommandList8* commandList, QuerySet* querySet, uint32_t index)
+{
+  assert(querySet != nullptr);
+  assert(querySet->Type() == QueryType::Timestamp);
+  assert(index < querySet->Count());
+  commandList->EndQuery(querySet->QueryHeap(), D3D12QueryType(querySet->Type()), index);
+}
+
 ComputePassEncoder CommandEncoder::BeginComputePass(const ComputePassDesc& desc)
 {
   m_CommandBuffer->SetComputeRootSignatureIfNeeded();
@@ -17,12 +35,8 @@ ComputePassEncoder CommandEncoder::BeginComputePass(const ComputePassDesc& desc)
   // TODO: keep track of open state in CommandEncoder, so we can't call CopyBufferToBuffer/Barrier etc while recording a compute/render pass
   // or begincomputepass and immediately beginrenderpass, etc.
   // (force split pass)
-
-  if (desc.timestampWrites != nullptr && desc.timestampWrites->beginningOfPassWriteIndex != QuerySetIndexUndefined) {
-    // FIXME: validate that index doesn't exceed QuerySet#count
-    // and also validate that querySet != nullptr and is QueryType::Timestamp
-    // FIXME: delegate this to QuerySet
-    CommandList()->EndQuery(desc.timestampWrites->querySet->QueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, desc.timestampWrites->beginningOfPassWriteIndex);
+  if (desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), desc.timestampWrites->querySet, desc.timestampWrites->beginningOfPassWriteIndex);
   }
 
   return ComputePassEncoder(desc, m_CommandBuffer);
@@ -45,6 +59,10 @@ MeshPassEncoder CommandEncoder::BeginMeshPass(const GraphicPassDesc& desc)
 void CommandEncoder::BeginGraphicPass(const GraphicPassDesc& desc)
 {
   m_CommandBuffer->SetGraphicsRootSignatureIfNeeded();
+
+  if (desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), desc.timestampWrites->querySet, desc.timestampWrites->beginningOfPassWriteIndex);
+  }
 
   std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvHandles;
   D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle{};
@@ -351,11 +369,22 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
   }
 }
 
-void CommandEncoder::CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size)
+void CommandEncoder::CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size)
 {
   // TODO: validate input?
   CommandList()->CopyBufferRegion(dst->Resource(), dstOffset, src->Resource(), srcOffset, size);
 }
+
+void CommandEncoder::ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset)
+{
+  CommandList()->ResolveQueryData(querySet->QueryHeap(), D3D12QueryType(querySet->Type()), firstQuery, queryCount, dst->Resource(), dstOffset);
+}
+
+void CommandEncoder::WriteTimestamp(QuerySet* querySet, uint32_t index)
+{
+  D3D12WriteTimestamp(CommandList(), querySet, index);
+}
+
 
 CommandBuffer* CommandEncoder::Finish()
 {
@@ -385,12 +414,8 @@ void ComputePassEncoder::Dispatch(uint32_t x, uint32_t y, uint32_t z)
 
 void ComputePassEncoder::End()
 {
-  // TODO: think of a way of DRYing this between RenderPass / ComputePass etc
-  if (m_Desc.timestampWrites != nullptr && m_Desc.timestampWrites->endOfPassWriteIndex != QuerySetIndexUndefined) {
-    // FIXME: validate that index doesn't exceed QuerySet#count
-    // and also validate that querySet != nullptr and is QueryType::Timestamp
-    // FIXME: delegate this to QuerySet
-    CommandList()->EndQuery(m_Desc.timestampWrites->querySet->QueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, m_Desc.timestampWrites->endOfPassWriteIndex);
+  if (m_Desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), m_Desc.timestampWrites->querySet, m_Desc.timestampWrites->endOfPassWriteIndex);
   }
 
   m_Ended = true;
@@ -417,6 +442,10 @@ void GraphicPassEncoder::End()
 {
   // TODO: mark encoder as open = false
   // TODO: ResolveSubresource if MSAA (resolveTarget)
+
+  if (m_Desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), m_Desc.timestampWrites->querySet, m_Desc.timestampWrites->endOfPassWriteIndex);
+  }
 
   m_Ended = true;
 }

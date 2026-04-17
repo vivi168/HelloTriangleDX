@@ -588,8 +588,7 @@ static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
 // Resources
 static std::shared_ptr<IssouRHI::Texture> g_DepthStencilBuffer;
-// TODO: RHI class for this
-static ComPtr<ID3D12QueryHeap> g_TimestampQueryHeap;
+static std::shared_ptr<IssouRHI::QuerySet> g_TimestampQuerySet;
 
 // PSO
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
@@ -1102,7 +1101,7 @@ void Render(float time)
   auto queue = g_Device->GetQueue();
   auto encoder = queue->CreateCommandEncoder();
 
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalBegin);
+  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalBegin);
 
   {
     std::array transitions{
@@ -1117,7 +1116,6 @@ void Render(float time)
 
   // record skinning compute commands if needed
   // TODO: we should also update culling data. And move to Indirect?
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinBegin);
   if (g_Scene.skinnedMeshInstances.size() > 0) {
     {
       std::array transitions{
@@ -1129,7 +1127,11 @@ void Render(float time)
 
     auto passEncoder = encoder.BeginComputePass({
       .label = "Skinning Compute Pass",
-      .timestampWrites = nullptr, // TODO
+      .timestampWrites = IssouRHI::TimestampWrites{
+          .beginningOfPassWriteIndex = Timestamp::SkinBegin,
+          .endOfPassWriteIndex = Timestamp::SkinEnd,
+          .querySet = g_TimestampQuerySet.get(),
+      },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
@@ -1142,8 +1144,10 @@ void Render(float time)
     }
 
     passEncoder.End();
+  } else {
+    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinBegin);
+    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinEnd);
   }
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::SkinEnd);
 
   // record culling commands
   {
@@ -1165,11 +1169,13 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullBegin);
-
     auto passEncoder = encoder.BeginComputePass({
       .label = "Culling Compute Pass",
-      .timestampWrites = nullptr, // TODO
+      .timestampWrites = IssouRHI::TimestampWrites{
+          .beginningOfPassWriteIndex = Timestamp::CullBegin,
+          .endOfPassWriteIndex = Timestamp::CullEnd,
+          .querySet = g_TimestampQuerySet.get(),
+      },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
@@ -1181,8 +1187,6 @@ void Render(float time)
     passEncoder.Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
 
     passEncoder.End();
-
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::CullEnd);
   }
 
   // Record drawing commands
@@ -1196,18 +1200,23 @@ void Render(float time)
       encoder.Barrier({.buffers = transitions});
     }
 
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawBegin);
-
-    IssouRHI::ColorAttachment targets[] = {{
+    std::array targets{
+      IssouRHI::ColorAttachment{
         .view = g_VisibilityBuffer->CreateView().get(),
         .clearValue = {0.0f, 0.0f, 0.0f, 0.0f},
-    }};
+      }
+    };
     auto passEncoder = encoder.BeginMeshPass({
         .label = "Visibilty Buffer Pass",
         .colorAttachment = targets,
         .depthStencilAttachment = {
             .view = g_DepthStencilBuffer->CreateView().get(),
             .depthClearValue = 1.0f,
+        },
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::DrawBegin,
+            .endOfPassWriteIndex = Timestamp::DrawEnd,
+            .querySet = g_TimestampQuerySet.get(),
         },
     });
 
@@ -1219,8 +1228,6 @@ void Render(float time)
     passEncoder.DrawMeshIndirect(g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
     passEncoder.End();
-
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::DrawEnd);
   }
 
   // Record Fill G-Buffer from Visibility-Buffer commands
@@ -1236,11 +1243,13 @@ void Render(float time)
       encoder.Barrier({.textures = transitions});
     }
 
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferBegin);
-
     auto passEncoder = encoder.BeginComputePass({
       .label = "Fill G-Buffer Compute Pass",
-      .timestampWrites = nullptr, // TODO
+      .timestampWrites = IssouRHI::TimestampWrites{
+          .beginningOfPassWriteIndex = Timestamp::FillGBufferBegin,
+          .endOfPassWriteIndex = Timestamp::FillGBufferEnd,
+          .querySet = g_TimestampQuerySet.get(),
+      },
     });
 
     passEncoder.SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
@@ -1260,12 +1269,10 @@ void Render(float time)
     passEncoder.Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
 
     passEncoder.End();
-
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FillGBufferEnd);
   }
 
   // Ray trace shadows
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsBegin);
+  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
     {
       std::array transitions{
@@ -1304,7 +1311,7 @@ void Render(float time)
       encoder.CommandList()->DispatchRays(&dispatchDesc);
     }
   }
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::ShadowsEnd);
+  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsEnd);
 
   // Record Full screen triangle pass - Compose final image commands
   {
@@ -1316,15 +1323,21 @@ void Render(float time)
 
       encoder.Barrier({.textures = transitions});
     }
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeBegin);
 
-    IssouRHI::ColorAttachment targets[] = {{
+    std::array targets{
+      IssouRHI::ColorAttachment{
         .view = renderTargetView.get(),
         .clearValue = {0.0f, 0.2f, 0.4f, 1.0f},
-    }};
+      }
+    };
     auto passEncoder = encoder.BeginRenderPass({
         .label = "Final Compose Pass",
         .colorAttachment = targets,
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::FinalComposeBegin,
+            .endOfPassWriteIndex = Timestamp::FinalComposeEnd,
+            .querySet = g_TimestampQuerySet.get(),
+        },
     });
 
     passEncoder.SetPipeline(g_RenderPipeline.get());
@@ -1336,8 +1349,6 @@ void Render(float time)
     passEncoder.PushConstants(SizeOfInUint(BuffersDescriptorIndices), 2, c);
     passEncoder.Draw(3);
     passEncoder.End();
-
-    encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::FinalComposeEnd);
   }
 
   {
@@ -1356,10 +1367,8 @@ void Render(float time)
     encoder.Barrier({.textures = transitions});
   }
 
-  encoder.CommandList()->EndQuery(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, Timestamp::TotalEnd);
-
-  encoder.CommandList()->ResolveQueryData(g_TimestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, Timestamp::Count,
-                                  ctx->timestampReadBackBuffer->Resource(), 0);
+  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalEnd);
+  encoder.ResolveQuerySet(g_TimestampQuerySet.get(), 0, Timestamp::Count, ctx->timestampReadBackBuffer.get(), 0);
 
   IssouRHI::CommandBuffer* cb[] = {encoder.Finish()};
   queue->Submit(cb);
@@ -1427,7 +1436,7 @@ void Cleanup()
 
   g_ShadowBuffer.reset();
 
-  g_TimestampQueryHeap.Reset();
+  g_TimestampQuerySet.reset();
 
   g_DepthStencilBuffer.reset();
 
@@ -1506,11 +1515,11 @@ static void InitFrameResources()
 
   // Query heap
   {
-    D3D12_QUERY_HEAP_DESC queryHeapDesc{
-        .Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
-        .Count = Timestamp::Count,
-    };
-    g_Device->GetNativeDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&g_TimestampQueryHeap));
+    g_TimestampQuerySet = g_Device->CreateQuerySet({
+        .label = "Timestamps queries",
+        .type = IssouRHI::QueryType::Timestamp,
+        .count = Timestamp::Count,
+    });
   }
 
   // Setup Platform/Renderer backends

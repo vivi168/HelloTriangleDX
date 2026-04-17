@@ -19,10 +19,12 @@ static D3D12_QUERY_HEAP_TYPE D3D12QueryHeapType(QueryType type)
 // TODO: method that use CHECK_HR should be bool/result?
 void QuerySet::Create()
 {
-  D3D12_QUERY_HEAP_DESC queryHeapDesc{
-      .Type = D3D12QueryHeapType(m_Desc.type),
-      .Count = m_Desc.count,
-  };
+  D3D12_QUERY_HEAP_DESC queryHeapDesc{};
+  queryHeapDesc.Type = D3D12QueryHeapType(m_Desc.type);
+  queryHeapDesc.Count = m_Desc.count;
+
   CHECK_HR(m_Device->GetNativeDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&m_QueryHeap)));
+
+  // FIXME: don't forget to SetName as well...
 }
 }

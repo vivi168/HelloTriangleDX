@@ -92,6 +92,7 @@ class Device;
 
 enum class QueryType {
   Timestamp,
+  // Occlusion?
 };
 
 struct QuerySetDesc {
@@ -107,6 +108,8 @@ public:
   ~QuerySet();
 
   void Create();
+  QueryType Type() const { return m_Desc.type; }
+  uint32_t Count() const { return m_Desc.count; }
 public:
   ID3D12QueryHeap* QueryHeap() const { return m_QueryHeap.Get(); }
 private:
@@ -122,7 +125,6 @@ struct TimestampWrites {
 
   QuerySet* querySet;
 };
-inline constexpr uint32_t QuerySetIndexUndefined = std::numeric_limits<uint32_t>::max();
 
 enum class PipelineStage : uint32_t {
   None = 0,
@@ -1019,7 +1021,12 @@ public:
 
   // TODO: make these uncallable if a pass has begun+not yet ended?
   void Barrier(const BarriersDesc& desc);
-  void CopyBufferToBuffer(Buffer* src, size_t srcOffset, Buffer* dst, size_t dstOffset, size_t size);
+  void CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size);
+  void ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset);
+  void WriteTimestamp(QuerySet* querySet, uint32_t index);
+  // BuildTopLevelAccelerationStructures(BuildTopLevelAccelerationStructureDesc)
+  // BuildBottomLevelAccelerationStructures(BuildBottomLevelAccelerationStructureDesc)
+  // BuildOpacityMicroMaps
 
   // TODO: assert that every pass has ended
   CommandBuffer* Finish();
@@ -1030,7 +1037,7 @@ private:
 
 struct ComputePassDesc {
   std::string label;
-  TimestampWrites* timestampWrites = nullptr;
+  std::optional<TimestampWrites> timestampWrites = std::nullopt;
 };
 
 class ComputePassEncoder : public EncoderBase
@@ -1081,7 +1088,7 @@ struct GraphicPassDesc {
   std::string label;
   std::span<ColorAttachment> colorAttachment;
   DepthStencilAttachment depthStencilAttachment{};
-  TimestampWrites* timestampWrites = nullptr;
+  std::optional<TimestampWrites> timestampWrites = std::nullopt;
 };
 
 class GraphicPassEncoder : public EncoderBase

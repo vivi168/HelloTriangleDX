@@ -297,15 +297,14 @@ void GraphicPipeline::Create()
       auto& blendDesc = psoDesc.BlendState.RenderTarget[i];
       blendDesc.BlendEnable = target.blend.has_value();
       if (blendDesc.BlendEnable) {
-        auto& blend = target.blend.value();
-        blendDesc.SrcBlend = D3D12Blend(blend.color.srcFactor);
-        blendDesc.SrcBlendAlpha = D3D12BlendAlpha(blend.alpha.srcFactor);
+        blendDesc.SrcBlend = D3D12Blend(target.blend->color.srcFactor);
+        blendDesc.SrcBlendAlpha = D3D12BlendAlpha(target.blend->alpha.srcFactor);
 
-        blendDesc.DestBlend = D3D12Blend(blend.color.dstFactor);
-        blendDesc.DestBlendAlpha = D3D12BlendAlpha(blend.alpha.dstFactor);
+        blendDesc.DestBlend = D3D12Blend(target.blend->color.dstFactor);
+        blendDesc.DestBlendAlpha = D3D12BlendAlpha(target.blend->alpha.dstFactor);
 
-        blendDesc.BlendOp = D3D12BlendOperation(blend.color.operation);
-        blendDesc.BlendOpAlpha = D3D12BlendOperation(blend.alpha.operation);
+        blendDesc.BlendOp = D3D12BlendOperation(target.blend->color.operation);
+        blendDesc.BlendOpAlpha = D3D12BlendOperation(target.blend->alpha.operation);
       }
       blendDesc.RenderTargetWriteMask = static_cast<uint8_t>(target.writeMask);
     }
