@@ -1,5 +1,4 @@
 #include "IssouRHI.h"
-#include "Utils.h"
 
 #include <shlwapi.h>
 
@@ -277,6 +276,62 @@ Device::~Device()
   }
 }
 
+static const wchar_t* VendorIDToStr(uint32_t vendorID)
+{
+  constexpr uint32_t VENDOR_ID_AMD = 0x1002;
+  constexpr uint32_t VENDOR_ID_NVIDIA = 0x10DE;
+  constexpr uint32_t VENDOR_ID_INTEL = 0x8086;
+
+  switch (vendorID) {
+    case 0x10001:
+      return L"VIV";
+    case 0x10002:
+      return L"VSI";
+    case 0x10003:
+      return L"KAZAN";
+    case 0x10004:
+      return L"CODEPLAY";
+    case 0x10005:
+      return L"MESA";
+    case 0x10006:
+      return L"POCL";
+    case VENDOR_ID_AMD:
+      return L"AMD";
+    case VENDOR_ID_NVIDIA:
+      return L"NVIDIA";
+    case VENDOR_ID_INTEL:
+      return L"Intel";
+    case 0x1010:
+      return L"ImgTec";
+    case 0x13B5:
+      return L"ARM";
+    case 0x5143:
+      return L"Qualcomm";
+  }
+  return L"";
+}
+
+static std::wstring SizeToStr(size_t size)
+{
+  if (size == 0) return L"0";
+
+  wchar_t result[32];
+  double size2 = (double)size;
+
+  if (size2 >= 1024.0 * 1024.0 * 1024.0 * 1024.0) {
+    swprintf_s(result, L"%.2f TB", size2 / (1024.0 * 1024.0 * 1024.0 * 1024.0));
+  } else if (size2 >= 1024.0 * 1024.0 * 1024.0) {
+    swprintf_s(result, L"%.2f GB", size2 / (1024.0 * 1024.0 * 1024.0));
+  } else if (size2 >= 1024.0 * 1024.0) {
+    swprintf_s(result, L"%.2f MB", size2 / (1024.0 * 1024.0));
+  } else if (size2 >= 1024.0) {
+    swprintf_s(result, L"%.2f KB", size2 / 1024.0);
+  } else {
+    swprintf_s(result, L"%llu B", size);
+  }
+  return result;
+}
+
 void Device::PrintAdapterInformation()
 {
   if (!m_Adapter) return;
@@ -338,22 +393,6 @@ void Device::PrintAdapterInformation()
     wprintf(L"    CacheCoherentUMA: %u\n", architecture1.CacheCoherentUMA ? 1 : 0);
     wprintf(L"    IsolatedMMU: %u\n", architecture1.IsolatedMMU ? 1 : 0);
   }
-}
-
-static std::wstring StringToWstring(std::string_view s)
-{
-  size_t len = s.length();
-
-  if (len == 0) return std::wstring();
-
-  int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, nullptr, 0);
-  assert(size > 0);
-
-  std::wstring ws(size, 0);
-  int res = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, ws.data(), size);
-  assert(res > 0);
-
-  return ws;
 }
 
 std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc& desc)

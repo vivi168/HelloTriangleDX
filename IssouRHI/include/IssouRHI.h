@@ -56,6 +56,8 @@ struct GPUSelection {
   std::wstring Substring;
 };
 
+// TODO: D3D12 Utils
+std::wstring StringToWstring(std::string_view s);
 void ReportLiveObjects();
 void PrintAdapterList();
 

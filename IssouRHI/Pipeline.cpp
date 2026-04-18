@@ -1,5 +1,4 @@
 #include "IssouRHI.h"
-#include "Utils.h"
 
 namespace IssouRHI
 {
@@ -31,6 +30,7 @@ void ComputePipeline::Create()
   CHECK_HR(m_Device->GetNativeDevice()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
 
   m_Pso.Attach(pipelineStateObject);
+  m_Pso->SetName(StringToWstring(m_Desc.label).c_str());
 }
 
 GraphicPipeline::GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type) : PipelineBase(device), m_Desc(desc), m_Type(type) {}
@@ -361,6 +361,7 @@ void GraphicPipeline::Create()
   }
 
   m_Pso.Attach(pipelineStateObject);
+  m_Pso->SetName(StringToWstring(m_Desc.label).c_str());
   m_PrimitiveTopology = D3D12PrimitiveTopology(m_Desc.primitive.topology);
 }
 

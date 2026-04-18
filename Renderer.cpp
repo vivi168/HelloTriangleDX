@@ -578,7 +578,6 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static D3D12MA::Allocator* g_Allocator;
 static IssouRHI::Device* g_Device;
 static IssouRHI::Surface* g_Surface;
 
@@ -653,7 +652,6 @@ void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Su
 {
   g_Device = device.get();    // FIXME: TMP raw ptr!
   g_Surface = surface.get();  // FIXME: TMP raw ptr!
-  g_Allocator = device->GetAllocator();
   g_CommandQueue = device->GetQueue()->GetNativeQueue();
 
   InitFrameResources();

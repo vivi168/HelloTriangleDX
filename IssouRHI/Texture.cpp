@@ -1,5 +1,4 @@
 #include "IssouRHI.h"
-#include "Utils.h"
 
 namespace IssouRHI
 {

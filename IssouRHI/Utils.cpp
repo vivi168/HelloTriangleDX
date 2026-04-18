@@ -6,14 +6,29 @@ using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
 {
+std::wstring StringToWstring(std::string_view s)
+{
+  size_t len = s.length();
+
+  if (len == 0) return std::wstring();
+
+  int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, nullptr, 0);
+  assert(size > 0);
+
+  std::wstring ws(size, 0);
+  int res = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), len, ws.data(), size);
+  assert(res > 0);
+
+  return ws;
+}
+
 void ReportLiveObjects()
 {
 #ifdef ENABLE_DEBUG_LAYER
   {
     Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
     if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)))) {
-      dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL,
-                                   DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+      dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
     }
   }
 #endif

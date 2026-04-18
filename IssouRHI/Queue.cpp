@@ -26,10 +26,9 @@ Queue::~Queue()
 
 void Queue::Create()
 {
-  D3D12_COMMAND_QUEUE_DESC qDesc{
-      .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-      .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-  };
+  D3D12_COMMAND_QUEUE_DESC qDesc{};
+  qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+  qDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 
   ID3D12CommandQueue* commandQueue = nullptr;
   CHECK_HR(m_Device->GetNativeDevice()->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&commandQueue)));

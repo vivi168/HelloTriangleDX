@@ -1,5 +1,4 @@
 #include "IssouRHI.h"
-#include "Utils.h"
 
 using Microsoft::WRL::ComPtr;
 
