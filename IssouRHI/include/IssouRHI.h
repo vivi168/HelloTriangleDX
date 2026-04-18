@@ -251,11 +251,11 @@ enum class TextureViewDimension : uint32_t {
 
 enum class TextureUsage : uint32_t {
   None = 0,
-  CopySrc = 1 << 0,
-  CopyDst = 1 << 1,
-  TextureBinding = 1 << 2,
-  StorageBinding = 1 << 3,
-  RenderAttachment = 1 << 4,
+  CopySrc = ISSOURHI_BIT(0),
+  CopyDst = ISSOURHI_BIT(1),
+  TextureBinding = ISSOURHI_BIT(2),
+  StorageBinding = ISSOURHI_BIT(3),
+  RenderAttachment = ISSOURHI_BIT(4),
 };
 ISSOURHI_ENUM_CLASS_OP(TextureUsage)
 
@@ -458,17 +458,17 @@ private:
 
 enum class BufferUsage : uint32_t {
   None = 0,
-  MapRead = 1 << 0,
-  MapWrite = 1 << 1,
-  CopySrc = 1 << 2,
-  CopyDst = 1 << 3,
-  Index = 1 << 4,
-  Vertex = 1 << 5,
-  Uniform = 1 << 6,
-  Storage = 1 << 7,
-  Indirect = 1 << 8,
-  QueryResolve = 1 << 9,
-  RayTracingAccelerationStructure = 1 << 10,
+  MapRead = ISSOURHI_BIT(0),
+  MapWrite = ISSOURHI_BIT(1),
+  CopySrc = ISSOURHI_BIT(2),
+  CopyDst = ISSOURHI_BIT(3),
+  Index = ISSOURHI_BIT(4),
+  Vertex = ISSOURHI_BIT(5),
+  Uniform = ISSOURHI_BIT(6),
+  Storage = ISSOURHI_BIT(7),
+  Indirect = ISSOURHI_BIT(8),
+  QueryResolve = ISSOURHI_BIT(9),
+  RayTracingAccelerationStructure = ISSOURHI_BIT(10),
 };
 ISSOURHI_ENUM_CLASS_OP(BufferUsage)
 
