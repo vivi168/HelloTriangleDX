@@ -590,8 +590,6 @@ public:
   PipelineBase(Device* device);
   virtual ~PipelineBase();
 
-  virtual void Create() = 0;
-
 public:
   ID3D12PipelineState* PipelineState() const { return m_Pso.Get(); }
 protected:  // D3D12 impl specific
@@ -608,12 +606,10 @@ struct ComputePipelineDesc {
 class ComputePipeline : public PipelineBase
 {
 public:
-  ComputePipeline(Device* device, const ComputePipelineDesc& desc);
+  ComputePipeline(Device* device);
   ~ComputePipeline();
 
-  void Create() override;
-private:
-  ComputePipelineDesc m_Desc;
+  void Create(const ComputePipelineDesc& desc);
 };
 
 enum ColorWriteFlags : uint8_t {
@@ -757,32 +753,30 @@ class GraphicPipeline : public PipelineBase
 {
 protected:
     enum class Type { Render, Mesh };
-    GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type);
+    GraphicPipeline(Device* device, Type type);
 public:
   ~GraphicPipeline() override;
 
-  void Create() override;
+  void Create(const GraphicPipelineDesc& desc);
 
   D3D12_PRIMITIVE_TOPOLOGY NativePrimitiveTopology() const { return m_PrimitiveTopology; }
 protected:
-  GraphicPipelineDesc m_Desc;
-
   Type m_Type;
 protected:
-  D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
+  D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 };
 
 class RenderPipeline : public GraphicPipeline
 {
 public:
-  RenderPipeline(Device* device, const GraphicPipelineDesc& desc);
+  RenderPipeline(Device* device);
   ~RenderPipeline() override;
 };
 
 class MeshPipeline : public GraphicPipeline
 {
 public:
-  MeshPipeline(Device* device, const GraphicPipelineDesc& desc);
+  MeshPipeline(Device* device);
   ~MeshPipeline() override;
 };
 

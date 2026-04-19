@@ -478,24 +478,24 @@ std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
 
 std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(const ComputePipelineDesc& desc)
 {
-  auto computePipeline = std::make_shared<ComputePipeline>(this, desc);
-  computePipeline->Create();
+  auto computePipeline = std::make_shared<ComputePipeline>(this);
+  computePipeline->Create(desc);
 
   return computePipeline;
 }
 
 std::shared_ptr<RenderPipeline> Device::CreateRenderPipeline(const GraphicPipelineDesc& desc)
 {
-  auto renderPipeline = std::make_shared<RenderPipeline>(this, desc);
-  renderPipeline->Create();
+  auto renderPipeline = std::make_shared<RenderPipeline>(this);
+  renderPipeline->Create(desc);
 
   return renderPipeline;
 }
 
 std::shared_ptr<MeshPipeline> Device::CreateMeshPipeline(const GraphicPipelineDesc& desc)
 {
-  auto meshPipeline = std::make_shared<MeshPipeline>(this, desc);
-  meshPipeline->Create();
+  auto meshPipeline = std::make_shared<MeshPipeline>(this);
+  meshPipeline->Create(desc);
 
   return meshPipeline;
 }

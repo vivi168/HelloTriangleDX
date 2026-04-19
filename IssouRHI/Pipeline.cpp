@@ -14,26 +14,26 @@ static D3D12_SHADER_BYTECODE D3D12ShaderByteCode(const ShaderModule& shader)
   };
 }
 
-ComputePipeline::ComputePipeline(Device* device, const ComputePipelineDesc& desc) : PipelineBase(device), m_Desc(desc) {}
+ComputePipeline::ComputePipeline(Device* device) : PipelineBase(device) {}
 
 ComputePipeline::~ComputePipeline() = default;
 
-void ComputePipeline::Create()
+void ComputePipeline::Create(const ComputePipelineDesc& desc)
 {
   D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
   psoDesc.pRootSignature = m_Device->RootSignature();
 
-  assert(m_Desc.shader.stage == ShaderStage::Compute);
-  psoDesc.CS = D3D12ShaderByteCode(m_Desc.shader);
+  assert(desc.shader.stage == ShaderStage::Compute);
+  psoDesc.CS = D3D12ShaderByteCode(desc.shader);
 
   ID3D12PipelineState* pipelineStateObject;
   CHECK_HR(m_Device->GetNativeDevice()->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
 
   m_Pso.Attach(pipelineStateObject);
-  m_Pso->SetName(StringToWstring(m_Desc.label).c_str());
+  m_Pso->SetName(StringToWstring(desc.label).c_str());
 }
 
-GraphicPipeline::GraphicPipeline(Device* device, const GraphicPipelineDesc& desc, Type type) : PipelineBase(device), m_Desc(desc), m_Type(type) {}
+GraphicPipeline::GraphicPipeline(Device* device, Type type) : PipelineBase(device), m_Type(type) {}
 
 GraphicPipeline::~GraphicPipeline() = default;
 
@@ -241,56 +241,56 @@ static D3D12_INDEX_BUFFER_STRIP_CUT_VALUE D3D12IndexBufferStripCutValue(Primitiv
   }
 }
 
-void GraphicPipeline::Create()
+void GraphicPipeline::Create(const GraphicPipelineDesc& desc)
 {
   const auto fillPsoDesc = [&](auto& psoDesc) {
     psoDesc.pRootSignature = m_Device->RootSignature();
 
     psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    psoDesc.BlendState.AlphaToCoverageEnable = m_Desc.multiSample.alphaToCoverageEnabled;
+    psoDesc.BlendState.AlphaToCoverageEnable = desc.multiSample.alphaToCoverageEnabled;
     psoDesc.BlendState.IndependentBlendEnable = TRUE;
 
-    psoDesc.SampleMask = m_Desc.multiSample.mask;
+    psoDesc.SampleMask = desc.multiSample.mask;
 
     // RasterizerState
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    psoDesc.RasterizerState.CullMode = D3D12CullMode(m_Desc.primitive.cullMode);
-    psoDesc.RasterizerState.FrontCounterClockwise = m_Desc.primitive.frontFace == FrontFace::CCW;
-    psoDesc.RasterizerState.DepthBias = m_Desc.depthStencil.depthBias;
-    psoDesc.RasterizerState.DepthBiasClamp = m_Desc.depthStencil.depthBiasClamp;
-    psoDesc.RasterizerState.SlopeScaledDepthBias = m_Desc.depthStencil.depthBiasSlopeScale;
-    psoDesc.RasterizerState.DepthClipEnable = !m_Desc.primitive.unclippedDepth;
-    psoDesc.RasterizerState.MultisampleEnable = m_Desc.multiSample.count > 1;
+    psoDesc.RasterizerState.CullMode = D3D12CullMode(desc.primitive.cullMode);
+    psoDesc.RasterizerState.FrontCounterClockwise = desc.primitive.frontFace == FrontFace::CCW;
+    psoDesc.RasterizerState.DepthBias = desc.depthStencil.depthBias;
+    psoDesc.RasterizerState.DepthBiasClamp = desc.depthStencil.depthBiasClamp;
+    psoDesc.RasterizerState.SlopeScaledDepthBias = desc.depthStencil.depthBiasSlopeScale;
+    psoDesc.RasterizerState.DepthClipEnable = !desc.primitive.unclippedDepth;
+    psoDesc.RasterizerState.MultisampleEnable = desc.multiSample.count > 1;
     psoDesc.RasterizerState.AntialiasedLineEnable = FALSE;
     psoDesc.RasterizerState.ForcedSampleCount = 0;
     psoDesc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
     // DepthStencilState
-    psoDesc.DepthStencilState.DepthEnable = m_Desc.depthStencil.depthWriteEnabled || m_Desc.depthStencil.depthCompare != CompareFunction::Always;
-    psoDesc.DepthStencilState.DepthWriteMask = m_Desc.depthStencil.depthWriteEnabled ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
-    psoDesc.DepthStencilState.DepthFunc = D3D12ComparisonFunc(m_Desc.depthStencil.depthCompare);
+    psoDesc.DepthStencilState.DepthEnable = desc.depthStencil.depthWriteEnabled || desc.depthStencil.depthCompare != CompareFunction::Always;
+    psoDesc.DepthStencilState.DepthWriteMask = desc.depthStencil.depthWriteEnabled ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+    psoDesc.DepthStencilState.DepthFunc = D3D12ComparisonFunc(desc.depthStencil.depthCompare);
 
-    psoDesc.DepthStencilState.StencilEnable = m_Desc.depthStencil.stencilFront.Enabled() || m_Desc.depthStencil.stencilBack.Enabled();
-    psoDesc.DepthStencilState.StencilReadMask = static_cast<UINT8>(m_Desc.depthStencil.stencilReadMask);
-    psoDesc.DepthStencilState.StencilWriteMask = static_cast<UINT8>(m_Desc.depthStencil.stencilWriteMask);
-    psoDesc.DepthStencilState.FrontFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilFront);
-    psoDesc.DepthStencilState.BackFace = D3D12DepthStencilOpDesc(m_Desc.depthStencil.stencilBack);
+    psoDesc.DepthStencilState.StencilEnable = desc.depthStencil.stencilFront.Enabled() || desc.depthStencil.stencilBack.Enabled();
+    psoDesc.DepthStencilState.StencilReadMask = static_cast<UINT8>(desc.depthStencil.stencilReadMask);
+    psoDesc.DepthStencilState.StencilWriteMask = static_cast<UINT8>(desc.depthStencil.stencilWriteMask);
+    psoDesc.DepthStencilState.FrontFace = D3D12DepthStencilOpDesc(desc.depthStencil.stencilFront);
+    psoDesc.DepthStencilState.BackFace = D3D12DepthStencilOpDesc(desc.depthStencil.stencilBack);
 
-    psoDesc.PrimitiveTopologyType = D3D12PrimitiveTopologyType(m_Desc.primitive.topology);
+    psoDesc.PrimitiveTopologyType = D3D12PrimitiveTopologyType(desc.primitive.topology);
 
-    psoDesc.DSVFormat = DXGIFormat(m_Desc.depthStencil.format);
+    psoDesc.DSVFormat = DXGIFormat(desc.depthStencil.format);
     assert(!(psoDesc.DepthStencilState.DepthEnable || psoDesc.DepthStencilState.StencilEnable) || psoDesc.DSVFormat != DXGI_FORMAT_UNKNOWN);
 
     psoDesc.SampleDesc = {
-        .Count = m_Desc.multiSample.count,
+        .Count = desc.multiSample.count,
         .Quality = 0,
     };
 
-    assert(m_Desc.targets.size() <= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT);
-    psoDesc.NumRenderTargets = m_Desc.targets.size();
+    assert(desc.targets.size() <= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT);
+    psoDesc.NumRenderTargets = desc.targets.size();
 
     for (size_t i = 0; i < psoDesc.NumRenderTargets; i++) {
-      auto& target = m_Desc.targets[i];
+      auto& target = desc.targets[i];
       psoDesc.RTVFormats[i] = DXGIFormat(target.format);
 
       auto& blendDesc = psoDesc.BlendState.RenderTarget[i];
@@ -316,7 +316,7 @@ void GraphicPipeline::Create()
       D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
       fillPsoDesc(psoDesc);
 
-      for (const auto& shader : m_Desc.shaders) {
+      for (const auto& shader : desc.shaders) {
         if (shader.stage == ShaderStage::Fragment) {
           psoDesc.PS = D3D12ShaderByteCode(shader);
         } else if (shader.stage == ShaderStage::Vertex) {
@@ -329,7 +329,7 @@ void GraphicPipeline::Create()
           .NumElements = 0,
       };
 
-      psoDesc.IBStripCutValue = D3D12IndexBufferStripCutValue(m_Desc.primitive.topology, m_Desc.primitive.stripIndexFormat);
+      psoDesc.IBStripCutValue = D3D12IndexBufferStripCutValue(desc.primitive.topology, desc.primitive.stripIndexFormat);
 
       CHECK_HR(m_Device->GetNativeDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineStateObject)));
       break;
@@ -338,7 +338,7 @@ void GraphicPipeline::Create()
       D3DX12_MESH_SHADER_PIPELINE_STATE_DESC psoDesc = {};
       fillPsoDesc(psoDesc);
 
-      for (const auto& shader : m_Desc.shaders) {
+      for (const auto& shader : desc.shaders) {
         if (shader.stage == ShaderStage::Fragment) {
           psoDesc.PS = D3D12ShaderByteCode(shader);
         } else if (shader.stage == ShaderStage::Mesh) {
@@ -361,15 +361,15 @@ void GraphicPipeline::Create()
   }
 
   m_Pso.Attach(pipelineStateObject);
-  m_Pso->SetName(StringToWstring(m_Desc.label).c_str());
-  m_PrimitiveTopology = D3D12PrimitiveTopology(m_Desc.primitive.topology);
+  m_Pso->SetName(StringToWstring(desc.label).c_str());
+  m_PrimitiveTopology = D3D12PrimitiveTopology(desc.primitive.topology);
 }
 
-RenderPipeline::RenderPipeline(Device* device, const GraphicPipelineDesc& desc) : GraphicPipeline(device, desc, GraphicPipeline::Type::Render) {}
+RenderPipeline::RenderPipeline(Device* device) : GraphicPipeline(device, GraphicPipeline::Type::Render) {}
 
 RenderPipeline::~RenderPipeline() = default;
 
-MeshPipeline::MeshPipeline(Device* device, const GraphicPipelineDesc& desc) : GraphicPipeline(device, desc, GraphicPipeline::Type::Mesh) {}
+MeshPipeline::MeshPipeline(Device* device) : GraphicPipeline(device, GraphicPipeline::Type::Mesh) {}
 
 MeshPipeline::~MeshPipeline() = default;
 
