@@ -149,4 +149,4 @@ void AccelerationStructure::Create(const AccelerationStructureDesc& desc)
     m_Device->GetNativeDevice()->CreateShaderResourceView(nullptr, &srvDesc, m_Srv.cpuHandle);
   }
 }
-}
+}  // namespace IssouRHI

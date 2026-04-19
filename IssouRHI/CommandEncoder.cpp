@@ -375,11 +375,11 @@ void CommandEncoder::BuildTopLevelAccelerationStructure(AccelerationStructure* d
   desc.DestAccelerationStructureData = dst->GpuAddress();
   desc.ScratchAccelerationStructureData = dst->ScratchGpuAddress();
   desc.Inputs = {
-    .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
-    .Flags = dst->Flags(),
-    .NumDescs = instanceCount,
-    .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
-    .InstanceDescs = instances.GpuAddress(),
+      .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
+      .Flags = dst->Flags(),
+      .NumDescs = instanceCount,
+      .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+      .InstanceDescs = instances.GpuAddress(),
   };
 
   if (src != nullptr) {
@@ -398,11 +398,11 @@ void CommandEncoder::BuildBottomLevelAccelerationStructure(AccelerationStructure
 
   auto geometryDescs = D3D12RaytracingGeometryDescs(geometries);
   desc.Inputs = {
-    .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
-    .Flags = dst->Flags(),
-    .NumDescs = static_cast<UINT>(geometryDescs.size()),
-    .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
-    .pGeometryDescs = geometryDescs.data(),
+      .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
+      .Flags = dst->Flags(),
+      .NumDescs = static_cast<UINT>(geometryDescs.size()),
+      .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+      .pGeometryDescs = geometryDescs.data(),
   };
 
   if (src != nullptr) {
