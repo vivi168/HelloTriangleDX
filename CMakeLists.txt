@@ -37,6 +37,7 @@ target_link_libraries(imgui PRIVATE common)
 add_library(IssouRHI)
 target_sources(IssouRHI
     PRIVATE
+        IssouRHI/AccelerationStructure.cpp
         IssouRHI/Buffer.cpp
         IssouRHI/CommandEncoder.cpp
         IssouRHI/DescriptorHeap.cpp

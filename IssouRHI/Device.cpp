@@ -476,6 +476,14 @@ std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
   return buf;
 }
 
+std::shared_ptr<AccelerationStructure> Device::CreateAccelerationStructure(const AccelerationStructureDesc& desc)
+{
+  auto as = std::make_shared<AccelerationStructure>(this);
+  as->Create(desc);
+
+  return as;
+}
+
 std::shared_ptr<ComputePipeline> Device::CreateComputePipeline(const ComputePipelineDesc& desc)
 {
   auto computePipeline = std::make_shared<ComputePipeline>(this);

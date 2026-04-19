@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <variant>
 
 #include <cassert>
 #include <cstdint>
@@ -307,8 +308,37 @@ inline DXGI_FORMAT DXGIFormat(TextureFormat format)
 }
 
 enum class VertexFormat : uint32_t {
+  Undefined,
   Float32x3,
 };
+
+inline DXGI_FORMAT DXGIFormat(VertexFormat format)
+{
+  switch (format) {
+    case VertexFormat::Undefined:
+      return DXGI_FORMAT_UNKNOWN;
+    case VertexFormat::Float32x3:
+      return DXGI_FORMAT_R32G32B32_FLOAT;
+    default:
+      std::unreachable();
+  }
+}
+
+enum class IndexFormat : uint32_t { Undefined, Uint16, Uint32 };
+
+inline DXGI_FORMAT DXGIFormat(IndexFormat format)
+{
+  switch (format) {
+    case IndexFormat::Undefined:
+      return DXGI_FORMAT_UNKNOWN;
+    case IndexFormat::Uint16:
+      return DXGI_FORMAT_R16_UINT;
+    case IndexFormat::Uint32:
+      return DXGI_FORMAT_R32_UINT;
+    default:
+      std::unreachable();
+  }
+}
 
 struct Extent3D {
   uint32_t width;
@@ -568,6 +598,137 @@ private: // D3D12 impl specific
   std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 };
 
+struct BufferWithOffset {
+  Buffer* buffer = nullptr;
+  uint64_t offset = 0;
+
+  explicit operator bool() const { return buffer != nullptr; }
+
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const
+  {
+    return buffer ? buffer->GpuAddress() + offset : 0;
+  }
+};
+
+using TransformMatrix = float[3][4];
+
+enum class TopLevelInstanceFlags : uint32_t {
+  None = 0,
+  TriangleCullDisable = ISSOURHI_BIT(0),
+  TriangleFrontCounterclockwise = ISSOURHI_BIT(1),
+  ForceOpaque = ISSOURHI_BIT(2),
+  ForceNonOpaque = ISSOURHI_BIT(3),
+  ForceOMM2State = ISSOURHI_BIT(4),
+  DisableOMMs = ISSOURHI_BIT(5)
+};
+ISSOURHI_ENUM_CLASS_OP(TopLevelInstanceFlags)
+
+struct TopLevelInstanceDesc {
+  TransformMatrix transformMatrix;
+  uint32_t instanceId : 24;
+  uint32_t instanceMask : 8;
+  uint32_t instanceContributionToHitGroupIndex : 24;
+  TopLevelInstanceFlags flags : 8;
+  uint64_t accelerationStructureGpuAddress;
+};
+
+// enum class BottomLevelGeometryType { Triangles, AABBs };
+
+enum class BottomLevelGeometryFlags : uint32_t {
+  None = 0,
+  Opaque = ISSOURHI_BIT(0),
+  NoDuplicateAnyHitInvocation = ISSOURHI_BIT(1),
+};
+ISSOURHI_ENUM_CLASS_OP(BottomLevelGeometryFlags)
+
+struct BottomLevelTrianglesDesc {
+  BufferWithOffset transformMatrices; // TransformMatrix
+
+  BufferWithOffset vertices;
+  uint64_t vertexStride;
+  uint32_t vertexCount;
+  VertexFormat vertexFormat;
+
+  BufferWithOffset indices;
+  uint32_t indexCount;
+  IndexFormat indexFormat;
+
+  // omm
+};
+
+struct BottomLevelAABB {
+  float minX;
+  float minY;
+  float minZ;
+  float maxX;
+  float maxY;
+  float maxZ;
+};
+
+struct BottomLevelAABBsDesc {
+  BufferWithOffset aabbs; // BottomLevelAABB
+  uint64_t stride;
+  uint64_t count;
+};
+
+struct BottomLevelGeometryDesc {
+  BottomLevelGeometryFlags flags;
+  std::variant<BottomLevelTrianglesDesc, BottomLevelAABBsDesc> geometry;
+};
+
+enum class AccelerationStructureFlags : uint32_t {
+  None = 0,
+  AllowUpdate = ISSOURHI_BIT(0),
+  AllowCompaction = ISSOURHI_BIT(1),
+  AllowDataAccess = ISSOURHI_BIT(2),
+  PreferFastTrace = ISSOURHI_BIT(3),
+  PreferFastBuild = ISSOURHI_BIT(4),
+  MinimizeMemory = ISSOURHI_BIT(5),
+  AllowMicromapUpdate = ISSOURHI_BIT(6),
+  AllowDisableMicromaps = ISSOURHI_BIT(7),
+};
+ISSOURHI_ENUM_CLASS_OP(AccelerationStructureFlags)
+
+struct TopLevelDesc {
+  std::span<TopLevelInstanceDesc> instances{};
+};
+
+struct BottomLevelDesc {
+  std::span<BottomLevelGeometryDesc> geometries{};
+};
+
+struct AccelerationStructureDesc {
+  std::string label;
+  AccelerationStructureFlags flags;
+  std::variant<TopLevelDesc, BottomLevelDesc> geometryOrInstanceDesc;
+};
+
+std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> D3D12RaytracingGeometryDescs(std::span<BottomLevelGeometryDesc> geometries);
+
+class AccelerationStructure
+{
+public:
+  AccelerationStructure(Device* device);
+  ~AccelerationStructure();
+
+  void Create(const AccelerationStructureDesc& desc);
+  uint32_t DescriptorIndex() const { return m_Srv.index; }
+public:
+  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Buffer->GpuAddress(); }
+  D3D12_GPU_VIRTUAL_ADDRESS ScratchGpuAddress() const { return m_ScratchBuffer->GpuAddress(); }
+
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS Flags() const { return m_Flags; }
+private:
+  Device* m_Device;
+  std::shared_ptr<Buffer> m_Buffer;
+  std::shared_ptr<Buffer> m_ScratchBuffer;
+
+  DescriptorAllocation m_Srv;
+private:
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS m_Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO m_PrebuildInfo{};
+};
+
 enum class ShaderStage {
   Compute,
   Fragment,
@@ -720,8 +881,6 @@ enum class PrimitiveTopology {
   TriangleStrip,
 };
 
-enum class IndexFormat { Undefined, Uint16, Uint32 };
-
 enum class FrontFace { CCW, CW };
 
 enum class CullMode { None, Front, Back };
@@ -798,6 +957,7 @@ public:
   std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc &desc);
   std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
+  std::shared_ptr<AccelerationStructure> CreateAccelerationStructure(const AccelerationStructureDesc& desc);
 
   std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
   std::shared_ptr<RenderPipeline> CreateRenderPipeline(const GraphicPipelineDesc& desc);
@@ -1017,11 +1177,12 @@ public:
 
   // TODO: make these uncallable if a pass has begun+not yet ended?
   void Barrier(const BarriersDesc& desc);
+  void BuildTopLevelAccelerationStructure(AccelerationStructure* dst, BufferWithOffset instances, uint32_t instanceCount, AccelerationStructure* src = nullptr);
+  void BuildBottomLevelAccelerationStructure(AccelerationStructure* dst, std::span<BottomLevelGeometryDesc> geometries, AccelerationStructure* src = nullptr);
   void CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size);
   void ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset);
   void WriteTimestamp(QuerySet* querySet, uint32_t index);
-  // BuildTopLevelAccelerationStructures(BuildTopLevelAccelerationStructureDesc)
-  // BuildBottomLevelAccelerationStructures(BuildBottomLevelAccelerationStructureDesc)
+
   // BuildOpacityMicroMaps
 
   // TODO: assert that every pass has ended

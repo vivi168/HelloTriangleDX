@@ -369,6 +369,50 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
   }
 }
 
+void CommandEncoder::BuildTopLevelAccelerationStructure(AccelerationStructure* dst, BufferWithOffset instances, uint32_t instanceCount, AccelerationStructure* src)
+{
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{};
+  desc.DestAccelerationStructureData = dst->GpuAddress();
+  desc.ScratchAccelerationStructureData = dst->ScratchGpuAddress();
+  desc.Inputs = {
+    .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
+    .Flags = dst->Flags(),
+    .NumDescs = instanceCount,
+    .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+    .InstanceDescs = instances.GpuAddress(),
+  };
+
+  if (src != nullptr) {
+    desc.SourceAccelerationStructureData = src->GpuAddress();
+    desc.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+  }
+
+  CommandList()->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+}
+
+void CommandEncoder::BuildBottomLevelAccelerationStructure(AccelerationStructure* dst, std::span<BottomLevelGeometryDesc> geometries, AccelerationStructure* src)
+{
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{};
+  desc.DestAccelerationStructureData = dst->GpuAddress();
+  desc.ScratchAccelerationStructureData = dst->ScratchGpuAddress();
+
+  auto geometryDescs = D3D12RaytracingGeometryDescs(geometries);
+  desc.Inputs = {
+    .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
+    .Flags = dst->Flags(),
+    .NumDescs = static_cast<UINT>(geometryDescs.size()),
+    .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+    .pGeometryDescs = geometryDescs.data(),
+  };
+
+  if (src != nullptr) {
+    desc.SourceAccelerationStructureData = src->GpuAddress();
+    desc.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+  }
+
+  CommandList()->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
+}
+
 void CommandEncoder::CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size)
 {
   // TODO: validate input?
