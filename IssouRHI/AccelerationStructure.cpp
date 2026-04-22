@@ -100,6 +100,7 @@ void AccelerationStructure::Create(const AccelerationStructureDesc& desc)
   inputs.Flags = m_Flags;
   inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 
+  std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometryDescs;
   if (std::holds_alternative<TopLevelDesc>(desc.geometryOrInstanceDesc)) {
     auto& geometryOrInstanceDesc = std::get<TopLevelDesc>(desc.geometryOrInstanceDesc);
 
@@ -107,7 +108,7 @@ void AccelerationStructure::Create(const AccelerationStructureDesc& desc)
     inputs.NumDescs = static_cast<UINT>(geometryOrInstanceDesc.instances.size());
   } else if (std::holds_alternative<BottomLevelDesc>(desc.geometryOrInstanceDesc)) {
     auto& geometryOrInstanceDesc = std::get<BottomLevelDesc>(desc.geometryOrInstanceDesc);
-    auto geometryDescs = D3D12RaytracingGeometryDescs(geometryOrInstanceDesc.geometries);
+    geometryDescs = D3D12RaytracingGeometryDescs(geometryOrInstanceDesc.geometries);
 
     inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
     inputs.NumDescs = static_cast<UINT>(geometryDescs.size());
@@ -115,9 +116,11 @@ void AccelerationStructure::Create(const AccelerationStructureDesc& desc)
   }
 
   m_Device->GetNativeDevice()->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &m_PrebuildInfo);
+  assert(m_PrebuildInfo.ResultDataMaxSizeInBytes > 0);
 
   {
     auto scratchSize = std::max(m_PrebuildInfo.ScratchDataSizeInBytes, m_PrebuildInfo.UpdateScratchDataSizeInBytes);
+    assert(scratchSize > 0);
 
     IssouRHI::BufferDesc scratchDesc{
         .label = desc.label + " (Scratch)",

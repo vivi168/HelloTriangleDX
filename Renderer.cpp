@@ -49,53 +49,6 @@ enum Timestamps : size_t {
 static constexpr UINT DRAW_MESH_CMDS_SIZE = MESH_INSTANCE_COUNT * sizeof(DrawMeshCommand);
 static constexpr UINT DRAW_MESH_CMDS_COUNTER_OFFSET = AlignForUavCounter(DRAW_MESH_CMDS_SIZE);
 
-// TODO: RHI implementation
-struct AccelerationStructure {
-  std::shared_ptr<IssouRHI::Buffer> resultData;
-  std::shared_ptr<IssouRHI::Buffer> scratch;
-
-  // FIXME: quick TMP hack, create a AccelerationStructure class on rhi side
-  void AllocBuffers(size_t resultDataSize, size_t scratchSize, IssouRHI::Device* device)
-  {
-    IssouRHI::BufferDesc scratchDesc{
-        .label = "Acceleration structure Scratch Resource",
-        .size = scratchSize,
-        .usage = IssouRHI::BufferUsage::Storage,
-    };
-    scratch = device->CreateBuffer(scratchDesc);
-
-    IssouRHI::BufferDesc resultDesc{
-        .label = "Acceleration structure Result Resource",
-        .size = resultDataSize,
-        .usage = IssouRHI::BufferUsage::Storage | IssouRHI::BufferUsage::RayTracingAccelerationStructure,
-    };
-    resultData = device->CreateBuffer(resultDesc);
-  }
-
-  // FIXME: quick TMP hack, create a AccelerationStructure class on rhi side
-  UINT ResultDataSrvDescriptorIndex(IssouRHI::Device* device)
-  {
-    if (srv) return srv.index;
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
-                                            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                                            .RaytracingAccelerationStructure = {.Location = resultData->GpuAddress()}};
-
-    srv = device->AllocCbvSrvUavDescriptor();
-    device->GetNativeDevice()->CreateShaderResourceView(nullptr, &srvDesc, srv.cpuHandle);
-
-    return srv.index;
-  }
-
-  void Reset()
-  {
-    resultData.reset();
-    scratch.reset();
-  }
-
-  IssouRHI::DescriptorAllocation srv;
-};
-
 struct SkinnedMeshInstance;
 
 struct MeshInstance {
@@ -165,10 +118,9 @@ struct Scene {
   // (unless skinned, in which case all corresponding mesh instances are added)
   std::vector<std::shared_ptr<MeshInstance>> uniqueMeshInstances;
 
-  std::vector<AccelerationStructure> blasBuffers;
-  AccelerationStructure tlasBuffer;
-  std::vector<D3D12_RAYTRACING_INSTANCE_DESC> rtInstanceDescriptors;
-  std::shared_ptr<IssouRHI::Buffer> rtInstanceDescBuffer;
+  std::vector<std::shared_ptr<IssouRHI::AccelerationStructure>> blasBuffers;
+  std::shared_ptr<IssouRHI::AccelerationStructure> tlasBuffer;
+  std::vector<IssouRHI::TopLevelInstanceDesc> rtInstanceDescriptors;
 
   Camera* camera;
 };
@@ -671,41 +623,14 @@ void LoadAssets()
   }
 
   // RayTracing acceleration structures setup
-  auto device = g_Device->GetNativeDevice();
-  ComPtr<ID3D12CommandAllocator> commandAllocator;
-  ComPtr<ID3D12GraphicsCommandList4> commandList;
-  ComPtr<ID3D12Fence> fence;
-  UINT64 fenceValue = 1;
-  HANDLE fenceEvent = nullptr;
-
-  {
-    CHECK_HR(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
-    CHECK_HR(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), NULL, IID_PPV_ARGS(&commandList)));
-    // Command lists are created in the recording state; close until needed.
-    CHECK_HR(commandList->Close());
-
-    CHECK_HR(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-    fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    assert(fenceEvent);
-  }
-
-  auto waitForGpu = [&]() {
-    // Signal and increment the fence value.
-    UINT64 fenceToWaitFor = fenceValue;
-    CHECK_HR(g_CommandQueue->Signal(fence.Get(), fenceToWaitFor));
-    fenceValue++;
-
-    // Wait until the fence is completed.
-    CHECK_HR(fence->SetEventOnCompletion(fenceToWaitFor, fenceEvent));
-    WaitForSingleObject(fenceEvent, INFINITE);
-  };
+  auto queue = g_Device->GetQueue();
+  auto encoder = queue->CreateCommandEncoder();
 
   // BLAS creation
   {
     const size_t numMeshes = g_Scene.uniqueMeshInstances.size();
 
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries(numMeshes);
-    std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> bottomLevelInputs(numMeshes);
+    std::vector<IssouRHI::AccelerationStructureDesc> bottomLevelInputs(numMeshes);
 
     g_Scene.blasBuffers.resize(numMeshes);
 
@@ -714,56 +639,38 @@ void LoadAssets()
       auto& mesh = mi->mesh;
 
       // TODO: loop subsets
-      geometries[i] = {
-          .Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES,
-          .Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE,  // TODO: flag none for anyhit?
-          .Triangles = {
-              .Transform3x4 = 0,
-              .IndexFormat = DXGI_FORMAT_R32_UINT,
-              .VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT,
-              .IndexCount = mesh->header.numIndices,
-              .VertexCount = mesh->header.numVerts,
-              .IndexBuffer = g_MeshStore.m_VertexIndices->GpuAddress() + mi->indexBufferOffset,
-              .VertexBuffer = {
-                  .StartAddress = g_MeshStore.m_VertexPositions->GpuAddress() + mi->data.firstPosition * sizeof(XMFLOAT3),
-                  .StrideInBytes = sizeof(XMFLOAT3),
-              }}};
+      std::array geometries{
+          IssouRHI::BottomLevelGeometryDesc{
+              .flags = IssouRHI::BottomLevelGeometryFlags::Opaque,
+              .geometry = IssouRHI::BottomLevelTrianglesDesc{
+                  .vertices = {g_MeshStore.m_VertexPositions.get(), mi->data.firstPosition * sizeof(XMFLOAT3)},
+                  .vertexStride = sizeof(XMFLOAT3),
+                  .vertexCount = mesh->header.numVerts,
+                  .vertexFormat = IssouRHI::VertexFormat::Float32x3,
+                  .indices = {g_MeshStore.m_VertexIndices.get(), mi->indexBufferOffset},
+                  .indexCount = mesh->header.numIndices,
+                  .indexFormat = IssouRHI::IndexFormat::Uint32,
+              },
+          },
+      };
 
-      bottomLevelInputs[i] = {.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
-                              .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
-                              .NumDescs = 1,
-                              .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
-                              .pGeometryDescs = &geometries[i]};
+      bottomLevelInputs[i] = {
+          .label = std::format("BLAS {}", i),
+          .flags = IssouRHI::AccelerationStructureFlags::PreferFastTrace,
+          .geometryOrInstanceDesc = IssouRHI::BottomLevelDesc{
+              .geometries = geometries,
+          },
+      };
 
-      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
-      device->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs[i], &sizeInfo);
-      assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
-
-      g_Scene.blasBuffers[i].AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_Device);
+      g_Scene.blasBuffers[i] = g_Device->CreateAccelerationStructure(bottomLevelInputs[i]);
 
       // assign blas buffer address to each instances of this mesh
       for (auto& inst : g_Scene.meshInstanceMap[mesh->name]) {
-        inst->blasBufferAddress = g_Scene.blasBuffers[i].resultData->GpuAddress();
+        inst->blasBufferAddress = g_Scene.blasBuffers[i]->GpuAddress();
       }
+
+      encoder.BuildBottomLevelAccelerationStructure(g_Scene.blasBuffers[i].get(), geometries);
     }
-
-    CHECK_HR(commandAllocator->Reset());
-    CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
-
-    for (size_t i = 0; i < numMeshes; i++) {
-      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
-          .DestAccelerationStructureData = g_Scene.blasBuffers[i].resultData->GpuAddress(),
-          .Inputs = bottomLevelInputs[i],
-          .ScratchAccelerationStructureData = g_Scene.blasBuffers[i].scratch->GpuAddress(),
-      };
-
-      commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
-    }
-
-    commandList->Close();
-    std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
-    g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    waitForGpu();
   }
 
   // Fill rtInstanceBuffer
@@ -779,14 +686,14 @@ void LoadAssets()
 
         XMMATRIX world = mi->mesh->LocalTransformMatrix() * modelMat;
 
-        D3D12_RAYTRACING_INSTANCE_DESC desc{};
-        XMStoreFloat3x4(reinterpret_cast<XMFLOAT3X4*>(desc.Transform), world);
-        // desc.InstanceID;
-        desc.InstanceMask = 0xff;
-        // desc.InstanceContributionToHitGroupIndex;
-        // desc.Flags;
-        desc.AccelerationStructure = mi->blasBufferAddress;
-        assert(desc.AccelerationStructure != 0);
+        IssouRHI::TopLevelInstanceDesc desc{};
+        XMStoreFloat3x4(reinterpret_cast<XMFLOAT3X4*>(desc.transformMatrix), world);
+        // desc.instanceId;
+        desc.instanceMask = 0xff;
+        // desc.instanceContributionToHitGroupIndex;
+        // desc.flags;
+        desc.accelerationStructureGpuAddress = mi->blasBufferAddress;
+        assert(desc.accelerationStructureGpuAddress != 0);
 
         g_Scene.rtInstanceDescriptors.push_back(desc);
       }
@@ -794,49 +701,49 @@ void LoadAssets()
   }
 
   // RT instance descriptors buffer
+  std::shared_ptr<IssouRHI::Buffer> rtInstanceDescBuffer;
   {
     IssouRHI::BufferDesc desc{
         .label = "RT Instance Desc Buffer",
-        .size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * g_Scene.rtInstanceDescriptors.size(),
+        .size = sizeof(IssouRHI::TopLevelInstanceDesc) * g_Scene.rtInstanceDescriptors.size(),
         .usage = IssouRHI::BufferUsage::MapWrite,
     };
-    g_Scene.rtInstanceDescBuffer = g_Device->CreateBuffer(desc);
-    g_Scene.rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
+    rtInstanceDescBuffer = g_Device->CreateBuffer(desc);
+    rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
   }
 
   // TLAS creation
   {
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelInputs = {
-        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
-        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
-        .NumDescs = static_cast<UINT>(g_Scene.rtInstanceDescriptors.size()),
-        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
-        .InstanceDescs = g_Scene.rtInstanceDescBuffer->GpuAddress(),
+    IssouRHI::AccelerationStructureDesc topLevelInputs{
+        .label = "TLAS",
+        .flags = IssouRHI::AccelerationStructureFlags::PreferFastTrace,
+        .geometryOrInstanceDesc = IssouRHI::TopLevelDesc{
+            .instances = g_Scene.rtInstanceDescriptors,
+        },
     };
 
-    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO sizeInfo{};
-    device->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &sizeInfo);
-    assert(sizeInfo.ResultDataMaxSizeInBytes > 0);
+    g_Scene.tlasBuffer = g_Device->CreateAccelerationStructure(topLevelInputs);
 
-    // Allocate buffer for scene tlas
-    g_Scene.tlasBuffer.AllocBuffers(sizeInfo.ResultDataMaxSizeInBytes, sizeInfo.ScratchDataSizeInBytes, g_Device);
-
-    CHECK_HR(commandAllocator->Reset());
-    CHECK_HR(commandList->Reset(commandAllocator.Get(), NULL));
-
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{
-        .DestAccelerationStructureData = g_Scene.tlasBuffer.resultData->GpuAddress(),
-        .Inputs = topLevelInputs,
-        .ScratchAccelerationStructureData = g_Scene.tlasBuffer.scratch->GpuAddress(),
+    // TODO: add global barrier to RHI
+    D3D12_GLOBAL_BARRIER barrier{
+        .SyncBefore = D3D12_BARRIER_SYNC_RAYTRACING,
+        .SyncAfter = D3D12_BARRIER_SYNC_RAYTRACING,
+        .AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+        .AccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
     };
+    D3D12_BARRIER_GROUP group{
+        .Type = D3D12_BARRIER_TYPE_GLOBAL,
+        .NumBarriers = 1,
+        .pGlobalBarriers = &barrier,
+    };
+    encoder.CommandList()->Barrier(1, &group);
 
-    commandList->BuildRaytracingAccelerationStructure(&desc, 0, nullptr);
-
-    commandList->Close();
-    std::array ppCommandLists{static_cast<ID3D12CommandList*>(commandList.Get())};
-    g_CommandQueue->ExecuteCommandLists(static_cast<UINT>(ppCommandLists.size()), ppCommandLists.data());
-    waitForGpu();
+    encoder.BuildTopLevelAccelerationStructure(g_Scene.tlasBuffer.get(), {rtInstanceDescBuffer.get(), 0}, g_Scene.rtInstanceDescriptors.size());
   }
+
+  IssouRHI::CommandBuffer* cb[] = {encoder.Finish()};
+  queue->Submit(cb);
+  queue->WaitForAll();
 }
 
 static void Update(FrameContext* ctx, float time)
@@ -1287,7 +1194,7 @@ void Render(float time)
 
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer.ResultDataSrvDescriptorIndex(g_Device), 2);
+    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer->DescriptorIndex(), 2);
     encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
 
     {
@@ -1419,11 +1326,10 @@ void Cleanup()
   g_DrawMeshCommands.reset();
   g_UAVCounterReset.reset();
 
-  g_Scene.rtInstanceDescBuffer.reset();
   for (auto& as : g_Scene.blasBuffers) {
-    as.Reset();
+    as.reset();
   }
-  g_Scene.tlasBuffer.Reset();
+  g_Scene.tlasBuffer.reset();
 
   g_DxrStateObject.Reset();
 

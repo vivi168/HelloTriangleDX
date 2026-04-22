@@ -371,6 +371,8 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
 
 void CommandEncoder::BuildTopLevelAccelerationStructure(AccelerationStructure* dst, BufferWithOffset instances, uint32_t instanceCount, AccelerationStructure* src)
 {
+  static_assert(sizeof(D3D12_RAYTRACING_INSTANCE_DESC) == sizeof(TopLevelInstanceDesc));
+
   D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC desc{};
   desc.DestAccelerationStructureData = dst->GpuAddress();
   desc.ScratchAccelerationStructureData = dst->ScratchGpuAddress();

@@ -8,6 +8,8 @@
 #include <dxgi1_6.h>
 #include <wrl.h>
 
+// TODO: get rid of STL in public header?
+// would need: string (=> const char* ?) span(=> ptr + size?), optional(=> nullptr ?), variant(=> enum+union ?), shared_ptr(=> ComPtr like class?)
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -610,8 +612,6 @@ struct BufferWithOffset {
   }
 };
 
-using TransformMatrix = float[3][4];
-
 enum class TopLevelInstanceFlags : uint32_t {
   None = 0,
   TriangleCullDisable = ISSOURHI_BIT(0),
@@ -624,15 +624,13 @@ enum class TopLevelInstanceFlags : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(TopLevelInstanceFlags)
 
 struct TopLevelInstanceDesc {
-  TransformMatrix transformMatrix;
+  float transformMatrix[3][4];
   uint32_t instanceId : 24;
   uint32_t instanceMask : 8;
   uint32_t instanceContributionToHitGroupIndex : 24;
   TopLevelInstanceFlags flags : 8;
   uint64_t accelerationStructureGpuAddress;
 };
-
-// enum class BottomLevelGeometryType { Triangles, AABBs };
 
 enum class BottomLevelGeometryFlags : uint32_t {
   None = 0,
@@ -642,16 +640,16 @@ enum class BottomLevelGeometryFlags : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(BottomLevelGeometryFlags)
 
 struct BottomLevelTrianglesDesc {
-  BufferWithOffset transformMatrices; // TransformMatrix
+  BufferWithOffset transformMatrices{}; // TransformMatrix
 
   BufferWithOffset vertices;
   uint64_t vertexStride;
   uint32_t vertexCount;
   VertexFormat vertexFormat;
 
-  BufferWithOffset indices;
-  uint32_t indexCount;
-  IndexFormat indexFormat;
+  BufferWithOffset indices{};
+  uint32_t indexCount = 0;
+  IndexFormat indexFormat = IndexFormat::Undefined;
 
   // omm
 };
@@ -911,8 +909,8 @@ struct GraphicPipelineDesc {
 class GraphicPipeline : public PipelineBase
 {
 protected:
-    enum class Type { Render, Mesh };
-    GraphicPipeline(Device* device, Type type);
+  enum class Type { Render, Mesh };
+  GraphicPipeline(Device* device, Type type);
 public:
   ~GraphicPipeline() override;
 
