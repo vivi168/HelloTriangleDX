@@ -1156,7 +1156,7 @@ struct TextureBarrierDesc {
 };
 
 struct BarriersDesc {
-  // std::span<GlobalBarrierDesc> globals{};
+  std::span<GlobalBarrierDesc> globals{};
   std::span<BufferBarrierDesc> buffers{};
   std::span<TextureBarrierDesc> textures{};
 };

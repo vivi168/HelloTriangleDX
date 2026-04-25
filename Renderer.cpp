@@ -712,6 +712,17 @@ void LoadAssets()
     rtInstanceDescBuffer->Write(IssouRHI::FullBufferRange, g_Scene.rtInstanceDescriptors.data());
   }
 
+  {
+    std::array transitions{
+        IssouRHI::GlobalBarrierDesc{
+            .from = IssouRHI::StageAccess{.stage = IssouRHI::PipelineStage::AccelerationStructure, .access = IssouRHI::Access::AccelerationStructureWrite},
+            .to = IssouRHI::StageAccess{.stage = IssouRHI::PipelineStage::AccelerationStructure, .access = IssouRHI::Access::AccelerationStructureRead},
+        },
+    };
+
+    encoder.Barrier({.globals = transitions});
+  }
+
   // TLAS creation
   {
     IssouRHI::AccelerationStructureDesc topLevelInputs{
@@ -723,20 +734,6 @@ void LoadAssets()
     };
 
     g_Scene.tlasBuffer = g_Device->CreateAccelerationStructure(topLevelInputs);
-
-    // TODO: add global barrier to RHI
-    D3D12_GLOBAL_BARRIER barrier{
-        .SyncBefore = D3D12_BARRIER_SYNC_RAYTRACING,
-        .SyncAfter = D3D12_BARRIER_SYNC_RAYTRACING,
-        .AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
-        .AccessAfter = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
-    };
-    D3D12_BARRIER_GROUP group{
-        .Type = D3D12_BARRIER_TYPE_GLOBAL,
-        .NumBarriers = 1,
-        .pGlobalBarriers = &barrier,
-    };
-    encoder.CommandList()->Barrier(1, &group);
 
     encoder.BuildTopLevelAccelerationStructure(g_Scene.tlasBuffer.get(), {rtInstanceDescBuffer.get(), 0}, g_Scene.rtInstanceDescriptors.size());
   }

@@ -286,6 +286,26 @@ static D3D12_BARRIER_LAYOUT D3D12BarrierLayout(TextureLayout layout)
   }
 }
 
+static std::optional<D3D12_GLOBAL_BARRIER> Transition(StageAccess from, StageAccess to)
+{
+  auto fromAccess = D3D12BarrierAccess(from.access);
+  auto toAccess = D3D12BarrierAccess(to.access);
+
+  bool accessChanged = from.access != to.access;
+  bool storageBarrier = fromAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && toAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+
+  if (!accessChanged && !storageBarrier) {
+    return std::nullopt;
+  }
+
+  return D3D12_GLOBAL_BARRIER{
+      .SyncBefore = D3D12BarrierSync(from.stage),
+      .SyncAfter = D3D12BarrierSync(to.stage),
+      .AccessBefore = fromAccess,
+      .AccessAfter = toAccess,
+  };
+}
+
 static std::optional<D3D12_BUFFER_BARRIER> Transition(Buffer* buf, StageAccess from, StageAccess to)
 {
   auto fromAccess = D3D12BarrierAccess(from.access);
@@ -293,8 +313,9 @@ static std::optional<D3D12_BUFFER_BARRIER> Transition(Buffer* buf, StageAccess f
   bool accessChanged = from.access != to.access;
   bool storageBarrier = fromAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && toAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 
-  if (!accessChanged && !storageBarrier)
+  if (!accessChanged && !storageBarrier) {
     return std::nullopt;
+  }
 
   auto barrier = CD3DX12_BUFFER_BARRIER(D3D12BarrierSync(from.stage),
                                         D3D12BarrierSync(to.stage),
@@ -314,8 +335,9 @@ static std::optional<D3D12_TEXTURE_BARRIER> Transition(Texture* tex, StageAccess
   bool accessLayoutChanged = fromAccess != toAccess || fromLayout != toLayout;
   bool storageBarrier = fromAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS && toAccess == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
 
-  if (!accessLayoutChanged && !storageBarrier)
+  if (!accessLayoutChanged && !storageBarrier) {
     return std::nullopt;
+  }
 
   auto barrier = CD3DX12_TEXTURE_BARRIER(D3D12BarrierSync(from.stage),
                                          D3D12BarrierSync(to.stage),
@@ -334,8 +356,17 @@ static std::optional<D3D12_TEXTURE_BARRIER> Transition(Texture* tex, StageAccess
 void CommandEncoder::Barrier(const BarriersDesc& desc)
 {
   // FIXME: use a small vector or something instead of doing heap allocation here?
+  std::vector<D3D12_GLOBAL_BARRIER> globalBarriers(desc.globals.size());
   std::vector<D3D12_BUFFER_BARRIER> bufferBarriers(desc.buffers.size());
   std::vector<D3D12_TEXTURE_BARRIER> textureBarriers(desc.textures.size());
+
+  size_t ng = 0;
+  for (const auto& g : desc.globals) {
+    auto barrier = Transition(g.from, g.to);
+    if (barrier) {
+      globalBarriers[ng++] = barrier.value();
+    }
+  }
 
   size_t nb = 0;
   for (const auto& b : desc.buffers) {
@@ -353,8 +384,12 @@ void CommandEncoder::Barrier(const BarriersDesc& desc)
     }
   }
 
-  D3D12_BARRIER_GROUP barrierGroups[2];  // 3 with Global Barriers
-  UINT n = 0;
+  D3D12_BARRIER_GROUP barrierGroups[3];
+  size_t n = 0;
+
+  if (ng > 0) {
+    barrierGroups[n++] = CD3DX12_BARRIER_GROUP(ng, globalBarriers.data());
+  }
 
   if (nb > 0) {
     barrierGroups[n++] = CD3DX12_BARRIER_GROUP(nb, bufferBarriers.data());
