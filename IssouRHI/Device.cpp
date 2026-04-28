@@ -508,6 +508,14 @@ std::shared_ptr<MeshPipeline> Device::CreateMeshPipeline(const GraphicPipelineDe
   return meshPipeline;
 }
 
+std::shared_ptr<RayTracingPipeline> Device::CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc)
+{
+  auto rayTracingPipeline = std::make_shared<RayTracingPipeline>(this);
+  rayTracingPipeline->Create(desc);
+
+  return rayTracingPipeline;
+}
+
 DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
 {
   return m_CbvSrvUavDescriptorHeap.Alloc();

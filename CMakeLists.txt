@@ -80,7 +80,9 @@ set(HLSL_SOURCES
     ${SHADERS_DIR}/Meshlet.as.hlsl
     ${SHADERS_DIR}/Meshlet.ms.hlsl
     ${SHADERS_DIR}/Meshlet.ps.hlsl
-    ${SHADERS_DIR}/RayTracing.rt.hlsl
+    ${SHADERS_DIR}/RayTracing.rahit.hlsl
+    ${SHADERS_DIR}/RayTracing.rmiss.hlsl
+    ${SHADERS_DIR}/RayTracing.rgen.hlsl
     ${SHADERS_DIR}/Skinning.cs.hlsl
 )
 set(HLSL_HEADERS
@@ -151,7 +153,11 @@ function(get_shader_profile BASENAME OUTPUT_PROFILE)
         set(SM_TYPE ms)
     elseif(SHADER_TYPE STREQUAL "AS")
         set(SM_TYPE as)
-    elseif(SHADER_TYPE STREQUAL "RT")
+    elseif(SHADER_TYPE STREQUAL "RAHIT" OR
+           SHADER_TYPE STREQUAL "RCHIT" OR
+           SHADER_TYPE STREQUAL "RINT" OR
+           SHADER_TYPE STREQUAL "RMISS" OR
+           SHADER_TYPE STREQUAL "RGEN")
         set(SM_TYPE lib)
     else()
         message(FATAL_ERROR "${SHADER_TYPE} is not a recognized shader type")

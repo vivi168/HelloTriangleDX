@@ -373,4 +373,81 @@ MeshPipeline::MeshPipeline(Device* device) : GraphicPipeline(device, GraphicPipe
 
 MeshPipeline::~MeshPipeline() = default;
 
+RayTracingPipeline::RayTracingPipeline(Device* device) : m_Device(device) {}
+
+RayTracingPipeline::~RayTracingPipeline() = default;
+
+static D3D12_RAYTRACING_PIPELINE_FLAGS D3D12RayTracingPipelineFlags(RayTracingPipelineFlags flags)
+{
+  D3D12_RAYTRACING_PIPELINE_FLAGS pipelineFlags = D3D12_RAYTRACING_PIPELINE_FLAG_NONE;
+
+  if (flags & RayTracingPipelineFlags::SkipTriangles) {
+    pipelineFlags |= D3D12_RAYTRACING_PIPELINE_FLAG_SKIP_TRIANGLES;
+  }
+  if (flags & RayTracingPipelineFlags::SkipAABBs) {
+    pipelineFlags |= D3D12_RAYTRACING_PIPELINE_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
+  }
+  if (flags & RayTracingPipelineFlags::AllowMicroMaps) {
+    pipelineFlags |= D3D12_RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS;
+  }
+
+  return pipelineFlags;
+}
+
+void RayTracingPipeline::Create(const RayTracingPipelineDesc& desc)
+{
+  CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};
+  std::vector<D3D12_SHADER_BYTECODE> byteCodes(desc.shaders.size());
+
+  for (size_t i = 0; i < desc.shaders.size(); ++i) {
+    const auto& shader = desc.shaders[i];
+    byteCodes[i] = D3D12ShaderByteCode(shader);
+
+    auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+    lib->SetDXILLibrary(&byteCodes[i]);
+    assert(shader.entryPointName.has_value());
+    auto entryPoint = StringToWstring(shader.entryPointName.value());
+    lib->DefineExport(entryPoint.c_str());
+  }
+
+  for (const auto& hitGroup : desc.hitGroups) {
+    auto hitGroupSubobject = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+    hitGroupSubobject->SetHitGroupExport(StringToWstring(hitGroup.name).c_str());
+
+    D3D12_HIT_GROUP_TYPE groupType = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+
+    if (hitGroup.anyHitEntryPoint.has_value()) {
+      hitGroupSubobject->SetAnyHitShaderImport(StringToWstring(hitGroup.anyHitEntryPoint.value()).c_str());
+    }
+    if (hitGroup.closestHitEntryPoint.has_value()) {
+      hitGroupSubobject->SetClosestHitShaderImport(StringToWstring(hitGroup.closestHitEntryPoint.value()).c_str());
+    }
+    if (hitGroup.intersectionEntryPoint.has_value()) {
+      hitGroupSubobject->SetIntersectionShaderImport(StringToWstring(hitGroup.intersectionEntryPoint.value()).c_str());
+      groupType = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+    }
+
+    hitGroupSubobject->SetHitGroupType(groupType);
+  }
+
+  auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+  shaderConfig->Config(desc.maxPayloadSize, desc.maxAttributeSize);
+
+  auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+  globalRootSignature->SetRootSignature(m_Device->RootSignature());
+
+  auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG1_SUBOBJECT>();
+  pipelineConfig->Config(desc.maxRecursionDepth, D3D12RayTracingPipelineFlags(desc.flags));
+
+  CHECK_HR(m_Device->GetNativeDevice()->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_StateObject)));
+
+  m_StateObject->SetName(StringToWstring(desc.label).c_str());
+
+// #ifdef _DEBUG
+//     PrintStateObjectDesc(raytracingPipeline);
+// #endif
+
+  CHECK_HR(m_StateObject.As(&m_StateObjectProperties));
+}
+
 }  // namespace IssouRHI

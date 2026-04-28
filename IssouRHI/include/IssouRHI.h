@@ -733,7 +733,13 @@ enum class ShaderStage {
   Vertex,
   Mesh,
   Task,
-  RayTracing,
+  // RayTracing
+  RayGen,
+  RayMiss,
+  RayIntersection,
+  RayClosestHit,
+  RayAnyHit,
+  Callable,
 };
 
 struct ShaderModule {
@@ -749,12 +755,13 @@ public:
   PipelineBase(Device* device);
   virtual ~PipelineBase();
 
-public:
+public:  // D3D12 impl specific
   ID3D12PipelineState* PipelineState() const { return m_Pso.Get(); }
+protected:
+  Device* m_Device;
+
 protected:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
-
-  Device* m_Device;
 };
 
 struct ComputePipelineDesc {
@@ -937,8 +944,48 @@ public:
   ~MeshPipeline() override;
 };
 
-struct RayTracingPipelineDesc;
-class RayTracingPipeline;
+enum class RayTracingPipelineFlags : uint32_t {
+  None = 0,
+  SkipTriangles = ISSOURHI_BIT(0),
+  SkipAABBs = ISSOURHI_BIT(1),
+  AllowMicroMaps = ISSOURHI_BIT(2),
+};
+ISSOURHI_ENUM_CLASS_OP(RayTracingPipelineFlags)
+
+struct HitGroupDesc {
+  std::string name;
+  std::optional<std::string> anyHitEntryPoint = std::nullopt;
+  std::optional<std::string> closestHitEntryPoint = std::nullopt;
+  std::optional<std::string> intersectionEntryPoint = std::nullopt;
+};
+
+struct RayTracingPipelineDesc {
+  std::string label;
+  std::span<ShaderModule> shaders;
+  std::span<HitGroupDesc> hitGroups;
+  uint32_t maxAttributeSize;
+  uint32_t maxPayloadSize;
+  uint32_t maxRecursionDepth;
+  RayTracingPipelineFlags flags = RayTracingPipelineFlags::None;
+  // TODO: omm
+};
+
+class RayTracingPipeline
+{
+public:
+  RayTracingPipeline(Device* device);
+  ~RayTracingPipeline();
+
+  void Create(const RayTracingPipelineDesc& desc);
+public:
+  ID3D12StateObject* StateObject() const { return m_StateObject.Get(); }
+  ID3D12StateObjectProperties* StateObjectProperties() const { return m_StateObjectProperties.Get(); }
+private:
+  Device* m_Device;
+private:
+  Microsoft::WRL::ComPtr<ID3D12StateObject> m_StateObject;
+  Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_StateObjectProperties;
+};
 
 class Queue;
 
@@ -960,6 +1007,7 @@ public:
   std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
   std::shared_ptr<RenderPipeline> CreateRenderPipeline(const GraphicPipelineDesc& desc);
   std::shared_ptr<MeshPipeline> CreateMeshPipeline(const GraphicPipelineDesc& desc);
+  std::shared_ptr<RayTracingPipeline> CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc);
 
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();

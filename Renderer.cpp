@@ -547,9 +547,9 @@ static std::shared_ptr<IssouRHI::QuerySet> g_TimestampQuerySet;
 static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
 static std::shared_ptr<IssouRHI::RenderPipeline> g_RenderPipeline;
 static std::shared_ptr<IssouRHI::MeshPipeline> g_MeshPipeline;
+static std::shared_ptr<IssouRHI::RayTracingPipeline> g_RayTracingPipeline;
 static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
 
-static ComPtr<ID3D12StateObject> g_DxrStateObject;
 static std::shared_ptr<IssouRHI::Buffer> g_RayGenShaderTable;
 static std::shared_ptr<IssouRHI::Buffer> g_MissShaderTable;
 static std::shared_ptr<IssouRHI::Buffer> g_HitGroupShaderTable;
@@ -1187,7 +1187,7 @@ void Render(float time)
       encoder.Barrier({.textures = transitions});
     }
 
-    encoder.CommandList()->SetPipelineState1(g_DxrStateObject.Get());
+    encoder.CommandList()->SetPipelineState1(g_RayTracingPipeline->StateObject());
 
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
     encoder.CommandList()->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
@@ -1319,6 +1319,7 @@ void Cleanup()
 
   g_RenderPipeline.reset();
   g_MeshPipeline.reset();
+  g_RayTracingPipeline.reset();
 
   g_DrawMeshCommands.reset();
   g_UAVCounterReset.reset();
@@ -1327,8 +1328,6 @@ void Cleanup()
     as.reset();
   }
   g_Scene.tlasBuffer.reset();
-
-  g_DxrStateObject.Reset();
 
   g_RayGenShaderTable.reset();
   g_MissShaderTable.reset();
@@ -1548,51 +1547,38 @@ static void InitFrameResources()
   {
     const wchar_t* HitGroupName = L"MyHitGroup";
     const wchar_t* RaygenShaderName = L"ShadowRayGen";
-    const wchar_t* AnyHitShaderName = L"ShadowAnyHit";
     const wchar_t* MissShaderName = L"ShadowMiss";
 
-    auto libBlob = ReadData(L"RayTracing.rt.cso");
-    D3D12_SHADER_BYTECODE libShader = {libBlob.data(), libBlob.size()};
+    auto rahitBlob = ReadData(L"RayTracing.rahit.cso");
+    auto rmissBlob = ReadData(L"RayTracing.rmiss.cso");
+    auto rgenBlob = ReadData(L"RayTracing.rgen.cso");
 
-    CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};
-    auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-    lib->SetDXILLibrary(&libShader);
-    lib->DefineExport(RaygenShaderName);
-    lib->DefineExport(AnyHitShaderName);
-    lib->DefineExport(MissShaderName);
-
-    auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-    hitGroup->SetAnyHitShaderImport(AnyHitShaderName);
-    hitGroup->SetHitGroupExport(HitGroupName);
-    hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
-
-    auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-    UINT payloadSize = 1 * sizeof(float);    // struct ShadowPayload { float visibility; };
-    UINT attributeSize = 2 * sizeof(float);  // struct BuiltInTriangleIntersectionAttributes { float2 barycentrics; };
-    shaderConfig->Config(payloadSize, attributeSize);
-
-    auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-    globalRootSignature->SetRootSignature(g_Device->RootSignature());
-
-    auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-    UINT maxRecursionDepth = 1;
-    pipelineConfig->Config(maxRecursionDepth);
-
-#ifdef _DEBUG
-    PrintStateObjectDesc(raytracingPipeline);
-#endif
-
-    CHECK_HR(g_Device->GetNativeDevice()->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&g_DxrStateObject)));
+    IssouRHI::ShaderModule shaderModules[] = {
+        {.stage = IssouRHI::ShaderStage::RayAnyHit, .code = rahitBlob.data(), .size = rahitBlob.size(), .entryPointName = "ShadowAnyHit"},
+        {.stage = IssouRHI::ShaderStage::RayMiss, .code = rmissBlob.data(), .size = rmissBlob.size(), .entryPointName = "ShadowMiss"},
+        {.stage = IssouRHI::ShaderStage::RayGen, .code = rgenBlob.data(), .size = rgenBlob.size(), .entryPointName = "ShadowRayGen"},
+    };
+    IssouRHI::HitGroupDesc hitGroups[] = {
+        {
+            .name = "MyHitGroup",
+            .anyHitEntryPoint = "ShadowAnyHit",
+        },
+    };
+    g_RayTracingPipeline = g_Device->CreateRayTracingPipelinePipeline({
+        .label = "Shadow RT Pipeline",
+        .shaders = shaderModules,
+        .hitGroups = hitGroups,
+        .maxAttributeSize = 2 * sizeof(float),  // struct BuiltInTriangleIntersectionAttributes { float2 barycentrics; };
+        .maxPayloadSize = 1 * sizeof(float),    // struct ShadowPayload { float visibility; };
+        .maxRecursionDepth = 1,
+    });
 
     // Shader Table
     // TODO: ShaderTable class in RHI
-    ComPtr<ID3D12StateObjectProperties> stateObjectProperties;
-    CHECK_HR(g_DxrStateObject.As(&stateObjectProperties));
-
     UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
 
     {
-      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(RaygenShaderName);
+      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(RaygenShaderName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
           .label = "RayGen Shader Table",
@@ -1604,7 +1590,7 @@ static void InitFrameResources()
     }
 
     {
-      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(MissShaderName);
+      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(MissShaderName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
           .label = "Miss Shader Table",
@@ -1616,7 +1602,7 @@ static void InitFrameResources()
     }
 
     {
-      void* shaderIdentifier = stateObjectProperties->GetShaderIdentifier(HitGroupName);
+      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(HitGroupName);
       UINT numShaderRecords = 1;
       IssouRHI::BufferDesc desc{
           .label = "HitGroup Shader Table",
