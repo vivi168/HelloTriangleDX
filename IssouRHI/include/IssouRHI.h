@@ -59,6 +59,18 @@ struct GPUSelection {
   std::wstring Substring;
 };
 
+// TODO: Utils
+inline bool IsPowerOfTwo(size_t v)
+{
+  return (v != 0) && ((v & (v - 1)) == 0);
+}
+
+inline size_t AlignUpPowerOfTwo(size_t size, size_t align)
+{
+    assert(IsPowerOfTwo(align));
+    return (size + align - 1) & ~(align - 1);
+}
+
 // TODO: D3D12 Utils
 std::wstring StringToWstring(std::string_view s);
 void ReportLiveObjects();
@@ -979,12 +991,49 @@ public:
   void Create(const RayTracingPipelineDesc& desc);
 public:
   ID3D12StateObject* StateObject() const { return m_StateObject.Get(); }
-  ID3D12StateObjectProperties* StateObjectProperties() const { return m_StateObjectProperties.Get(); }
+  void* ShaderIdentifier(std::string entryPoint) const;
 private:
   Device* m_Device;
 private:
   Microsoft::WRL::ComPtr<ID3D12StateObject> m_StateObject;
   Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_StateObjectProperties;
+};
+
+struct ShaderTableDesc {
+  std::string label;
+  const RayTracingPipeline* pipeline;
+  std::string rayGenEntryPoint;
+  std::span<std::string> missEntryPoints{};
+  std::span<std::string> hitGroupNames{};
+  std::span<std::string> callableEntryPoints{};
+};
+
+class ShaderTable {
+public:
+  ShaderTable(Device* device);
+  ~ShaderTable();
+
+  void Create(const ShaderTableDesc& desc);
+public:
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE RayGenShaderRecord() const;
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE MissShaderTable() const;
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE HitGroupTable() const;
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE CallableShaderTable() const;
+private:
+  Device* m_Device;
+
+  std::shared_ptr<Buffer> m_Buffer;
+
+  uint32_t m_RayGenShaderRecordSize = 0;
+
+  uint32_t m_MissShaderTableSize = 0;
+  uint32_t m_MissShaderTableOffset = 0;
+
+  uint32_t m_HitGroupTableSize = 0;
+  uint32_t m_HitGroupTableOffset = 0;
+
+  uint32_t m_CallableShaderTableSize = 0;
+  uint32_t m_CallableShaderTableOffset = 0;
 };
 
 class Queue;
@@ -1008,6 +1057,7 @@ public:
   std::shared_ptr<RenderPipeline> CreateRenderPipeline(const GraphicPipelineDesc& desc);
   std::shared_ptr<MeshPipeline> CreateMeshPipeline(const GraphicPipelineDesc& desc);
   std::shared_ptr<RayTracingPipeline> CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc);
+  std::shared_ptr<ShaderTable> CreateShaderTable(const ShaderTableDesc& desc);
 
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
@@ -1173,6 +1223,7 @@ class RayTracingPassEncoder;
 
 struct ComputePassDesc;
 struct GraphicPassDesc;
+struct RayTracingPassDesc;
 
 class EncoderBase
 {

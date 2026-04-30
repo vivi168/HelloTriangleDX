@@ -45,6 +45,7 @@ target_sources(IssouRHI
         IssouRHI/Pipeline.cpp
         IssouRHI/QuerySet.cpp
         IssouRHI/Queue.cpp
+        IssouRHI/ShaderTable.cpp
         IssouRHI/Surface.cpp
         IssouRHI/Texture.cpp
         IssouRHI/Utils.cpp

@@ -545,9 +545,7 @@ static std::shared_ptr<IssouRHI::MeshPipeline> g_MeshPipeline;
 static std::shared_ptr<IssouRHI::RayTracingPipeline> g_RayTracingPipeline;
 static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
 
-static std::shared_ptr<IssouRHI::Buffer> g_RayGenShaderTable;
-static std::shared_ptr<IssouRHI::Buffer> g_MissShaderTable;
-static std::shared_ptr<IssouRHI::Buffer> g_HitGroupShaderTable;
+static std::shared_ptr<IssouRHI::ShaderTable> g_ShaderTable;
 
 static std::shared_ptr<IssouRHI::Buffer> g_DrawMeshCommands;  // written by compute shader
 static std::shared_ptr<IssouRHI::Buffer> g_UAVCounterReset;
@@ -1182,24 +1180,20 @@ void Render(float time)
 
     encoder.CommandList()->SetPipelineState1(g_RayTracingPipeline->StateObject());
 
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read), 0);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite), 1);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, g_Scene.tlasBuffer->DescriptorIndex(), 2);
-    encoder.CommandList()->SetComputeRoot32BitConstant(0, frameConstantsIndex, 3);
+    std::array<uint32_t, 4> pc = {
+        g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+        g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
+        g_Scene.tlasBuffer->DescriptorIndex(),
+        frameConstantsIndex,
+    };
+
+    encoder.CommandList()->SetComputeRoot32BitConstants(0, pc.size(), pc.data(), 0);
 
     {
       D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
-      // Since each shader table has only one shader record, the stride is same as the size.
-      dispatchDesc.HitGroupTable.StartAddress = g_HitGroupShaderTable->GpuAddress();
-      dispatchDesc.HitGroupTable.SizeInBytes = g_HitGroupShaderTable->Size();
-      dispatchDesc.HitGroupTable.StrideInBytes = g_HitGroupShaderTable->Size();
-
-      dispatchDesc.MissShaderTable.StartAddress = g_MissShaderTable->GpuAddress();
-      dispatchDesc.MissShaderTable.SizeInBytes = g_MissShaderTable->Size();
-      dispatchDesc.MissShaderTable.StrideInBytes = g_MissShaderTable->Size();
-
-      dispatchDesc.RayGenerationShaderRecord.StartAddress = g_RayGenShaderTable->GpuAddress();
-      dispatchDesc.RayGenerationShaderRecord.SizeInBytes = g_RayGenShaderTable->Size();
+      dispatchDesc.HitGroupTable = g_ShaderTable->HitGroupTable();
+      dispatchDesc.MissShaderTable = g_ShaderTable->MissShaderTable();
+      dispatchDesc.RayGenerationShaderRecord = g_ShaderTable->RayGenShaderRecord();
 
       dispatchDesc.Width = g_Width;
       dispatchDesc.Height = g_Height;
@@ -1322,9 +1316,7 @@ void Cleanup()
   }
   g_Scene.tlasBuffer.reset();
 
-  g_RayGenShaderTable.reset();
-  g_MissShaderTable.reset();
-  g_HitGroupShaderTable.reset();
+  g_ShaderTable.reset();
 
   g_VisibilityBuffer.reset();
   g_GBuffer.Reset();
@@ -1538,10 +1530,6 @@ static void InitFrameResources()
 
   // Ray traced shadow pipeline
   {
-    const wchar_t* HitGroupName = L"MyHitGroup";
-    const wchar_t* RaygenShaderName = L"ShadowRayGen";
-    const wchar_t* MissShaderName = L"ShadowMiss";
-
     auto rahitBlob = ReadData(L"RayTracing.rahit.cso");
     auto rmissBlob = ReadData(L"RayTracing.rmiss.cso");
     auto rgenBlob = ReadData(L"RayTracing.rgen.cso");
@@ -1567,44 +1555,15 @@ static void InitFrameResources()
     });
 
     // Shader Table
-    // TODO: ShaderTable class in RHI
-    UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-
-    {
-      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(RaygenShaderName);
-      UINT numShaderRecords = 1;
-      IssouRHI::BufferDesc desc{
-          .label = "RayGen Shader Table",
-          .size = numShaderRecords * shaderIdentifierSize,
-          .usage = IssouRHI::BufferUsage::MapWrite,
-      };
-      g_RayGenShaderTable = g_Device->CreateBuffer(desc);
-      g_RayGenShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
-    }
-
-    {
-      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(MissShaderName);
-      UINT numShaderRecords = 1;
-      IssouRHI::BufferDesc desc{
-          .label = "Miss Shader Table",
-          .size = numShaderRecords * shaderIdentifierSize,
-          .usage = IssouRHI::BufferUsage::MapWrite,
-      };
-      g_MissShaderTable = g_Device->CreateBuffer(desc);
-      g_MissShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
-    }
-
-    {
-      void* shaderIdentifier = g_RayTracingPipeline->StateObjectProperties()->GetShaderIdentifier(HitGroupName);
-      UINT numShaderRecords = 1;
-      IssouRHI::BufferDesc desc{
-          .label = "HitGroup Shader Table",
-          .size = numShaderRecords * shaderIdentifierSize,
-          .usage = IssouRHI::BufferUsage::MapWrite,
-      };
-      g_HitGroupShaderTable = g_Device->CreateBuffer(desc);
-      g_HitGroupShaderTable->Write(IssouRHI::FullBufferRange, shaderIdentifier);
-    }
+    std::string missEntryPoints[] = {"ShadowMiss"};
+    std::string hitGroupNames[] = {"MyHitGroup"};
+    g_ShaderTable = g_Device->CreateShaderTable({
+        .label = "Shadow RT Shader Table",
+        .pipeline = g_RayTracingPipeline.get(),
+        .rayGenEntryPoint = "ShadowRayGen",
+        .missEntryPoints = missEntryPoints,
+        .hitGroupNames = hitGroupNames,
+    });
   }
 
   // MeshStore

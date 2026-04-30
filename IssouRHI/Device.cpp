@@ -521,6 +521,14 @@ std::shared_ptr<RayTracingPipeline> Device::CreateRayTracingPipelinePipeline(con
   return rayTracingPipeline;
 }
 
+std::shared_ptr<ShaderTable> Device::CreateShaderTable(const ShaderTableDesc& desc)
+{
+  auto shaderTable = std::make_shared<ShaderTable>(this);
+  shaderTable->Create(desc);
+
+  return shaderTable;
+}
+
 DescriptorAllocation Device::AllocCbvSrvUavDescriptor()
 {
   return m_CbvSrvUavDescriptorHeap.Alloc();
