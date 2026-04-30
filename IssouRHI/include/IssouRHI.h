@@ -454,10 +454,10 @@ class TextureView;
 class Texture
 {
 public:
-  static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(const TextureDesc& desc);
-
   Texture(Device* device, const TextureDesc& desc);
   ~Texture();
+
+  void Create();
 
   // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();

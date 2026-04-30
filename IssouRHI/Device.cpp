@@ -433,40 +433,8 @@ std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc& desc)
 
 std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
 {
-  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
-  if (desc.usage & TextureUsage::CopyDst) {
-    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
-  } else {
-    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-  }
-
-  D3D12_RESOURCE_DESC1 textureDesc = Texture::D3D12ResourceDesc(desc);
-
-  D3D12_CLEAR_VALUE zero{};
-  zero.Format = textureDesc.Format;
-
-  // TODO: how to allow for another clear value / any value for .clearValue of ColorAttachment?
-  D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr;
-  if (textureDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
-    pOptimizedClearValue = &zero;
-  }
-
-  D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_COMMON;
-  if (textureDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) {
-    zero.DepthStencil.Depth = 1.0f;
-    zero.DepthStencil.Stencil = 0;
-    initialLayout = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
-  }
-
-  ID3D12Resource* resource;
-  D3D12MA::Allocation* allocation;
-  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &textureDesc, initialLayout, pOptimizedClearValue, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
-
-  resource->SetName(StringToWstring(desc.label).c_str());
-
   auto tex = std::make_shared<Texture>(this, desc);
-  // TODO: use the same Create() pattern as Queue and QuerySet?
-  tex->Attach(resource, allocation);
+  tex->Create();
 
   return tex;
 }

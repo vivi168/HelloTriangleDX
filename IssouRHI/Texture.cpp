@@ -44,7 +44,7 @@ static uint32_t PlaneSlice(TextureAspect aspect)
   }
 }
 
-D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(const TextureDesc& desc)
+static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(const TextureDesc& desc)
 {
   switch (desc.dimension) {
     case TextureDimension::Texture1D:
@@ -77,6 +77,42 @@ D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(const TextureDesc& desc)
 }
 
 Texture::Texture(Device* device, const TextureDesc& desc) : m_Device(device), m_Desc(desc) {}
+
+void Texture::Create()
+{
+D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
+  if (m_Desc.usage & TextureUsage::CopyDst) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
+  } else {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+  }
+
+  D3D12_RESOURCE_DESC1 textureDesc = D3D12ResourceDesc(m_Desc);
+
+  D3D12_CLEAR_VALUE zero{};
+  zero.Format = textureDesc.Format;
+
+  // TODO: how to allow for another clear value / any value for .clearValue of ColorAttachment?
+  D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr;
+  if (textureDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
+    pOptimizedClearValue = &zero;
+  }
+
+  D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_COMMON;
+  if (textureDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) {
+    zero.DepthStencil.Depth = 1.0f;
+    zero.DepthStencil.Stencil = 0;
+    initialLayout = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
+  }
+
+  ID3D12Resource* resource;
+  D3D12MA::Allocation* allocation;
+  CHECK_HR(m_Device->GetAllocator()->CreateResource3(&allocDesc, &textureDesc, initialLayout, pOptimizedClearValue, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
+  m_Resource.Attach(resource);
+  m_Allocation = allocation;
+
+  m_Resource->SetName(StringToWstring(m_Desc.label).c_str());
+}
 
 Texture::~Texture()
 {
