@@ -587,14 +587,14 @@ public:
   Buffer(Device* device, const BufferDesc& desc);
   ~Buffer();
 
+  void Create();
+
   uint64_t Size() const { return m_Desc.size; }
 
 public:
   uint32_t DescriptorIndex(const BufferViewDesc& desc);
   // FIXME: sort methods below by correct "ownership"
 public:  // D3D12 impl specific
-  void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
-
   void Write(BufferRange range, const void* data);
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);

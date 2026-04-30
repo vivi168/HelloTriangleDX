@@ -22,10 +22,34 @@ Buffer::~Buffer()
   }
 }
 
-void Buffer::Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation)
+void Buffer::Create()
 {
-  m_Resource.Attach(other);
+  assert(!((m_Desc.usage & BufferUsage::MapRead) && (m_Desc.usage & BufferUsage::MapWrite)));
+
+  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
+  if (m_Desc.usage & BufferUsage::MapRead) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_READBACK;
+  } else if (m_Desc.usage & BufferUsage::MapWrite) {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
+  } else {
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+  }
+
+  auto bufferDesc = CD3DX12_RESOURCE_DESC1::Buffer(m_Desc.size);
+  if (m_Desc.usage & BufferUsage::Storage) {
+    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  }
+  if (m_Desc.usage & BufferUsage::RayTracingAccelerationStructure) {
+    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
+  }
+
+  ID3D12Resource* resource;
+  D3D12MA::Allocation* allocation;
+  CHECK_HR(m_Device->GetAllocator()->CreateResource3(&allocDesc, &bufferDesc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
+  m_Resource.Attach(resource);
   m_Allocation = allocation;
+
+  m_Resource->SetName(StringToWstring(m_Desc.label).c_str());
 }
 
 BufferRange Buffer::ClampBufferRange(BufferRange range)

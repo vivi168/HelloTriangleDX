@@ -441,33 +441,8 @@ std::shared_ptr<Texture> Device::CreateTexture(const TextureDesc& desc)
 
 std::shared_ptr<Buffer> Device::CreateBuffer(const BufferDesc& desc)
 {
-  assert(!((desc.usage & BufferUsage::MapRead) && (desc.usage & BufferUsage::MapWrite)));
-
-  D3D12MA::CALLOCATION_DESC allocDesc = D3D12MA::CALLOCATION_DESC{};
-  if (desc.usage & BufferUsage::MapRead) {
-    allocDesc.HeapType = D3D12_HEAP_TYPE_READBACK;
-  } else if (desc.usage & BufferUsage::MapWrite) {
-    allocDesc.HeapType = D3D12_HEAP_TYPE_GPU_UPLOAD;
-  } else {
-    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-  }
-
-  auto bufferDesc = CD3DX12_RESOURCE_DESC1::Buffer(desc.size);
-  if (desc.usage & BufferUsage::Storage) {
-    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-  }
-  if (desc.usage & BufferUsage::RayTracingAccelerationStructure) {
-    bufferDesc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
-  }
-
-  ID3D12Resource* resource;
-  D3D12MA::Allocation* allocation;
-  CHECK_HR(m_Allocator->CreateResource3(&allocDesc, &bufferDesc, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, &allocation, IID_PPV_ARGS(&resource)));
-  resource->SetName(StringToWstring(desc.label).c_str());
-
   auto buf = std::make_shared<Buffer>(this, desc);
-  // TODO: use the same Create() pattern as Queue and QuerySet?
-  buf->Attach(resource, allocation);
+  buf->Create();
 
   return buf;
 }
