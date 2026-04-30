@@ -533,10 +533,6 @@ static std::wstring g_AssetsPath;
 static IssouRHI::Device* g_Device;
 static IssouRHI::Surface* g_Surface;
 
-// swapchain used to switch between render targets
-// container for command lists
-static ID3D12CommandQueue* g_CommandQueue;
-
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
 // Resources
@@ -544,7 +540,6 @@ static std::shared_ptr<IssouRHI::Texture> g_DepthStencilBuffer;
 static std::shared_ptr<IssouRHI::QuerySet> g_TimestampQuerySet;
 
 // PSO
-static std::unordered_map<PSO, ComPtr<ID3D12PipelineState>> g_PipelineStateObjects;
 static std::shared_ptr<IssouRHI::RenderPipeline> g_RenderPipeline;
 static std::shared_ptr<IssouRHI::MeshPipeline> g_MeshPipeline;
 static std::shared_ptr<IssouRHI::RayTracingPipeline> g_RayTracingPipeline;
@@ -604,7 +599,6 @@ void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Su
 {
   g_Device = device.get();    // FIXME: TMP raw ptr!
   g_Surface = surface.get();  // FIXME: TMP raw ptr!
-  g_CommandQueue = device->GetQueue()->GetNativeQueue();
 
   InitFrameResources();
 }
@@ -870,8 +864,7 @@ static void Update(FrameContext* ctx, float time)
     UINT64 timestamps[Timestamp::Count];
     ctx->timestampReadBackBuffer->Read(IssouRHI::FullBufferRange, timestamps);
 
-    UINT64 frequency;
-    g_CommandQueue->GetTimestampFrequency(&frequency);
+    UINT64 frequency = g_Device->TimestampFrequencyHz();
 
     auto GetTime = [&frequency, &timestamps](size_t i) {
       UINT64 begin = timestamps[i];
@@ -1427,7 +1420,7 @@ static void InitFrameResources()
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
   initInfo.Device = g_Device->GetNativeDevice();
-  initInfo.CommandQueue = g_CommandQueue;
+  initInfo.CommandQueue = g_Device->GetQueue()->GetNativeQueue();
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
   initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
   initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;

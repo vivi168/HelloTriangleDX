@@ -176,6 +176,11 @@ Device::Device(const GPUSelection& gpuSelection)
     m_Queue->Create();
   }
 
+  // Misc
+  {
+    m_Queue->GetNativeQueue()->GetTimestampFrequency(&m_TimestampFrequencyHz);
+  }
+
   // Create descriptor heaps
   {
     m_CbvSrvUavDescriptorHeap.Create(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, NUM_DESCRIPTORS_PER_HEAP, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);

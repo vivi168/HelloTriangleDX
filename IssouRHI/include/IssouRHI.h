@@ -1017,6 +1017,7 @@ public:
   void FreeRtvDescriptor(DescriptorAllocation alloc);
   void FreeDsvDescriptor(DescriptorAllocation alloc);
 
+  uint64_t TimestampFrequencyHz() const { return m_TimestampFrequencyHz; }
 public:
   ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
   IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
@@ -1037,6 +1038,8 @@ private:
   DescriptorHeap m_CbvSrvUavDescriptorHeap;
   DescriptorHeap m_RtvDescriptorHeap;
   DescriptorHeap m_DsvDescriptorHeap;
+
+  uint64_t m_TimestampFrequencyHz = 1;
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
   Microsoft::WRL::ComPtr<ID3D12Device5> m_Device;
