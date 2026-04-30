@@ -1273,7 +1273,7 @@ public:
   ComputePassEncoder BeginComputePass(const ComputePassDesc& desc);
   RenderPassEncoder BeginRenderPass(const GraphicPassDesc& desc);
   MeshPassEncoder BeginMeshPass(const GraphicPassDesc& desc);
-  RayTracingPassEncoder BeginRayTracingPass(const GraphicPassDesc& desc);
+  RayTracingPassEncoder BeginRayTracingPass(const RayTracingPassDesc& desc);
 
   // TODO: make these uncallable if a pass has begun+not yet ended?
   void Barrier(const BarriersDesc& desc);
@@ -1384,6 +1384,28 @@ public:
   // DrawMesh();
   void DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer = nullptr, uint64_t countOffset = 0);
   void SetPipeline(MeshPipeline* pipeline);
+};
+
+// TODO: DRY somehow with compute pass ?
+struct RayTracingPassDesc {
+  std::string label;
+  std::optional<TimestampWrites> timestampWrites = std::nullopt;
+};
+
+class RayTracingPassEncoder : public EncoderBase
+{
+public:
+  RayTracingPassEncoder(const RayTracingPassDesc& desc, CommandBuffer* commandBuffer);
+  ~RayTracingPassEncoder();
+
+  void TraceRays(ShaderTable* shaderTable, uint32_t width, uint32_t height, uint32_t depth = 1);
+  // TODO: TraceRaysIndirect
+  void End();
+  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void SetPipeline(RayTracingPipeline* pipeline);
+private:
+  RayTracingPassDesc m_Desc;
+  bool m_Ended = false;
 };
 
 }  // namespace IssouRHI

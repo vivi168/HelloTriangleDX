@@ -135,6 +135,17 @@ void CommandEncoder::BeginGraphicPass(const GraphicPassDesc& desc)
   }
 }
 
+RayTracingPassEncoder CommandEncoder::BeginRayTracingPass(const RayTracingPassDesc& desc)
+{
+  m_CommandBuffer->SetComputeRootSignatureIfNeeded();
+
+  if (desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), desc.timestampWrites->querySet, desc.timestampWrites->beginningOfPassWriteIndex);
+  }
+
+  return RayTracingPassEncoder(desc, m_CommandBuffer);
+}
+
 static D3D12_BARRIER_SYNC D3D12BarrierSync(PipelineStage stage)
 {
   if (stage == PipelineStage::All) {
@@ -568,5 +579,47 @@ void MeshPassEncoder::DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirect
 void MeshPassEncoder::SetPipeline(MeshPipeline* pipeline)
 {
   CommandList()->SetPipelineState(pipeline->PipelineState());
+}
+
+RayTracingPassEncoder::RayTracingPassEncoder(const RayTracingPassDesc& desc, CommandBuffer* commandBuffer) : EncoderBase(commandBuffer), m_Desc(desc) {}
+
+RayTracingPassEncoder::~RayTracingPassEncoder()
+{
+  assert(m_Ended);
+}
+
+void RayTracingPassEncoder::TraceRays(ShaderTable* shaderTable, uint32_t width, uint32_t height, uint32_t depth)
+{
+  D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
+
+  dispatchDesc.RayGenerationShaderRecord = shaderTable->RayGenShaderRecord();
+  dispatchDesc.MissShaderTable = shaderTable->MissShaderTable();
+  dispatchDesc.HitGroupTable = shaderTable->HitGroupTable();
+  dispatchDesc.CallableShaderTable = shaderTable->CallableShaderTable();
+
+  dispatchDesc.Width = width;
+  dispatchDesc.Height = height;
+  dispatchDesc.Depth = depth;
+
+  CommandList()->DispatchRays(&dispatchDesc);
+}
+
+void RayTracingPassEncoder::End()
+{
+  if (m_Desc.timestampWrites.has_value()) {
+    D3D12WriteTimestamp(CommandList(), m_Desc.timestampWrites->querySet, m_Desc.timestampWrites->endOfPassWriteIndex);
+  }
+
+  m_Ended = true;
+}
+
+void RayTracingPassEncoder::PushConstants(uint32_t offset, uint32_t size, const void* data)
+{
+  CommandList()->SetComputeRoot32BitConstants(0, size, data, offset);
+}
+
+void RayTracingPassEncoder::SetPipeline(RayTracingPipeline* pipeline)
+{
+  CommandList()->SetPipelineState1(pipeline->StateObject());
 }
 }  // namespace IssouRHI

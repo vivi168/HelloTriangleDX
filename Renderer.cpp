@@ -1167,7 +1167,6 @@ void Render(float time)
   }
 
   // Ray trace shadows
-  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
   if (g_EnableRTShadows) {
     {
       std::array transitions{
@@ -1178,7 +1177,16 @@ void Render(float time)
       encoder.Barrier({.textures = transitions});
     }
 
-    encoder.CommandList()->SetPipelineState1(g_RayTracingPipeline->StateObject());
+    auto passEncoder = encoder.BeginRayTracingPass({
+        .label = "Shadow RT Pass",
+        .timestampWrites = IssouRHI::TimestampWrites{
+            .beginningOfPassWriteIndex = Timestamp::ShadowsBegin,
+            .endOfPassWriteIndex = Timestamp::ShadowsEnd,
+            .querySet = g_TimestampQuerySet.get(),
+        },
+    });
+
+    passEncoder.SetPipeline(g_RayTracingPipeline.get());
 
     std::array<uint32_t, 4> pc = {
         g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
@@ -1186,23 +1194,14 @@ void Render(float time)
         g_Scene.tlasBuffer->DescriptorIndex(),
         frameConstantsIndex,
     };
+    passEncoder.PushConstants(0, pc.size(), pc.data());
 
-    encoder.CommandList()->SetComputeRoot32BitConstants(0, pc.size(), pc.data(), 0);
-
-    {
-      D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
-      dispatchDesc.HitGroupTable = g_ShaderTable->HitGroupTable();
-      dispatchDesc.MissShaderTable = g_ShaderTable->MissShaderTable();
-      dispatchDesc.RayGenerationShaderRecord = g_ShaderTable->RayGenShaderRecord();
-
-      dispatchDesc.Width = g_Width;
-      dispatchDesc.Height = g_Height;
-      dispatchDesc.Depth = 1;
-
-      encoder.CommandList()->DispatchRays(&dispatchDesc);
-    }
+    passEncoder.TraceRays(g_ShaderTable.get(), g_Width, g_Height);
+    passEncoder.End();
+  } else {
+    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
+    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsEnd);
   }
-  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsEnd);
 
   // Record Full screen triangle pass - Compose final image commands
   {
