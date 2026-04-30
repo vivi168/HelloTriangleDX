@@ -4,22 +4,24 @@ using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
 {
-Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
+Surface::Surface(Device* device, void* handle) : m_Device(device), m_Handle(handle) {}
+
+Surface::~Surface()
+{
+  CloseHandle(m_FenceEvent);
+}
+
+void Surface::Create()
 {
   // Fence
   {
     ID3D12Fence* fence = nullptr;
-    CHECK_HR(device->GetNativeDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    CHECK_HR(m_Device->GetNativeDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
     m_Fence.Attach(fence);
 
     m_FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     assert(m_FenceEvent);
   }
-}
-
-Surface::~Surface()
-{
-  CloseHandle(m_FenceEvent);
 }
 
 void Surface::Configure(SurfaceConfiguration& config)
@@ -47,7 +49,7 @@ void Surface::CreateSwapChain(SurfaceConfiguration& config)
   swapChainDesc.BufferDesc = backBufferDesc;
   swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
   swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-  swapChainDesc.OutputWindow = m_Handle;
+  swapChainDesc.OutputWindow = reinterpret_cast<HWND>(m_Handle);
 
   swapChainDesc.SampleDesc.Count = 1;  // our multi-sampling description
   swapChainDesc.SampleDesc.Quality = 0;

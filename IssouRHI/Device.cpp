@@ -107,7 +107,32 @@ static void PrintStatsString(D3D12MA::Allocator* allocator)
   allocator->FreeStatsString(statsString);
 }
 
+std::unique_ptr<Device> Device::CreateDevice(Backend backend, const GPUSelection& gpuSelection)
+{
+  switch (backend) {
+    case Backend::D3D12:
+      return std::make_unique<Device>(gpuSelection);
+    default:
+      return nullptr;
+  }
+}
+
 Device::Device(const GPUSelection& gpuSelection)
+{
+  Create(gpuSelection);
+}
+
+Device::~Device()
+{
+  PrintStatsString(m_Allocator.Get());
+  m_Allocator.Reset();
+
+  if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
+    assert(g_CpuAllocationCount.load() == 0);
+  }
+}
+
+void Device::Create(const GPUSelection& gpuSelection)
 {
   m_Adapter = SelectAdapter(gpuSelection);
 
@@ -271,16 +296,6 @@ Device::Device(const GPUSelection& gpuSelection)
   }
 }
 
-Device::~Device()
-{
-  PrintStatsString(m_Allocator.Get());
-  m_Allocator.Reset();
-
-  if (ENABLE_CPU_ALLOCATION_CALLBACKS) {
-    assert(g_CpuAllocationCount.load() == 0);
-  }
-}
-
 static const wchar_t* VendorIDToStr(uint32_t vendorID)
 {
   constexpr uint32_t VENDOR_ID_AMD = 0x1002;
@@ -398,6 +413,14 @@ void Device::PrintAdapterInformation()
     wprintf(L"    CacheCoherentUMA: %u\n", architecture1.CacheCoherentUMA ? 1 : 0);
     wprintf(L"    IsolatedMMU: %u\n", architecture1.IsolatedMMU ? 1 : 0);
   }
+}
+
+std::shared_ptr<Surface> Device::CreateSurface(void* handle)
+{
+  auto surf = std::make_shared<Surface>(this, handle);
+  surf->Create();
+
+  return surf;
 }
 
 std::shared_ptr<QuerySet> Device::CreateQuerySet(const QuerySetDesc& desc)

@@ -18,7 +18,7 @@ StepTimer g_Timer;
 
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<IssouRHI::Device> device)
+int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, IssouRHI::Device* device)
 {
   WNDCLASSEX windowClass;
   ZeroMemory(&windowClass, sizeof(windowClass));
@@ -53,19 +53,10 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::shared_ptr<Iss
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-  ImGui_ImplWin32_Init(Win32Application::GetHwnd());
-
-  auto surface = std::make_shared<IssouRHI::Surface>(device.get(), g_Hwnd);
-  IssouRHI::SurfaceConfiguration config{
-    .format = IssouRHI::TextureFormat::RGBA8Unorm,
-    .width = WINDOW_WIDTH,
-    .height = WINDOW_HEIGHT,
-    .bufferCount = Renderer::FRAME_BUFFER_COUNT,
-  };
-  surface->Configure(config);
+  ImGui_ImplWin32_Init(g_Hwnd);
 
   Renderer::InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
-  Renderer::Init(device, surface);
+  Renderer::Init(device);
 
   ShowWindow(g_Hwnd, nCmdShow);
 

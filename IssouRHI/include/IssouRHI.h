@@ -1112,17 +1112,30 @@ private:
 };
 
 class Queue;
+struct SurfaceConfiguration;
+class Surface;
+
+enum class Backend {
+    D3D12,
+    Metal,
+    Vulkan,
+};
 
 class Device
 {
 public:
-  Device(const GPUSelection& gpuSelection);
-  ~Device();
+  static std::unique_ptr<Device> CreateDevice(Backend backend, const GPUSelection& gpuSelection);
 
-  void PrintAdapterInformation();
+  Device(const GPUSelection& gpuSelection);
+  virtual ~Device();
+
+  virtual void Create(const GPUSelection& gpuSelection);
+
+  virtual void PrintAdapterInformation();
 
   Queue* GetQueue() const { return m_Queue.get(); }
 
+  std::shared_ptr<Surface> CreateSurface(void* handle);
   std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc& desc);
   std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
@@ -1134,6 +1147,9 @@ public:
   std::shared_ptr<RayTracingPipeline> CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc);
   std::shared_ptr<ShaderTable> CreateShaderTable(const ShaderTableDesc& desc);
 
+  uint64_t TimestampFrequencyHz() const { return m_TimestampFrequencyHz; }
+
+public:
   DescriptorAllocation AllocCbvSrvUavDescriptor();
   DescriptorAllocation AllocRtvDescriptor();
   DescriptorAllocation AllocDsvDescriptor();
@@ -1141,8 +1157,6 @@ public:
   void FreeSrvUavDescriptor(DescriptorAllocation alloc);
   void FreeRtvDescriptor(DescriptorAllocation alloc);
   void FreeDsvDescriptor(DescriptorAllocation alloc);
-
-  uint64_t TimestampFrequencyHz() const { return m_TimestampFrequencyHz; }
 
 public:
   ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
@@ -1169,12 +1183,12 @@ public:
 
 private:
   std::unique_ptr<Queue> m_Queue;
+  uint64_t m_TimestampFrequencyHz = 1;
 
+private:
   DescriptorHeap m_CbvSrvUavDescriptorHeap;
   DescriptorHeap m_RtvDescriptorHeap;
   DescriptorHeap m_DsvDescriptorHeap;
-
-  uint64_t m_TimestampFrequencyHz = 1;
 
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
@@ -1202,8 +1216,10 @@ struct SurfaceConfiguration {
 class Surface
 {
 public:
-  Surface(Device* device, HWND hwnd);
+  Surface(Device* device, void* handle);
   ~Surface();
+
+  void Create();
 
   void Configure(SurfaceConfiguration& config);
   std::shared_ptr<Texture> GetCurrentTexture();
@@ -1216,6 +1232,8 @@ private:
   void CreateTextures(SurfaceConfiguration& config);
 
   Device* m_Device;
+  void* m_Handle;
+
   std::vector<std::shared_ptr<Texture>> m_Textures;
 
   uint32_t m_FrameIndex;
@@ -1223,7 +1241,6 @@ private:
   bool m_Configured = false;
 
 private:
-  HWND m_Handle;
   Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
 
   Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;

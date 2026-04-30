@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include "Win32Application.h"
+
 #include "Renderer.h"
 #include "RendererHelper.h"
 
@@ -528,7 +530,7 @@ static std::wstring g_AssetsPath;
 
 // Pipeline objects
 static IssouRHI::Device* g_Device;
-static IssouRHI::Surface* g_Surface;
+static std::shared_ptr<IssouRHI::Surface> g_Surface;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 
@@ -590,10 +592,18 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_Title = name;
 }
 
-void Init(std::shared_ptr<IssouRHI::Device> device, std::shared_ptr<IssouRHI::Surface> surface)
+void Init(IssouRHI::Device* device)
 {
-  g_Device = device.get();    // FIXME: TMP raw ptr!
-  g_Surface = surface.get();  // FIXME: TMP raw ptr!
+  g_Device = device;
+
+  g_Surface = g_Device->CreateSurface(Win32Application::GetHwnd());
+  IssouRHI::SurfaceConfiguration config{
+    .format = IssouRHI::TextureFormat::RGBA8Unorm,
+    .width = g_Width,
+    .height = g_Height,
+    .bufferCount = FRAME_BUFFER_COUNT,
+  };
+  g_Surface->Configure(config);
 
   InitFrameResources();
 }
@@ -813,8 +823,7 @@ static void Update(FrameContext* ctx, float time)
     }
 
     if (g_Scene.numBoneMatrices > 0) {
-      g_MeshStore.UpdateBoneMatrices(tmpBoneMatrices.data(), g_Scene.numBoneMatrices * sizeof(XMFLOAT4X4), 0,
-                                     g_Surface->CurrentFrameIndex());
+      g_MeshStore.UpdateBoneMatrices(tmpBoneMatrices.data(), g_Scene.numBoneMatrices * sizeof(XMFLOAT4X4), 0, g_Surface->CurrentFrameIndex());
     }
     g_MeshStore.UpdateInstances(tmpInstances.data(), g_Scene.numMeshInstances * sizeof(MeshInstance::data), 0, g_Surface->CurrentFrameIndex());
   }
@@ -1326,6 +1335,8 @@ void Cleanup()
   for (size_t i = FRAME_BUFFER_COUNT; i--;) {
     g_FrameContext[i].Reset();
   }
+
+  g_Surface.reset();
 }
 
 UINT GetWidth() { return g_Width; }
