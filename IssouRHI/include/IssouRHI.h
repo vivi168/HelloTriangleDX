@@ -558,7 +558,7 @@ public: // D3D12 impl specific
   void Clear(BufferRange range);
   void Read(BufferRange range, void* outData);
 
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
+  uint64_t GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
 
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
 
@@ -618,7 +618,7 @@ struct BufferWithOffset {
 
   explicit operator bool() const { return buffer != nullptr; }
 
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const
+  uint64_t GpuAddress() const
   {
     return buffer ? buffer->GpuAddress() + offset : 0;
   }
@@ -724,8 +724,8 @@ public:
   void Create(const AccelerationStructureDesc& desc);
   uint32_t DescriptorIndex() const { return m_Srv.index; }
 public:
-  D3D12_GPU_VIRTUAL_ADDRESS GpuAddress() const { return m_Buffer->GpuAddress(); }
-  D3D12_GPU_VIRTUAL_ADDRESS ScratchGpuAddress() const { return m_ScratchBuffer->GpuAddress(); }
+  uint64_t GpuAddress() const { return m_Buffer->GpuAddress(); }
+  uint64_t ScratchGpuAddress() const { return m_ScratchBuffer->GpuAddress(); }
 
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS Flags() const { return m_Flags; }
 private:
@@ -1239,6 +1239,8 @@ protected:
   CommandBuffer* m_CommandBuffer;
 };
 
+// TODO: class PassEncoderBase : public EncoderBase => to manage begin/end, timestamp write
+
 struct GlobalBarrierDesc {
   StageAccess from;
   StageAccess to;
@@ -1254,7 +1256,7 @@ struct TextureBarrierDesc {
   Texture* resource;
   StageAccessLayout from;
   StageAccessLayout to;
-  // SubresourceRange range;
+  // TODO: SubresourceRange range;
 };
 
 struct BarriersDesc {
@@ -1283,7 +1285,7 @@ public:
   void ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset);
   void WriteTimestamp(QuerySet* querySet, uint32_t index);
 
-  // BuildOpacityMicroMaps
+  // TODO: BuildOpacityMicroMaps
 
   // TODO: assert that every pass has ended
   CommandBuffer* Finish();
@@ -1309,7 +1311,7 @@ public:
   void PushConstants(uint32_t offset, uint32_t size, const void *data);
   void SetPipeline(ComputePipeline* pipeline);
 private:
-  ComputePassDesc m_Desc;
+  ComputePassDesc m_Desc; // FIXME: remove this and store TimestampWrites instead
   bool m_Ended = false;
 };
 
@@ -1358,7 +1360,7 @@ public:
   void End();
   void PushConstants(uint32_t offset, uint32_t size, const void *data);
 protected:
-  GraphicPassDesc m_Desc;
+  GraphicPassDesc m_Desc; // FIXME: remove this and store TimestampWrites instead.
   bool m_Ended = false;
 };
 
@@ -1369,9 +1371,9 @@ public:
   ~RenderPassEncoder() override;
 
   void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
-  // DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
-  // DrawIndirect(indirectBuffer, indirectOffset)
-  // DrawIndexedIndirect(indirectBuffer, indirectOffset)
+  // TODO: DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
+  // TODO: DrawIndirect(indirectBuffer, indirectOffset)
+  // TODO: DrawIndexedIndirect(indirectBuffer, indirectOffset)
   void SetPipeline(RenderPipeline* pipeline);
 };
 
@@ -1381,7 +1383,7 @@ public:
   MeshPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
   ~MeshPassEncoder() override;
 
-  // DrawMesh();
+  // TODO: DrawMesh();
   void DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer = nullptr, uint64_t countOffset = 0);
   void SetPipeline(MeshPipeline* pipeline);
 };

@@ -2,6 +2,8 @@
 #include "IssouRHI.h"
 #include "Win32Application.h"
 
+#include <shellapi.h>
+
 static void PrintHelp()
 {
   wprintf(

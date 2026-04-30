@@ -57,7 +57,7 @@ struct MeshInstance {
   UINT instanceBufferOffset;
   UINT indexBufferOffset;
   UINT rtInstanceOffset;
-  D3D12_GPU_VIRTUAL_ADDRESS blasBufferAddress = 0;
+  UINT64 blasBufferAddress = 0;
 
   std::weak_ptr<SkinnedMeshInstance> skinnedMeshInstance;
   std::shared_ptr<Mesh3D> mesh = nullptr;
