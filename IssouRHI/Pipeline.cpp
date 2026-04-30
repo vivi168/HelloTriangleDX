@@ -443,9 +443,9 @@ void RayTracingPipeline::Create(const RayTracingPipelineDesc& desc)
 
   m_StateObject->SetName(StringToWstring(desc.label).c_str());
 
-// #ifdef _DEBUG
-//     PrintStateObjectDesc(raytracingPipeline);
-// #endif
+  // #ifdef _DEBUG
+  //     PrintStateObjectDesc(raytracingPipeline);
+  // #endif
 
   CHECK_HR(m_StateObject.As(&m_StateObjectProperties));
 }
@@ -455,5 +455,4 @@ void* RayTracingPipeline::ShaderIdentifier(std::string entryPoint) const
   // TODO: cache result?
   return m_StateObjectProperties->GetShaderIdentifier(StringToWstring(entryPoint).c_str());
 }
-
 }  // namespace IssouRHI

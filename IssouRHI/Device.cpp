@@ -558,5 +558,4 @@ void Device::FreeDsvDescriptor(DescriptorAllocation alloc)
 {
   m_DsvDescriptorHeap.Free(alloc);
 }
-
 }  // namespace IssouRHI

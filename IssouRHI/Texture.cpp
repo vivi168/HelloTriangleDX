@@ -2,7 +2,6 @@
 
 namespace IssouRHI
 {
-
 static bool IsDepthStencil(TextureFormat format)
 {
   switch (format) {
@@ -50,29 +49,29 @@ D3D12_RESOURCE_DESC1 Texture::D3D12ResourceDesc(const TextureDesc& desc)
   switch (desc.dimension) {
     case TextureDimension::Texture1D:
       return CD3DX12_RESOURCE_DESC1::Tex1D(
-        DXGIFormat(desc.format),
-        static_cast<UINT64>(desc.size.width),
-        static_cast<UINT16>(desc.size.height),
-        static_cast<UINT16>(desc.mipLevelCount),
-        D3D12ResourceFlags(desc.usage, desc.format));
+          DXGIFormat(desc.format),
+          static_cast<UINT64>(desc.size.width),
+          static_cast<UINT16>(desc.size.height),
+          static_cast<UINT16>(desc.mipLevelCount),
+          D3D12ResourceFlags(desc.usage, desc.format));
     case TextureDimension::Texture2D:
       return CD3DX12_RESOURCE_DESC1::Tex2D(
-        DXGIFormat(desc.format),
-        static_cast<UINT64>(desc.size.width),
-        static_cast<UINT16>(desc.size.height),
-        static_cast<UINT16>(desc.size.depth),
-        static_cast<UINT16>(desc.mipLevelCount),
-        desc.sampleCount,
-        0,
-        D3D12ResourceFlags(desc.usage, desc.format));
+          DXGIFormat(desc.format),
+          static_cast<UINT64>(desc.size.width),
+          static_cast<UINT16>(desc.size.height),
+          static_cast<UINT16>(desc.size.depth),
+          static_cast<UINT16>(desc.mipLevelCount),
+          desc.sampleCount,
+          0,
+          D3D12ResourceFlags(desc.usage, desc.format));
     case TextureDimension::Texture3D:
       return CD3DX12_RESOURCE_DESC1::Tex3D(
-        DXGIFormat(desc.format),
-        static_cast<UINT64>(desc.size.width),
-        static_cast<UINT16>(desc.size.height),
-        static_cast<UINT16>(desc.size.depth),
-        static_cast<UINT16>(desc.mipLevelCount),
-        D3D12ResourceFlags(desc.usage, desc.format));
+          DXGIFormat(desc.format),
+          static_cast<UINT64>(desc.size.width),
+          static_cast<UINT16>(desc.size.height),
+          static_cast<UINT16>(desc.size.depth),
+          static_cast<UINT16>(desc.mipLevelCount),
+          D3D12ResourceFlags(desc.usage, desc.format));
   }
   return D3D12_RESOURCE_DESC1{};
 }
@@ -105,10 +104,10 @@ std::shared_ptr<TextureView> Texture::CreateView()
   desc.format = Format();
   desc.dimension = ViewDimension(m_Desc.dimension);
   desc.range = {
-    .baseMipLevel = 0,
-    .mipLevelCount = m_Desc.mipLevelCount,
-    .baseArrayLayer = 0,
-    .arrayLayerCount = m_Desc.size.depth,
+      .baseMipLevel = 0,
+      .mipLevelCount = m_Desc.mipLevelCount,
+      .baseArrayLayer = 0,
+      .arrayLayerCount = m_Desc.size.depth,
   };
 
   return CreateView(desc);
@@ -190,7 +189,6 @@ void Texture::WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresour
 
   m_Resource->Unmap(0, nullptr);
 }
-
 
 D3D12_SHADER_RESOURCE_VIEW_DESC Texture::SrvDescriptor(const TextureViewDesc& desc) const
 {
@@ -355,25 +353,24 @@ TextureView::~TextureView()
 uint32_t TextureView::DescriptorIndex(TextureAccess access) const
 {
   switch (access) {
-  case TextureAccess::Read:
-    return m_Srv.index;
-  case TextureAccess::ReadWrite:
-    return m_Uav.index;
-  default:
-    std::unreachable();
+    case TextureAccess::Read:
+      return m_Srv.index;
+    case TextureAccess::ReadWrite:
+      return m_Uav.index;
+    default:
+      std::unreachable();
   }
 }
 
 uint64_t TextureView::DescriptorHandle(TextureAccess access) const
 {
   switch (access) {
-  case TextureAccess::Read:
-    return m_Srv.gpuHandle.ptr;
-  case TextureAccess::ReadWrite:
-    return m_Uav.gpuHandle.ptr;
-  default:
-    std::unreachable();
+    case TextureAccess::Read:
+      return m_Srv.gpuHandle.ptr;
+    case TextureAccess::ReadWrite:
+      return m_Uav.gpuHandle.ptr;
+    default:
+      std::unreachable();
   }
 }
-
 }  // namespace IssouRHI

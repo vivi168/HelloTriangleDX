@@ -5,13 +5,10 @@
 
 #include "shaders/Shared.h"
 
-#include "Win32Application.h"
-
 #include "Camera.h"
 #include "Mesh.h"
 
 using namespace DirectX;
-using Microsoft::WRL::ComPtr;
 
 namespace Renderer
 {

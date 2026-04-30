@@ -5,7 +5,6 @@
 // I need to sleep
 namespace IssouRHI
 {
-
 Queue::Queue(Device* device) : m_Device(device)
 {
   ID3D12Fence* fence = nullptr;
@@ -172,5 +171,4 @@ void CommandBuffer::SetGraphicsRootSignatureIfNeeded()
   m_CommandList->SetGraphicsRootSignature(m_Device->RootSignature());
   m_GraphicRootSignatureSet = true;
 }
-
 }  // namespace IssouRHI

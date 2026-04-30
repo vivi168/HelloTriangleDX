@@ -95,18 +95,17 @@ void Buffer::Unmap()
   m_Resource->Unmap(0, nullptr);
 }
 
-
 uint32_t Buffer::DescriptorIndex(const BufferViewDesc& desc)
 {
   switch (desc.access) {
-  case BufferAccess::Constant:
-    return CbvDescriptorAlloc(desc.range).index;
-  case BufferAccess::Read:
-    return SrvDescriptorAlloc(desc.range, desc.elementStride).index;
-  case BufferAccess::ReadWrite:
-    return UavDescriptorAlloc(desc.range, desc.elementStride, desc.counter, desc.counterOffset).index;
-  default:
-    std::unreachable();
+    case BufferAccess::Constant:
+      return CbvDescriptorAlloc(desc.range).index;
+    case BufferAccess::Read:
+      return SrvDescriptorAlloc(desc.range, desc.elementStride).index;
+    case BufferAccess::ReadWrite:
+      return UavDescriptorAlloc(desc.range, desc.elementStride, desc.counter, desc.counterOffset).index;
+    default:
+      std::unreachable();
   }
 }
 
@@ -124,8 +123,8 @@ DescriptorAllocation Buffer::CbvDescriptorAlloc(BufferRange range)
   alloc = m_Device->AllocCbvSrvUavDescriptor();
 
   D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc{
-    .BufferLocation = GpuAddress() + range.offset,
-    .SizeInBytes = static_cast<UINT>(range.size),
+      .BufferLocation = GpuAddress() + range.offset,
+      .SizeInBytes = static_cast<UINT>(range.size),
   };
   m_Device->GetNativeDevice()->CreateConstantBufferView(&cbvDesc, alloc.cpuHandle);
 

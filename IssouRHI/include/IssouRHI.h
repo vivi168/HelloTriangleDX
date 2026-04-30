@@ -17,9 +17,9 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <vector>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include <cassert>
 #include <cstdint>
@@ -31,13 +31,21 @@
 #endif
 
 #define ISSOURHI_BIT(b) (1 << (b))
-#define ISSOURHI_ENUM_CLASS_OP(e) \
-  static_assert(sizeof(e) <= sizeof(uint32_t)); \
-  constexpr e operator ~ (e a) { return (e)(~(uint32_t)a); } \
-  constexpr uint32_t operator & (e a, e b) { return (uint32_t)a & (uint32_t)b; } \
-  constexpr e operator | (e a, e b) { return (e)((uint32_t)a | (uint32_t)b); } \
-  constexpr e& operator &= (e& a, e b) { a = (e)(a & b); return a; } \
-  constexpr e& operator |= (e& a, e b) { a = (e)(a | b); return a; }
+#define ISSOURHI_ENUM_CLASS_OP(e)                                              \
+  static_assert(sizeof(e) <= sizeof(uint32_t));                                \
+  constexpr e operator~(e a) { return (e)(~(uint32_t)a); }                     \
+  constexpr uint32_t operator&(e a, e b) { return (uint32_t)a & (uint32_t)b; } \
+  constexpr e operator|(e a, e b) { return (e)((uint32_t)a | (uint32_t)b); }   \
+  constexpr e& operator&=(e& a, e b)                                           \
+  {                                                                            \
+    a = (e)(a & b);                                                            \
+    return a;                                                                  \
+  }                                                                            \
+  constexpr e& operator|=(e& a, e b)                                           \
+  {                                                                            \
+    a = (e)(a | b);                                                            \
+    return a;                                                                  \
+  }
 
 // FIXME: duplicated for now with stdafx.h
 #define STRINGIZE(x) STRINGIZE2(x)
@@ -67,8 +75,8 @@ inline bool IsPowerOfTwo(size_t v)
 
 inline size_t AlignUpPowerOfTwo(size_t size, size_t align)
 {
-    assert(IsPowerOfTwo(align));
-    return (size + align - 1) & ~(align - 1);
+  assert(IsPowerOfTwo(align));
+  return (size + align - 1) & ~(align - 1);
 }
 
 // TODO: D3D12 Utils
@@ -93,6 +101,7 @@ public:
 
   // FIXME: TMP
   ID3D12DescriptorHeap* Get() const { return m_Heap.Get(); }
+
 private:
   Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_Heap;
 
@@ -125,13 +134,18 @@ public:
   ~QuerySet();
 
   void Create();
+
   QueryType Type() const { return m_Desc.type; }
+
   uint32_t Count() const { return m_Desc.count; }
+
 public:
   ID3D12QueryHeap* QueryHeap() const { return m_QueryHeap.Get(); }
+
 private:
   Device* m_Device;
   QuerySetDesc m_Desc;
+
 private:
   Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_QueryHeap;
 };
@@ -175,7 +189,7 @@ enum class PipelineStage : uint32_t {
   MeshShaders = TaskShader | MeshShader,
   RayTracingShaders = RaygenShader | MissShader | IntersectionShader | ClosestHitShader | AnyHitShader | CallableShader,
 };
-ISSOURHI_ENUM_CLASS_OP(PipelineStage);
+ISSOURHI_ENUM_CLASS_OP(PipelineStage)
 
 enum class Access : uint32_t {
   None = 0,
@@ -211,7 +225,7 @@ enum class Access : uint32_t {
   // Clear
   ClearStorage = ISSOURHI_BIT(22),
 };
-ISSOURHI_ENUM_CLASS_OP(Access);
+ISSOURHI_ENUM_CLASS_OP(Access)
 
 enum class TextureLayout {
   Undefined,
@@ -298,26 +312,26 @@ enum class TextureFormat : uint32_t {
 inline DXGI_FORMAT DXGIFormat(TextureFormat format)
 {
   switch (format) {
-  case TextureFormat::Undefined:
-    return DXGI_FORMAT_UNKNOWN;
-  case TextureFormat::BC5Unorm:
-    return DXGI_FORMAT_BC5_UNORM;
-  case TextureFormat::BC7Unorm:
-    return DXGI_FORMAT_BC7_UNORM;
-  case TextureFormat::Depth32Float:
-    return DXGI_FORMAT_D32_FLOAT;
-  case TextureFormat::R8Unorm:
-    return DXGI_FORMAT_R8_UNORM;
-  case TextureFormat::RG8Unorm:
-    return DXGI_FORMAT_R8G8_UNORM;
-  case TextureFormat::R32Uint:
-    return DXGI_FORMAT_R32_UINT;
-  case TextureFormat::RGBA8Unorm:
-    return DXGI_FORMAT_R8G8B8A8_UNORM;
-  case TextureFormat::RGB10A2Unorm:
-    return DXGI_FORMAT_R10G10B10A2_UNORM;
-  case TextureFormat::RGBA32Float:
-    return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    case TextureFormat::Undefined:
+      return DXGI_FORMAT_UNKNOWN;
+    case TextureFormat::BC5Unorm:
+      return DXGI_FORMAT_BC5_UNORM;
+    case TextureFormat::BC7Unorm:
+      return DXGI_FORMAT_BC7_UNORM;
+    case TextureFormat::Depth32Float:
+      return DXGI_FORMAT_D32_FLOAT;
+    case TextureFormat::R8Unorm:
+      return DXGI_FORMAT_R8_UNORM;
+    case TextureFormat::RG8Unorm:
+      return DXGI_FORMAT_R8G8_UNORM;
+    case TextureFormat::R32Uint:
+      return DXGI_FORMAT_R32_UINT;
+    case TextureFormat::RGBA8Unorm:
+      return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case TextureFormat::RGB10A2Unorm:
+      return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case TextureFormat::RGBA32Float:
+      return DXGI_FORMAT_R32G32B32A32_FLOAT;
   }
 }
 
@@ -338,7 +352,11 @@ inline DXGI_FORMAT DXGIFormat(VertexFormat format)
   }
 }
 
-enum class IndexFormat : uint32_t { Undefined, Uint16, Uint32 };
+enum class IndexFormat : uint32_t {
+  Undefined,
+  Uint16,
+  Uint32,
+};
 
 inline DXGI_FORMAT DXGIFormat(IndexFormat format)
 {
@@ -359,7 +377,7 @@ struct Extent3D {
   uint32_t height = 1;
   uint32_t depth = 1;
 
-  bool operator == (const Extent3D& other) const
+  bool operator==(const Extent3D& other) const
   {
     return width == other.width && height == other.height && depth == other.depth;
   }
@@ -386,12 +404,12 @@ struct SubresourceRange {
   uint32_t baseArrayLayer = 0;
   uint32_t arrayLayerCount = 1;
 
-  bool operator == (const SubresourceRange& other) const
+  bool operator==(const SubresourceRange& other) const
   {
     return baseMipLevel == other.baseMipLevel &&
-        mipLevelCount == other.mipLevelCount &&
-        baseArrayLayer == other.baseArrayLayer &&
-        arrayLayerCount == other.arrayLayerCount;
+           mipLevelCount == other.mipLevelCount &&
+           baseArrayLayer == other.baseArrayLayer &&
+           arrayLayerCount == other.arrayLayerCount;
   }
 };
 
@@ -401,16 +419,16 @@ struct TextureViewDesc {
   TextureAspect aspect = TextureAspect::All;
   SubresourceRange range;
 
-  bool operator == (const TextureViewDesc& other) const
+  bool operator==(const TextureViewDesc& other) const
   {
     return format == other.format &&
-        dimension == other.dimension &&
-        aspect == other.aspect &&
-        range == other.range;
+           dimension == other.dimension &&
+           aspect == other.aspect &&
+           range == other.range;
   }
 
   struct Hasher {
-    size_t operator () (const TextureViewDesc& desc) const
+    size_t operator()(const TextureViewDesc& desc) const
     {
       size_t hash = 0;
 
@@ -433,7 +451,8 @@ struct TextureViewDesc {
 // Base <- Interface (public interface impl) <- Impl ( <- API specific impl)
 class TextureView;
 
-class Texture {
+class Texture
+{
 public:
   static D3D12_RESOURCE_DESC1 D3D12ResourceDesc(const TextureDesc& desc);
 
@@ -445,11 +464,16 @@ public:
   std::shared_ptr<TextureView> CreateView(const TextureViewDesc& desc);
 
   Device* GetDevice() const { return m_Device; }
+
   TextureUsage Usage() const { return m_Desc.usage; }
+
   TextureFormat Format() const { return m_Desc.format; }
+
   Extent3D Size() const { return m_Desc.size; };
+
   Extent3D SizeAtMipLevel(uint32_t level) const;
-public: // D3D12 impl specific
+
+public:  // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
   void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
 
@@ -460,6 +484,7 @@ public: // D3D12 impl specific
   D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(const TextureViewDesc& desc) const;
 
   ID3D12Resource* Resource() const { return m_Resource.Get(); };
+
 private:
   bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
 
@@ -467,14 +492,19 @@ private:
 
   Device* m_Device;
   TextureDesc m_Desc;
+
 private:  // D3D12 impl specific
   Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
   D3D12MA::Allocation* m_Allocation = nullptr;
 };
 
-enum class TextureAccess { Read, ReadWrite };
+enum class TextureAccess {
+  Read,
+  ReadWrite,
+};
 
-class TextureView {
+class TextureView
+{
 public:
   TextureView(Texture* tex, const TextureViewDesc& desc);
   ~TextureView();
@@ -483,16 +513,20 @@ public:
   uint64_t DescriptorHandle(TextureAccess access) const;
 
   Extent3D Size() const { return m_Texture->SizeAtMipLevel(m_Desc.range.baseMipLevel); }
-public: // D3D12 impl specific
+
+public:  // D3D12 impl specific
   // Internal use
   DescriptorAllocation SrvDescriptorAlloc() const { return m_Srv; }
+
   DescriptorAllocation UavDescriptorAlloc() const { return m_Uav; }
+
   // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
   DescriptorAllocation RtvDescriptorAlloc() const { return m_Rtv; }
+
   DescriptorAllocation DsvDescriptorAlloc() const { return m_Dsv; }
 
 private:
-  Texture* m_Texture; // should it be owning? weak ref?
+  Texture* m_Texture;  // should it be owning? weak ref?
   TextureViewDesc m_Desc;
   DescriptorAllocation m_Srv;
   DescriptorAllocation m_Uav;
@@ -522,6 +556,7 @@ struct BufferRange {
 
   bool operator==(const BufferRange& other) const { return offset == other.offset && size == other.size; }
 };
+
 inline constexpr BufferRange FullBufferRange = {0, std::numeric_limits<uint64_t>::max()};
 
 struct BufferDesc {
@@ -530,7 +565,11 @@ struct BufferDesc {
   BufferUsage usage;
 };
 
-enum class BufferAccess { Constant, Read, ReadWrite };
+enum class BufferAccess {
+  Constant,
+  Read,
+  ReadWrite,
+};
 
 class Buffer;
 
@@ -542,16 +581,18 @@ struct BufferViewDesc {
   Buffer* counter = nullptr;
 };
 
-class Buffer {
+class Buffer
+{
 public:
   Buffer(Device* device, const BufferDesc& desc);
   ~Buffer();
 
   uint64_t Size() const { return m_Desc.size; }
+
 public:
   uint32_t DescriptorIndex(const BufferViewDesc& desc);
   // FIXME: sort methods below by correct "ownership"
-public: // D3D12 impl specific
+public:  // D3D12 impl specific
   void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation);
 
   void Write(BufferRange range, const void* data);
@@ -571,7 +612,8 @@ private:
 
   Device* m_Device;
   BufferDesc m_Desc;
-private: // D3D12 impl specific
+
+private:  // D3D12 impl specific
   void Map();
   void Unmap();
 
@@ -652,7 +694,7 @@ enum class BottomLevelGeometryFlags : uint32_t {
 ISSOURHI_ENUM_CLASS_OP(BottomLevelGeometryFlags)
 
 struct BottomLevelTrianglesDesc {
-  BufferWithOffset transformMatrices{}; // TransformMatrix
+  BufferWithOffset transformMatrices{};  // TransformMatrix
 
   BufferWithOffset vertices;
   uint64_t vertexStride;
@@ -676,7 +718,7 @@ struct BottomLevelAABB {
 };
 
 struct BottomLevelAABBsDesc {
-  BufferWithOffset aabbs; // BottomLevelAABB
+  BufferWithOffset aabbs;  // BottomLevelAABB
   uint64_t stride;
   uint64_t count;
 };
@@ -722,18 +764,23 @@ public:
   ~AccelerationStructure();
 
   void Create(const AccelerationStructureDesc& desc);
+
   uint32_t DescriptorIndex() const { return m_Srv.index; }
+
 public:
   uint64_t GpuAddress() const { return m_Buffer->GpuAddress(); }
+
   uint64_t ScratchGpuAddress() const { return m_ScratchBuffer->GpuAddress(); }
 
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS Flags() const { return m_Flags; }
+
 private:
   Device* m_Device;
   std::shared_ptr<Buffer> m_Buffer;
   std::shared_ptr<Buffer> m_ScratchBuffer;
 
   DescriptorAllocation m_Srv;
+
 private:
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS m_Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO m_PrebuildInfo{};
@@ -769,6 +816,7 @@ public:
 
 public:  // D3D12 impl specific
   ID3D12PipelineState* PipelineState() const { return m_Pso.Get(); }
+
 protected:
   Device* m_Device;
 
@@ -799,7 +847,13 @@ enum ColorWriteFlags : uint8_t {
 };
 ISSOURHI_ENUM_CLASS_OP(ColorWriteFlags)
 
-enum class BlendOperation { Add, Subtract, ReverseSubtract, Min, Max };
+enum class BlendOperation {
+  Add,
+  Subtract,
+  ReverseSubtract,
+  Min,
+  Max,
+};
 
 enum class BlendFactor {
   Zero,
@@ -858,7 +912,7 @@ enum class StencilOperation {
   DecrementClamp,
   IncrementWrap,
   DecrementWrap,
-} ;
+};
 
 struct StencilFaceState {
   CompareFunction compare = CompareFunction::Always;
@@ -898,9 +952,16 @@ enum class PrimitiveTopology {
   TriangleStrip,
 };
 
-enum class FrontFace { CCW, CW };
+enum class FrontFace {
+  CCW,
+  CW,
+};
 
-enum class CullMode { None, Front, Back };
+enum class CullMode {
+  None,
+  Front,
+  Back,
+};
 
 struct PrimitiveState {
   PrimitiveTopology topology = PrimitiveTopology::TriangleList;
@@ -928,16 +989,23 @@ struct GraphicPipelineDesc {
 class GraphicPipeline : public PipelineBase
 {
 protected:
-  enum class Type { Render, Mesh };
+  enum class Type {
+    Render,
+    Mesh,
+  };
+
   GraphicPipeline(Device* device, Type type);
+
 public:
   ~GraphicPipeline() override;
 
   void Create(const GraphicPipelineDesc& desc);
 
   D3D12_PRIMITIVE_TOPOLOGY NativePrimitiveTopology() const { return m_PrimitiveTopology; }
+
 protected:
   Type m_Type;
+
 protected:
   D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 };
@@ -989,11 +1057,15 @@ public:
   ~RayTracingPipeline();
 
   void Create(const RayTracingPipelineDesc& desc);
+
 public:
   ID3D12StateObject* StateObject() const { return m_StateObject.Get(); }
+
   void* ShaderIdentifier(std::string entryPoint) const;
+
 private:
   Device* m_Device;
+
 private:
   Microsoft::WRL::ComPtr<ID3D12StateObject> m_StateObject;
   Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_StateObjectProperties;
@@ -1008,17 +1080,20 @@ struct ShaderTableDesc {
   std::span<std::string> callableEntryPoints{};
 };
 
-class ShaderTable {
+class ShaderTable
+{
 public:
   ShaderTable(Device* device);
   ~ShaderTable();
 
   void Create(const ShaderTableDesc& desc);
+
 public:
   D3D12_GPU_VIRTUAL_ADDRESS_RANGE RayGenShaderRecord() const;
   D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE MissShaderTable() const;
   D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE HitGroupTable() const;
   D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE CallableShaderTable() const;
+
 private:
   Device* m_Device;
 
@@ -1048,7 +1123,7 @@ public:
 
   Queue* GetQueue() const { return m_Queue.get(); }
 
-  std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc &desc);
+  std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc& desc);
   std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
   std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
   std::shared_ptr<AccelerationStructure> CreateAccelerationStructure(const AccelerationStructureDesc& desc);
@@ -1068,20 +1143,30 @@ public:
   void FreeDsvDescriptor(DescriptorAllocation alloc);
 
   uint64_t TimestampFrequencyHz() const { return m_TimestampFrequencyHz; }
+
 public:
   ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
+
   IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
+
   D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
 
   ID3D12DescriptorHeap* CbvSrvUavDescriptorHeap() const { return m_CbvSrvUavDescriptorHeap.Get(); }
+
   ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
+
   ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
 
   ID3D12RootSignature* RootSignature() const { return m_RootSignature.Get(); }
+
   ID3D12CommandSignature* DispatchSignature() const { return m_DispatchSignature.Get(); }
+
   ID3D12CommandSignature* DrawCommandSignature() const { return m_DrawCommandSignature.Get(); }
+
   ID3D12CommandSignature* DrawIndirectCommandSignature() const { return m_DrawIndirectCommandSignature.Get(); }
+
   ID3D12CommandSignature* DispatchMeshCommandSignature() const { return m_DispatchMeshCommandSignature.Get(); }
+
 private:
   std::unique_ptr<Queue> m_Queue;
 
@@ -1090,6 +1175,7 @@ private:
   DescriptorHeap m_DsvDescriptorHeap;
 
   uint64_t m_TimestampFrequencyHz = 1;
+
 private:
   Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
   Microsoft::WRL::ComPtr<ID3D12Device5> m_Device;
@@ -1157,8 +1243,10 @@ public:
   void Create();
   void Init();
   void Reset();
+
 public:
   void UpdateFenceValue(UINT64 value) { m_FenceValue = value; }
+
   UINT64 FenceValue() const { return m_FenceValue; }
 
   void SetComputeRootSignatureIfNeeded();
@@ -1166,6 +1254,7 @@ public:
 
 public:
   Device* m_Device;
+
   ID3D12GraphicsCommandList8* CommandList() const { return m_CommandList.Get(); }
 
 private:
@@ -1192,9 +1281,11 @@ public:
 
   void Submit(std::span<CommandBuffer*> commandBuffers);
   void WaitForAll();
+
 public:
   // TMP: remove this once public API is done
   ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
+
 private:
   CommandBuffer* FindOrCreateCommandBuffer();
   CommandBuffer* CreateCommandBuffer();
@@ -1208,6 +1299,7 @@ private:
   std::vector<std::unique_ptr<CommandBuffer>> m_CommandBuffers;
   std::list<CommandBuffer*> m_CommandBuffersExecuting;
   std::list<CommandBuffer*> m_CommandBuffersAvailable;
+
 private:
   Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
 
@@ -1232,6 +1324,7 @@ public:
   virtual ~EncoderBase();
 
   Device* GetDevice() const { return m_CommandBuffer->m_Device; }
+
 public:
   ID3D12GraphicsCommandList8* CommandList() const { return m_CommandBuffer->CommandList(); }
 
@@ -1289,6 +1382,7 @@ public:
 
   // TODO: assert that every pass has ended
   CommandBuffer* Finish();
+
 private:
   void BeginGraphicPass(const GraphicPassDesc& desc);
   std::string m_Label;
@@ -1308,10 +1402,11 @@ public:
   void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1);
   // DispatchIndirect(indirectBuffer, indirectOffset)
   void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void PushConstants(uint32_t offset, uint32_t size, const void* data);
   void SetPipeline(ComputePipeline* pipeline);
+
 private:
-  ComputePassDesc m_Desc; // FIXME: remove this and store TimestampWrites instead
+  ComputePassDesc m_Desc;  // FIXME: remove this and store TimestampWrites instead
   bool m_Ended = false;
 };
 
@@ -1319,7 +1414,12 @@ struct Color {
   float r, g, b, a;
 };
 
-enum class LoadOp { Clear, Load, DontCare };
+enum class LoadOp {
+  Clear,
+  Load,
+  DontCare,
+};
+
 // enum class StoreOp { Store, Discard };
 
 struct ColorAttachment {
@@ -1354,13 +1454,16 @@ class GraphicPassEncoder : public EncoderBase
 {
 protected:
   GraphicPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
+
 public:
   ~GraphicPassEncoder() override;
+
 public:
   void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void PushConstants(uint32_t offset, uint32_t size, const void* data);
+
 protected:
-  GraphicPassDesc m_Desc; // FIXME: remove this and store TimestampWrites instead.
+  GraphicPassDesc m_Desc;  // FIXME: remove this and store TimestampWrites instead.
   bool m_Ended = false;
 };
 
@@ -1403,8 +1506,9 @@ public:
   void TraceRays(ShaderTable* shaderTable, uint32_t width, uint32_t height, uint32_t depth = 1);
   // TODO: TraceRaysIndirect
   void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void *data);
+  void PushConstants(uint32_t offset, uint32_t size, const void* data);
   void SetPipeline(RayTracingPipeline* pipeline);
+
 private:
   RayTracingPassDesc m_Desc;
   bool m_Ended = false;

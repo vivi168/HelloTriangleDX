@@ -54,5 +54,4 @@ void PrintAdapterList()
     ++index;
   }
 }
-
 }  // namespace IssouRHI

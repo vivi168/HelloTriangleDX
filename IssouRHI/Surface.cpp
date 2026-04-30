@@ -4,7 +4,6 @@ using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
 {
-
 Surface::Surface(Device* device, HWND hwnd) : m_Device(device), m_Handle(hwnd)
 {
   // Fence
@@ -74,8 +73,8 @@ void Surface::CreateTextures(SurfaceConfiguration& config)
 
   TextureDesc desc{};
   desc.size = {
-    .width = config.width,
-    .height = config.height,
+      .width = config.width,
+      .height = config.height,
   };
   desc.format = config.format;
   desc.usage = TextureUsage::RenderAttachment;
@@ -112,5 +111,4 @@ void Surface::Present()
   CHECK_HR(m_Device->GetQueue()->GetNativeQueue()->Signal(m_Fence.Get(), ++m_NextFenceValue));
   m_FenceValues[m_FrameIndex] = m_NextFenceValue;
 }
-
-}
+}  // namespace IssouRHI
