@@ -18,7 +18,7 @@ StepTimer g_Timer;
 
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, IssouRHI::Device* device)
+int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::unique_ptr<IssouRHI::Device> device)
 {
   WNDCLASSEX windowClass;
   ZeroMemory(&windowClass, sizeof(windowClass));
@@ -56,7 +56,7 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, IssouRHI::Device* d
   ImGui_ImplWin32_Init(g_Hwnd);
 
   Renderer::InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
-  Renderer::Init(device);
+  Renderer::Init(std::move(device));
 
   ShowWindow(g_Hwnd, nCmdShow);
 

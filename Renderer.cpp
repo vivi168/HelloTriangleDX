@@ -529,7 +529,7 @@ static std::wstring g_Title;
 static std::wstring g_AssetsPath;
 
 // Pipeline objects
-static IssouRHI::Device* g_Device;
+static std::unique_ptr<IssouRHI::Device> g_Device;
 static std::shared_ptr<IssouRHI::Surface> g_Surface;
 
 static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
@@ -592,9 +592,9 @@ void InitWindow(UINT width, UINT height, std::wstring name)
   g_Title = name;
 }
 
-void Init(IssouRHI::Device* device)
+void Init(std::unique_ptr<IssouRHI::Device> device)
 {
-  g_Device = device;
+  g_Device = std::move(device);
 
   g_Surface = g_Device->CreateSurface(Win32Application::GetHwnd());
   IssouRHI::SurfaceConfiguration config{
@@ -1337,6 +1337,9 @@ void Cleanup()
   }
 
   g_Surface.reset();
+  g_Device.reset();
+
+  IssouRHI::ReportLiveObjects();
 }
 
 UINT GetWidth() { return g_Width; }
@@ -1574,7 +1577,7 @@ static void InitFrameResources()
   }
 
   // MeshStore
-  g_MeshStore.Init(g_Device);
+  g_MeshStore.Init(g_Device.get());
 
   // Draw Meshlets commands
   {

@@ -68,12 +68,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
     return (int)ExitCode::GPUList;
   }
 
-  int result = [&]() {
-    auto device = IssouRHI::Device::CreateDevice(IssouRHI::Backend::D3D12, g_CommandLineParameters.m_GPUSelection);
-    return Win32Application::Run(hInstance, nCmdShow, device.get());
-  }();
-
-  IssouRHI::ReportLiveObjects();
+  auto device = IssouRHI::Device::CreateDevice(IssouRHI::Backend::D3D12, g_CommandLineParameters.m_GPUSelection);
+  auto result = Win32Application::Run(hInstance, nCmdShow, std::move(device));
 
   return result;
 }

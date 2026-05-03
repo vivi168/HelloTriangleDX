@@ -10,7 +10,7 @@ namespace Renderer
 inline constexpr size_t FRAME_BUFFER_COUNT = 3;
 
 void InitWindow(UINT width, UINT height, std::wstring name);
-void Init(IssouRHI::Device* device);
+void Init(std::unique_ptr<IssouRHI::Device> device);
 void LoadAssets();
 void Render(float time);
 void Cleanup();
