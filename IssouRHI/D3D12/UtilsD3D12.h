@@ -12,6 +12,7 @@ namespace D3D12
 std::wstring StringToWstring(std::string_view s);
 void ReportLiveObjects(); // TODO: move this to device static member + D3D12 only
 void PrintAdapterList();
+void PrintStateObjectDesc(const D3D12_STATE_OBJECT_DESC* desc);
 
 inline DXGI_FORMAT DXGIFormat(TextureFormat format)
 {
@@ -68,6 +69,5 @@ inline DXGI_FORMAT DXGIFormat(IndexFormat format)
 }
 
 std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> D3D12RaytracingGeometryDescs(std::span<BottomLevelGeometryDesc> geometries);
-
 }
 }

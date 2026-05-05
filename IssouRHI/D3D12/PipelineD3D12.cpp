@@ -436,9 +436,9 @@ void RayTracingPipelineImpl::Create(const RayTracingPipelineDesc& desc)
 
   m_StateObject->SetName(StringToWstring(desc.label).c_str());
 
-  // #ifdef _DEBUG
-  //     PrintStateObjectDesc(raytracingPipeline);
-  // #endif
+#ifdef _DEBUG
+  PrintStateObjectDesc(raytracingPipeline);
+#endif
 
   CHECK_HR(m_StateObject.As(&m_StateObjectProperties));
 }
