@@ -1,10 +1,12 @@
-#include "IssouRHI.h"
+#include "UtilsD3D12.h"
 
 #include <dxgidebug.h>
 
 using Microsoft::WRL::ComPtr;
 
 namespace IssouRHI
+{
+namespace D3D12
 {
 std::wstring StringToWstring(std::string_view s)
 {
@@ -54,4 +56,5 @@ void PrintAdapterList()
     ++index;
   }
 }
+}  // namespace D3D12
 }  // namespace IssouRHI

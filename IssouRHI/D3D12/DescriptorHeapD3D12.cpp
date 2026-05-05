@@ -1,6 +1,10 @@
-#include "IssouRHI.h"
+#include "DescriptorHeapD3D12.h"
+
+#include "UtilsD3D12.h"
 
 namespace IssouRHI
+{
+namespace D3D12
 {
 void DescriptorHeap::Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
 {
@@ -55,4 +59,5 @@ void DescriptorHeap::Free(DescriptorAllocation alloc)
   assert(cpuIdx == gpuIdx);
   m_FreeIndices.push_front(cpuIdx);
 }
-}  // namespace IssouRHI
+}
+}

@@ -10,6 +10,8 @@
 #include "Camera.h"
 #include "Mesh.h"
 
+#include "InteropD3D12.h"
+
 using namespace DirectX;
 
 namespace Renderer
@@ -540,7 +542,7 @@ static std::shared_ptr<IssouRHI::QuerySet> g_TimestampQuerySet;
 
 // PSO
 static std::shared_ptr<IssouRHI::RenderPipeline> g_RenderPipeline;
-static std::shared_ptr<IssouRHI::MeshPipeline> g_MeshPipeline;
+static std::shared_ptr<IssouRHI::RenderPipeline> g_MeshPipeline;
 static std::shared_ptr<IssouRHI::RayTracingPipeline> g_RayTracingPipeline;
 static std::unordered_map<PSO, std::shared_ptr<IssouRHI::ComputePipeline>> g_ComputePipelines;
 
@@ -668,7 +670,7 @@ void LoadAssets()
         inst->blasBufferAddress = g_Scene.blasBuffers[i]->GpuAddress();
       }
 
-      encoder.BuildBottomLevelAccelerationStructure(g_Scene.blasBuffers[i].get(), geometries);
+      encoder->BuildBottomLevelAccelerationStructure(g_Scene.blasBuffers[i].get(), geometries);
     }
   }
 
@@ -719,7 +721,7 @@ void LoadAssets()
         },
     };
 
-    encoder.Barrier({.globals = transitions});
+    encoder->Barrier({.globals = transitions});
   }
 
   // TLAS creation
@@ -734,10 +736,10 @@ void LoadAssets()
 
     g_Scene.tlasBuffer = g_Device->CreateAccelerationStructure(topLevelInputs);
 
-    encoder.BuildTopLevelAccelerationStructure(g_Scene.tlasBuffer.get(), {rtInstanceDescBuffer.get(), 0}, g_Scene.rtInstanceDescriptors.size());
+    encoder->BuildTopLevelAccelerationStructure(g_Scene.tlasBuffer.get(), {rtInstanceDescBuffer.get(), 0}, g_Scene.rtInstanceDescriptors.size());
   }
 
-  IssouRHI::CommandBuffer* cb[] = {encoder.Finish()};
+  IssouRHI::CommandBuffer* cb[] = {encoder->Finish()};
   queue->Submit(cb);
   queue->WaitForAll();
 }
@@ -830,8 +832,10 @@ static void Update(FrameContext* ctx, float time)
 
   // ImGui
   {
+#ifdef BUILD_D3D12_BACKEND
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
+#endif
     ImGui::NewFrame();
   }
 
@@ -854,8 +858,7 @@ static void Update(FrameContext* ctx, float time)
 
     XMStoreFloat3(&ctx->frameConstants.SunDirection, vec);
 
-    ImGui::Text("Sun Direction: %f %f %f", ctx->frameConstants.SunDirection.x, ctx->frameConstants.SunDirection.y,
-                ctx->frameConstants.SunDirection.z);
+    ImGui::Text("Sun Direction: %f %f %f", ctx->frameConstants.SunDirection.x, ctx->frameConstants.SunDirection.y, ctx->frameConstants.SunDirection.z);
 
     ImGui::End();
   }
@@ -863,8 +866,6 @@ static void Update(FrameContext* ctx, float time)
   ctx->UpdateFrameConstants();
 
   {
-    ImGui::Begin("Timestamps");
-
     UINT64 timestamps[Timestamp::Count];
     ctx->timestampReadBackBuffer->Read(IssouRHI::FullBufferRange, timestamps);
 
@@ -877,6 +878,8 @@ static void Update(FrameContext* ctx, float time)
 
       return static_cast<double>(delta) / frequency * 1000.0;
     };
+
+    ImGui::Begin("Timestamps");
 
     ImGui::Text("Skinning: %.4f ms", GetTime(Timestamp::SkinBegin));
     ImGui::Text("Culling: %.4f ms", GetTime(Timestamp::CullBegin));
@@ -1002,7 +1005,7 @@ void Render(float time)
   auto queue = g_Device->GetQueue();
   auto encoder = queue->CreateCommandEncoder();
 
-  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalBegin);
+  encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalBegin);
 
   {
     std::array transitions{
@@ -1010,7 +1013,7 @@ void Render(float time)
         BuildTransition(g_VisibilityBuffer.get(), {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
     };
 
-    encoder.Barrier({.textures = transitions});
+    encoder->Barrier({.textures = transitions});
   }
 
   uint32_t frameConstantsIndex = ctx->frameConstantBuffer->DescriptorIndex({IssouRHI::BufferAccess::Constant, IssouRHI::FullBufferRange, sizeof(FrameConstants)});
@@ -1023,10 +1026,10 @@ void Render(float time)
           BuildTransition(g_MeshStore.m_VertexPositions.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
-      encoder.Barrier({.buffers = transitions});
+      encoder->Barrier({.buffers = transitions});
     }
 
-    auto passEncoder = encoder.BeginComputePass({
+    auto passEncoder = encoder->BeginComputePass({
         .label = "Skinning Compute Pass",
         .timestampWrites = IssouRHI::TimestampWrites{
             .beginningOfPassWriteIndex = Timestamp::SkinBegin,
@@ -1035,19 +1038,19 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
-    passEncoder.PushConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices);
+    passEncoder->SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
+    passEncoder->PushConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
       auto o = smi->BuffersOffsets();
-      passEncoder.PushConstants(SizeOfInUint(SkinningBuffersDescriptorIndices), SizeOfInUint(o), &o);
-      passEncoder.Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE));
+      passEncoder->PushConstants(SizeOfInUint(SkinningBuffersDescriptorIndices), SizeOfInUint(o), &o);
+      passEncoder->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE));
     }
 
-    passEncoder.End();
+    passEncoder->End();
   } else {
-    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinBegin);
-    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinEnd);
+    encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinBegin);
+    encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::SkinEnd);
   }
 
   // record culling commands
@@ -1057,20 +1060,20 @@ void Render(float time)
           BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Copy, IssouRHI::Access::CopyDestination}),
       };
 
-      encoder.Barrier({.buffers = transitions});
+      encoder->Barrier({.buffers = transitions});
     }
 
-    encoder.CopyBufferToBuffer(g_UAVCounterReset.get(), 0, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET, sizeof(UINT));
+    encoder->CopyBufferToBuffer(g_UAVCounterReset.get(), 0, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET, sizeof(UINT));
 
     {
       std::array transitions{
           BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage}),
       };
 
-      encoder.Barrier({.buffers = transitions});
+      encoder->Barrier({.buffers = transitions});
     }
 
-    auto passEncoder = encoder.BeginComputePass({
+    auto passEncoder = encoder->BeginComputePass({
         .label = "Culling Compute Pass",
         .timestampWrites = IssouRHI::TimestampWrites{
             .beginningOfPassWriteIndex = Timestamp::CullBegin,
@@ -1079,15 +1082,15 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
+    passEncoder->SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
 
-    passEncoder.PushConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices);
-    passEncoder.PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices), 1, &frameConstantsIndex);
-    passEncoder.PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices) + 1, 1, &g_Scene.numMeshInstances);
+    passEncoder->PushConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices);
+    passEncoder->PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices), 1, &frameConstantsIndex);
+    passEncoder->PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices) + 1, 1, &g_Scene.numMeshInstances);
 
-    passEncoder.Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
+    passEncoder->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
 
-    passEncoder.End();
+    passEncoder->End();
   }
 
   // Record drawing commands
@@ -1098,7 +1101,7 @@ void Render(float time)
           BuildTransition(g_DrawMeshCommands.get(), {IssouRHI::PipelineStage::Indirect, IssouRHI::Access::ArgumentBuffer}),
       };
 
-      encoder.Barrier({.buffers = transitions});
+      encoder->Barrier({.buffers = transitions});
     }
 
     std::array targets{
@@ -1107,7 +1110,7 @@ void Render(float time)
             .clearValue = {0.0f, 0.0f, 0.0f, 0.0f},
         },
     };
-    auto passEncoder = encoder.BeginMeshPass({
+    auto passEncoder = encoder->BeginRenderPass({
         .label = "Visibilty Buffer Pass",
         .colorAttachment = targets,
         .depthStencilAttachment = {
@@ -1121,14 +1124,14 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_MeshPipeline.get());
+    passEncoder->SetPipeline(g_MeshPipeline.get());
 
-    passEncoder.PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
-    passEncoder.PushConstants(SizeOfInUint(BuffersDescriptorIndices), 1, &frameConstantsIndex);
+    passEncoder->PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
+    passEncoder->PushConstants(SizeOfInUint(BuffersDescriptorIndices), 1, &frameConstantsIndex);
 
-    passEncoder.DrawMeshIndirect(g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+    passEncoder->DrawMeshIndirect(g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
-    passEncoder.End();
+    passEncoder->End();
   }
 
   // Record Fill G-Buffer from Visibility-Buffer commands
@@ -1141,10 +1144,10 @@ void Render(float time)
           BuildTransition(g_GBuffer.baseColor.get(), {IssouRHI::PipelineStage::ComputeShader, IssouRHI::Access::ShaderResourceStorage, IssouRHI::TextureLayout::ShaderResourceStorage}),
       };
 
-      encoder.Barrier({.textures = transitions});
+      encoder->Barrier({.textures = transitions});
     }
 
-    auto passEncoder = encoder.BeginComputePass({
+    auto passEncoder = encoder->BeginComputePass({
         .label = "Fill G-Buffer Compute Pass",
         .timestampWrites = IssouRHI::TimestampWrites{
             .beginningOfPassWriteIndex = Timestamp::FillGBufferBegin,
@@ -1153,7 +1156,7 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
+    passEncoder->SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
 
     auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read));
     UINT n = SizeOfInUint(c);
@@ -1163,13 +1166,13 @@ void Render(float time)
     // same for SetGraphicsRoot32BitConstant. "bind" everything up front, and be done with it.
     // Only have one "slot", so only one "InitAsConstant" and prepare some enum for the different offsets in the root signature.
     // Also, instead of writing an entire struct to the root signature. have ConstantBuffer and write the cbv to it.
-    passEncoder.PushConstants(0, n, &c);
-    passEncoder.PushConstants(n, n2, &ctx->buffersDescriptorsIndices);
-    passEncoder.PushConstants(n + n2, 1, &frameConstantsIndex);
+    passEncoder->PushConstants(0, n, &c);
+    passEncoder->PushConstants(n, n2, &ctx->buffersDescriptorsIndices);
+    passEncoder->PushConstants(n + n2, 1, &frameConstantsIndex);
 
-    passEncoder.Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
+    passEncoder->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
 
-    passEncoder.End();
+    passEncoder->End();
   }
 
   // Ray trace shadows
@@ -1180,10 +1183,10 @@ void Render(float time)
           BuildTransition(g_GBuffer.worldPosition.get(), {IssouRHI::PipelineStage::RayTracingShaders, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
       };
 
-      encoder.Barrier({.textures = transitions});
+      encoder->Barrier({.textures = transitions});
     }
 
-    auto passEncoder = encoder.BeginRayTracingPass({
+    auto passEncoder = encoder->BeginRayTracingPass({
         .label = "Shadow RT Pass",
         .timestampWrites = IssouRHI::TimestampWrites{
             .beginningOfPassWriteIndex = Timestamp::ShadowsBegin,
@@ -1192,7 +1195,7 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_RayTracingPipeline.get());
+    passEncoder->SetPipeline(g_RayTracingPipeline.get());
 
     std::array<uint32_t, 4> pc = {
         g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
@@ -1200,13 +1203,13 @@ void Render(float time)
         g_Scene.tlasBuffer->DescriptorIndex(),
         frameConstantsIndex,
     };
-    passEncoder.PushConstants(0, pc.size(), pc.data());
+    passEncoder->PushConstants(0, pc.size(), pc.data());
 
-    passEncoder.TraceRays(g_ShaderTable.get(), g_Width, g_Height);
-    passEncoder.End();
+    passEncoder->TraceRays(g_ShaderTable.get(), g_Width, g_Height);
+    passEncoder->End();
   } else {
-    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
-    encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsEnd);
+    encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
+    encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsEnd);
   }
 
   // Record Full screen triangle pass - Compose final image commands
@@ -1217,7 +1220,7 @@ void Render(float time)
           BuildTransition(g_GBuffer.baseColor.get(), {IssouRHI::PipelineStage::FragmentShader, IssouRHI::Access::ShaderResource, IssouRHI::TextureLayout::ShaderResource}),
       };
 
-      encoder.Barrier({.textures = transitions});
+      encoder->Barrier({.textures = transitions});
     }
 
     std::array targets{
@@ -1226,7 +1229,7 @@ void Render(float time)
             .clearValue = {0.0f, 0.2f, 0.4f, 1.0f},
         },
     };
-    auto passEncoder = encoder.BeginRenderPass({
+    auto passEncoder = encoder->BeginRenderPass({
         .label = "Final Compose Pass",
         .colorAttachment = targets,
         .timestampWrites = IssouRHI::TimestampWrites{
@@ -1236,23 +1239,25 @@ void Render(float time)
         },
     });
 
-    passEncoder.SetPipeline(g_RenderPipeline.get());
+    passEncoder->SetPipeline(g_RenderPipeline.get());
     uint32_t c[] = {
         g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
         g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
     };
-    passEncoder.PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
-    passEncoder.PushConstants(SizeOfInUint(BuffersDescriptorIndices), 2, c);
-    passEncoder.Draw(3);
-    passEncoder.End();
+    passEncoder->PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
+    passEncoder->PushConstants(SizeOfInUint(BuffersDescriptorIndices), 2, c);
+    passEncoder->Draw(3);
+    passEncoder->End();
   }
 
   {
-    auto rtvHandle = renderTargetView->RtvDescriptorAlloc().cpuHandle;
-    encoder.CommandList()->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
     ImGui::Render();
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), encoder.CommandList());
+#ifdef BUILD_D3D12_BACKEND
+    auto rtvHandle = IssouRHI::D3D12::RtvDescriptorHandle(renderTargetView.get());
+    auto commandList = IssouRHI::D3D12::GetNativeCommandList(encoder.get());
+    commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+#endif
   }
 
   {
@@ -1260,13 +1265,13 @@ void Render(float time)
         BuildTransition(renderTarget.get(), {IssouRHI::PipelineStage::None, IssouRHI::Access::None, IssouRHI::TextureLayout::Present}),
     };
 
-    encoder.Barrier({.textures = transitions});
+    encoder->Barrier({.textures = transitions});
   }
 
-  encoder.WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalEnd);
-  encoder.ResolveQuerySet(g_TimestampQuerySet.get(), 0, Timestamp::Count, ctx->timestampReadBackBuffer.get(), 0);
+  encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::TotalEnd);
+  encoder->ResolveQuerySet(g_TimestampQuerySet.get(), 0, Timestamp::Count, ctx->timestampReadBackBuffer.get(), 0);
 
-  IssouRHI::CommandBuffer* cb[] = {encoder.Finish()};
+  IssouRHI::CommandBuffer* cb[] = {encoder->Finish()};
   queue->Submit(cb);
 
   g_Surface->Present();
@@ -1274,8 +1279,10 @@ void Render(float time)
 
 void Cleanup()
 {
+#ifdef BUILD_D3D12_BACKEND
   ImGui_ImplDX12_Shutdown();
   ImGui_ImplWin32_Shutdown();
+#endif
   ImGui::DestroyContext();
 
   g_Device->GetQueue()->WaitForAll();
@@ -1339,7 +1346,9 @@ void Cleanup()
   g_Surface.reset();
   g_Device.reset();
 
-  IssouRHI::ReportLiveObjects();
+#ifdef BUILD_D3D12_BACKEND
+  IssouRHI::D3D12::ReportLiveObjects();
+#endif
 }
 
 UINT GetWidth() { return g_Width; }
@@ -1419,33 +1428,26 @@ static void InitFrameResources()
     });
   }
 
+#ifdef BUILD_D3D12_BACKEND
   // Setup Platform/Renderer backends
   ImGui_ImplDX12_InitInfo initInfo = {};
-  initInfo.Device = g_Device->GetNativeDevice();
-  initInfo.CommandQueue = g_Device->GetQueue()->GetNativeQueue();
+  initInfo.Device = IssouRHI::D3D12::GetNativeDevice(g_Device.get());
+  initInfo.CommandQueue = IssouRHI::D3D12::GetNativeQueue(g_Device->GetQueue());
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
   initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
   initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
   // descriptor, future versions will need to allocate more)
-  initInfo.SrvDescriptorHeap = g_Device->CbvSrvUavDescriptorHeap();
-  initInfo.SrvDescriptorAllocFn =
-      [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
-         D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
-        IssouRHI::DescriptorAllocation alloc = g_Device->AllocCbvSrvUavDescriptor();
-        *outCpuHandle = alloc.cpuHandle;
-        *outGpuHandle = alloc.gpuHandle;
-      };
-  initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
-                                    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
-                                    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
-    IssouRHI::DescriptorAllocation alloc{};
-    alloc.cpuHandle = cpuHandle;
-    alloc.gpuHandle = gpuHandle;
-    g_Device->FreeSrvUavDescriptor(alloc);
+  initInfo.SrvDescriptorHeap = IssouRHI::D3D12::CbvSrvUavDescriptorHeap(g_Device.get());
+  initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle) {
+    IssouRHI::D3D12::AllocCbvSrvUavDescriptor(g_Device.get(), outCpuHandle, outGpuHandle);
+  };
+  initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
+    IssouRHI::D3D12::FreeCbvSrvUavDescriptor(g_Device.get(), cpuHandle, gpuHandle);
   };
   ImGui_ImplDX12_Init(&initInfo);
+#endif
 
   // Mesh Shader pipeline
   {
@@ -1863,10 +1865,18 @@ static UINT CreateTexture(std::filesystem::path filename)
   };
   auto tex = g_Device->CreateTexture(textureDesc);
 
-  std::vector<D3D12_SUBRESOURCE_DATA> subresources;
-  CHECK_HR(PrepareUpload(g_Device->GetNativeDevice(), image.GetImages(), image.GetImageCount(), metadata, subresources));
+  std::vector<IssouRHI::TextureSubresource> subresources;
+  subresources.reserve(image.GetImageCount());
+  for (size_t i = 0; i < image.GetImageCount(); ++i) {
+    const Image& src = image.GetImages()[i];
+    subresources.push_back({
+        .rowPitch = src.rowPitch,
+        .slicePitch = src.slicePitch,
+        .data = src.pixels,
+    });
+  }
 
-  tex->WriteToSubresource(subresources.data(), static_cast<UINT>(subresources.size()));
+  tex->Write(subresources);
 
   g_Textures[filename] = tex;
 

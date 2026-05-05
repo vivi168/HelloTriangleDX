@@ -1,13 +1,5 @@
 #pragma once
 
-// TODO:
-// In a proper RHI we shouldn't expose API specifics in a frontfacing header!!!!
-// have a front facing header that exposes common interfaces (eg IDevice, etc) contains api agnostic code.
-// have api specific classes inheriting these interfaces and containing api specific code (eg, Device, etc)
-#include <d3dx12.h>
-#include <dxgi1_6.h>
-#include <wrl.h>
-
 // TODO: get rid of STL in public header?
 // would need: string (=> const char* ?) span(=> ptr + size?), optional(=> nullptr ?), variant(=> enum+union ?), shared_ptr(=> ComPtr like class?)
 #include <deque>
@@ -17,14 +9,13 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 #include <cassert>
 #include <cstdint>
-
-#include <D3D12MemAlloc.h>
 
 #ifdef _DEBUG
 #define ENABLE_DEBUG_LAYER true
@@ -47,24 +38,11 @@
     return a;                                                                  \
   }
 
-// FIXME: duplicated for now with stdafx.h
-#define STRINGIZE(x) STRINGIZE2(x)
-#define STRINGIZE2(x) #x
-#define LINE_STRING STRINGIZE(__LINE__)
-// TODO: return std::expected for function that call CHECK_HR?
-#define CHECK_HR(expr)                                                             \
-  do {                                                                             \
-    if (FAILED(expr)) {                                                            \
-      assert(0 && #expr);                                                          \
-      throw std::runtime_error(__FILE__ "(" LINE_STRING "): FAILED( " #expr " )"); \
-    }                                                                              \
-  } while (false)
-
 namespace IssouRHI
 {
 struct GPUSelection {
-  UINT32 Index = UINT32_MAX;
-  std::wstring Substring;
+  uint32_t Index = UINT32_MAX;
+  std::wstring Substring;  // FIXME: make this not wstring
 };
 
 // TODO: Utils
@@ -78,41 +56,6 @@ inline size_t AlignUpPowerOfTwo(size_t size, size_t align)
   assert(IsPowerOfTwo(align));
   return (size + align - 1) & ~(align - 1);
 }
-
-// TODO: D3D12 Utils
-std::wstring StringToWstring(std::string_view s);
-void ReportLiveObjects();
-void PrintAdapterList();
-
-struct DescriptorAllocation {
-  UINT index;
-  D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle{};
-  D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle{};
-
-  explicit operator bool() const { return cpuHandle.ptr != 0; }
-};
-
-class DescriptorHeap
-{
-public:
-  void Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags);
-  DescriptorAllocation Alloc();
-  void Free(DescriptorAllocation alloc);
-
-  // FIXME: TMP
-  ID3D12DescriptorHeap* Get() const { return m_Heap.Get(); }
-
-private:
-  Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_Heap;
-
-  D3D12_CPU_DESCRIPTOR_HANDLE m_HeapStartCpu{};
-  D3D12_GPU_DESCRIPTOR_HANDLE m_HeapStartGpu{};
-  UINT m_HeapHandleIncrement;
-  UINT m_NumDescriptors;
-  std::deque<UINT> m_FreeIndices;
-
-  // TODO: mutex
-};
 
 class Device;
 
@@ -131,23 +74,17 @@ class QuerySet
 {
 public:
   QuerySet(Device* device, const QuerySetDesc& desc);
-  ~QuerySet();
+  virtual ~QuerySet();
 
-  void Create();
+  virtual void Create() = 0;
 
   QueryType Type() const { return m_Desc.type; }
 
   uint32_t Count() const { return m_Desc.count; }
 
-public:
-  ID3D12QueryHeap* QueryHeap() const { return m_QueryHeap.Get(); }
-
-private:
+protected:
   Device* m_Device;
   QuerySetDesc m_Desc;
-
-private:
-  Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_QueryHeap;
 };
 
 struct TimestampWrites {
@@ -294,6 +231,18 @@ enum class TextureAspect : uint32_t {
   StencilOnly,
 };
 
+inline uint32_t PlaneSlice(TextureAspect aspect)
+{
+  switch (aspect) {
+    case TextureAspect::All:
+    case TextureAspect::DepthOnly:
+      return 0;
+    case TextureAspect::StencilOnly:
+      // TODO
+      return 1;
+  }
+}
+
 // TODO: add missing types
 enum class TextureFormat : uint32_t {
   Undefined,
@@ -308,30 +257,13 @@ enum class TextureFormat : uint32_t {
   RGBA32Float,
 };
 
-// TODO: where to put this
-inline DXGI_FORMAT DXGIFormat(TextureFormat format)
+inline bool IsDepthStencil(TextureFormat format)
 {
   switch (format) {
-    case TextureFormat::Undefined:
-      return DXGI_FORMAT_UNKNOWN;
-    case TextureFormat::BC5Unorm:
-      return DXGI_FORMAT_BC5_UNORM;
-    case TextureFormat::BC7Unorm:
-      return DXGI_FORMAT_BC7_UNORM;
     case TextureFormat::Depth32Float:
-      return DXGI_FORMAT_D32_FLOAT;
-    case TextureFormat::R8Unorm:
-      return DXGI_FORMAT_R8_UNORM;
-    case TextureFormat::RG8Unorm:
-      return DXGI_FORMAT_R8G8_UNORM;
-    case TextureFormat::R32Uint:
-      return DXGI_FORMAT_R32_UINT;
-    case TextureFormat::RGBA8Unorm:
-      return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case TextureFormat::RGB10A2Unorm:
-      return DXGI_FORMAT_R10G10B10A2_UNORM;
-    case TextureFormat::RGBA32Float:
-      return DXGI_FORMAT_R32G32B32A32_FLOAT;
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -340,37 +272,11 @@ enum class VertexFormat : uint32_t {
   Float32x3,
 };
 
-inline DXGI_FORMAT DXGIFormat(VertexFormat format)
-{
-  switch (format) {
-    case VertexFormat::Undefined:
-      return DXGI_FORMAT_UNKNOWN;
-    case VertexFormat::Float32x3:
-      return DXGI_FORMAT_R32G32B32_FLOAT;
-    default:
-      std::unreachable();
-  }
-}
-
 enum class IndexFormat : uint32_t {
   Undefined,
   Uint16,
   Uint32,
 };
-
-inline DXGI_FORMAT DXGIFormat(IndexFormat format)
-{
-  switch (format) {
-    case IndexFormat::Undefined:
-      return DXGI_FORMAT_UNKNOWN;
-    case IndexFormat::Uint16:
-      return DXGI_FORMAT_R16_UINT;
-    case IndexFormat::Uint32:
-      return DXGI_FORMAT_R32_UINT;
-    default:
-      std::unreachable();
-  }
-}
 
 struct Extent3D {
   uint32_t width;
@@ -451,17 +357,25 @@ struct TextureViewDesc {
 // Base <- Interface (public interface impl) <- Impl ( <- API specific impl)
 class TextureView;
 
+struct TextureSubresource {
+  uint64_t rowPitch;
+  uint64_t slicePitch;
+  const void* data;
+};
+
 class Texture
 {
 public:
   Texture(Device* device, const TextureDesc& desc);
-  ~Texture();
+  virtual ~Texture();
 
-  void Create();
+  virtual void Create() = 0;
+
+  virtual void Write(std::span<TextureSubresource> subresources, uint32_t baseMipLevel = 0, uint32_t baseArrayLayer = 0) = 0;
 
   // use std::expected (C++23) ?
   std::shared_ptr<TextureView> CreateView();
-  std::shared_ptr<TextureView> CreateView(const TextureViewDesc& desc);
+  virtual std::shared_ptr<TextureView> CreateView(const TextureViewDesc& desc) = 0;
 
   Device* GetDevice() const { return m_Device; }
 
@@ -473,29 +387,13 @@ public:
 
   Extent3D SizeAtMipLevel(uint32_t level) const;
 
-public:  // D3D12 impl specific
-  void Attach(ID3D12Resource* other, D3D12MA::Allocation* allocation = nullptr);
-  void WriteToSubresource(D3D12_SUBRESOURCE_DATA* data, UINT numSubresources, UINT firstSubresource = 0);
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC SrvDescriptor(const TextureViewDesc& desc) const;
-  D3D12_UNORDERED_ACCESS_VIEW_DESC UavDescriptor(const TextureViewDesc& desc) const;
-  // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
-  D3D12_RENDER_TARGET_VIEW_DESC RtvDescriptor(const TextureViewDesc& desc) const;
-  D3D12_DEPTH_STENCIL_VIEW_DESC DsvDescriptor(const TextureViewDesc& desc) const;
-
-  ID3D12Resource* Resource() const { return m_Resource.Get(); };
-
-private:
+protected:
   bool IsMultiSampled() const { return m_Desc.sampleCount > 1; }
 
   std::unordered_map<TextureViewDesc, std::shared_ptr<TextureView>, TextureViewDesc::Hasher> m_Views;
 
   Device* m_Device;
   TextureDesc m_Desc;
-
-private:  // D3D12 impl specific
-  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
-  D3D12MA::Allocation* m_Allocation = nullptr;
 };
 
 enum class TextureAccess {
@@ -507,31 +405,16 @@ class TextureView
 {
 public:
   TextureView(Texture* tex, const TextureViewDesc& desc);
-  ~TextureView();
+  virtual ~TextureView();
 
-  uint32_t DescriptorIndex(TextureAccess access) const;
-  uint64_t DescriptorHandle(TextureAccess access) const;
+  virtual uint32_t DescriptorIndex(TextureAccess access) const = 0;
+  virtual uint64_t DescriptorHandle(TextureAccess access) const = 0;
 
   Extent3D Size() const { return m_Texture->SizeAtMipLevel(m_Desc.range.baseMipLevel); }
 
-public:  // D3D12 impl specific
-  // Internal use
-  DescriptorAllocation SrvDescriptorAlloc() const { return m_Srv; }
-
-  DescriptorAllocation UavDescriptorAlloc() const { return m_Uav; }
-
-  // Internal use (OMSetRenderTargets, ClearRenderTargetView, etc)
-  DescriptorAllocation RtvDescriptorAlloc() const { return m_Rtv; }
-
-  DescriptorAllocation DsvDescriptorAlloc() const { return m_Dsv; }
-
-private:
+protected:
   Texture* m_Texture;  // should it be owning? weak ref?
   TextureViewDesc m_Desc;
-  DescriptorAllocation m_Srv;
-  DescriptorAllocation m_Uav;
-  DescriptorAllocation m_Rtv;
-  DescriptorAllocation m_Dsv;
 };
 
 enum class BufferUsage : uint32_t {
@@ -585,73 +468,24 @@ class Buffer
 {
 public:
   Buffer(Device* device, const BufferDesc& desc);
-  ~Buffer();
+  virtual ~Buffer();
 
-  void Create();
+  virtual void Create() = 0;
 
   uint64_t Size() const { return m_Desc.size; }
 
-public:
-  uint32_t DescriptorIndex(const BufferViewDesc& desc);
-  // FIXME: sort methods below by correct "ownership"
-public:  // D3D12 impl specific
-  void Write(BufferRange range, const void* data);
-  void Clear(BufferRange range);
-  void Read(BufferRange range, void* outData);
+  virtual uint32_t DescriptorIndex(const BufferViewDesc& desc) = 0;
+  virtual uint64_t GpuAddress() const = 0;
 
-  uint64_t GpuAddress() const { return m_Resource->GetGPUVirtualAddress(); }
+  virtual void Write(BufferRange range, const void* data) = 0;
+  virtual void Clear(BufferRange range) = 0;
+  virtual void Read(BufferRange range, void* outData) = 0;
 
-  ID3D12Resource* Resource() const { return m_Resource.Get(); };
-
-private:
+protected:
   BufferRange ClampBufferRange(BufferRange range);
-
-  DescriptorAllocation CbvDescriptorAlloc(BufferRange range);
-  DescriptorAllocation SrvDescriptorAlloc(BufferRange range, UINT byteStride);
-  DescriptorAllocation UavDescriptorAlloc(BufferRange range, UINT byteStride, Buffer* counter, UINT64 counterOffsetInBytes);
 
   Device* m_Device;
   BufferDesc m_Desc;
-
-private:  // D3D12 impl specific
-  void Map();
-  void Unmap();
-
-  Microsoft::WRL::ComPtr<ID3D12Resource> m_Resource;
-  D3D12MA::Allocation* m_Allocation = nullptr;
-  void* m_Address = nullptr;
-
-  struct ViewKey {
-    BufferRange range;
-    UINT byteStride = 0;
-    Buffer* counter = nullptr;
-    UINT64 counterOffsetInBytes = 0;
-
-    bool operator==(const ViewKey& other) const
-    {
-      return range == other.range && byteStride == other.byteStride && counter == other.counter &&
-             counterOffsetInBytes == other.counterOffsetInBytes;
-    }
-
-    struct Hasher {
-      size_t operator()(const ViewKey& vk) const
-      {
-        size_t hash = 0;
-
-        HashCombine(hash, vk.range.offset);
-        HashCombine(hash, vk.range.size);
-        HashCombine(hash, vk.byteStride);
-        HashCombine(hash, reinterpret_cast<std::uintptr_t>(vk.counter));
-        HashCombine(hash, vk.counterOffsetInBytes);
-
-        return hash;
-      }
-    };
-  };
-
-  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Cbvs{};
-  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Srvs{};
-  std::unordered_map<ViewKey, DescriptorAllocation, ViewKey::Hasher> m_Uavs{};
 };
 
 struct BufferWithOffset {
@@ -755,35 +589,24 @@ struct AccelerationStructureDesc {
   std::variant<TopLevelDesc, BottomLevelDesc> geometryOrInstanceDesc;
 };
 
-std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> D3D12RaytracingGeometryDescs(std::span<BottomLevelGeometryDesc> geometries);
-
 class AccelerationStructure
 {
 public:
   AccelerationStructure(Device* device);
-  ~AccelerationStructure();
+  virtual ~AccelerationStructure();
 
-  void Create(const AccelerationStructureDesc& desc);
+  virtual void Create(const AccelerationStructureDesc& desc) = 0;
 
-  uint32_t DescriptorIndex() const { return m_Srv.index; }
+  virtual uint32_t DescriptorIndex() const = 0;
 
-public:
   uint64_t GpuAddress() const { return m_Buffer->GpuAddress(); }
 
   uint64_t ScratchGpuAddress() const { return m_ScratchBuffer->GpuAddress(); }
 
-  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS Flags() const { return m_Flags; }
-
-private:
+protected:
   Device* m_Device;
   std::shared_ptr<Buffer> m_Buffer;
   std::shared_ptr<Buffer> m_ScratchBuffer;
-
-  DescriptorAllocation m_Srv;
-
-private:
-  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS m_Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO m_PrebuildInfo{};
 };
 
 enum class ShaderStage {
@@ -808,34 +631,21 @@ struct ShaderModule {
   std::optional<std::string> entryPointName = std::nullopt;
 };
 
-class PipelineBase
-{
-public:
-  PipelineBase(Device* device);
-  virtual ~PipelineBase();
-
-public:  // D3D12 impl specific
-  ID3D12PipelineState* PipelineState() const { return m_Pso.Get(); }
-
-protected:
-  Device* m_Device;
-
-protected:  // D3D12 impl specific
-  Microsoft::WRL::ComPtr<ID3D12PipelineState> m_Pso;
-};
-
 struct ComputePipelineDesc {
   std::string label;
   ShaderModule shader;
 };
 
-class ComputePipeline : public PipelineBase
+class ComputePipeline
 {
 public:
   ComputePipeline(Device* device);
-  ~ComputePipeline();
+  virtual ~ComputePipeline();
 
-  void Create(const ComputePipelineDesc& desc);
+  virtual void Create(const ComputePipelineDesc& desc) = 0;
+
+protected:
+    Device* m_Device;
 };
 
 enum ColorWriteFlags : uint8_t {
@@ -977,7 +787,7 @@ struct MultisampleState {
   bool alphaToCoverageEnabled = false;
 };
 
-struct GraphicPipelineDesc {
+struct RenderPipelineDesc {
   std::string label;
   std::span<ShaderModule> shaders;
   std::span<ColorTargetState> targets;
@@ -986,42 +796,23 @@ struct GraphicPipelineDesc {
   MultisampleState multiSample{};
 };
 
-class GraphicPipeline : public PipelineBase
+class RenderPipeline
 {
-protected:
+public:
   enum class Type {
     Render,
     Mesh,
   };
 
-  GraphicPipeline(Device* device, Type type);
+  RenderPipeline(Device* device, Type type);
 
-public:
-  ~GraphicPipeline() override;
+  virtual ~RenderPipeline();
 
-  void Create(const GraphicPipelineDesc& desc);
-
-  D3D12_PRIMITIVE_TOPOLOGY NativePrimitiveTopology() const { return m_PrimitiveTopology; }
+  virtual void Create(const RenderPipelineDesc& desc) = 0;
 
 protected:
+  Device* m_Device;
   Type m_Type;
-
-protected:
-  D3D12_PRIMITIVE_TOPOLOGY m_PrimitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
-};
-
-class RenderPipeline : public GraphicPipeline
-{
-public:
-  RenderPipeline(Device* device);
-  ~RenderPipeline() override;
-};
-
-class MeshPipeline : public GraphicPipeline
-{
-public:
-  MeshPipeline(Device* device);
-  ~MeshPipeline() override;
 };
 
 enum class RayTracingPipelineFlags : uint32_t {
@@ -1054,21 +845,12 @@ class RayTracingPipeline
 {
 public:
   RayTracingPipeline(Device* device);
-  ~RayTracingPipeline();
+  virtual ~RayTracingPipeline();
 
-  void Create(const RayTracingPipelineDesc& desc);
+  virtual void Create(const RayTracingPipelineDesc& desc) = 0;
 
-public:
-  ID3D12StateObject* StateObject() const { return m_StateObject.Get(); }
-
-  void* ShaderIdentifier(std::string entryPoint) const;
-
-private:
+protected:
   Device* m_Device;
-
-private:
-  Microsoft::WRL::ComPtr<ID3D12StateObject> m_StateObject;
-  Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_StateObjectProperties;
 };
 
 struct ShaderTableDesc {
@@ -1084,17 +866,11 @@ class ShaderTable
 {
 public:
   ShaderTable(Device* device);
-  ~ShaderTable();
+  virtual ~ShaderTable();
 
-  void Create(const ShaderTableDesc& desc);
+  virtual void Create(const ShaderTableDesc& desc) = 0;
 
-public:
-  D3D12_GPU_VIRTUAL_ADDRESS_RANGE RayGenShaderRecord() const;
-  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE MissShaderTable() const;
-  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE HitGroupTable() const;
-  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE CallableShaderTable() const;
-
-private:
+  protected:
   Device* m_Device;
 
   std::shared_ptr<Buffer> m_Buffer;
@@ -1126,90 +902,38 @@ class Device
 public:
   static std::unique_ptr<Device> CreateDevice(Backend backend, const GPUSelection& gpuSelection);
 
-  Device(const GPUSelection& gpuSelection);
   virtual ~Device();
 
-  virtual void Create(const GPUSelection& gpuSelection);
+  virtual void Create(const GPUSelection& gpuSelection) = 0;
 
-  virtual void PrintAdapterInformation();
+  virtual void PrintAdapterInformation() = 0;
 
   Queue* GetQueue() const { return m_Queue.get(); }
 
-  std::shared_ptr<Surface> CreateSurface(void* handle);
-  std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc& desc);
-  std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc);
-  std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc);
-  std::shared_ptr<AccelerationStructure> CreateAccelerationStructure(const AccelerationStructureDesc& desc);
+  virtual std::shared_ptr<Surface> CreateSurface(void* handle) = 0;
+  virtual std::shared_ptr<QuerySet> CreateQuerySet(const QuerySetDesc& desc) = 0;
+  virtual std::shared_ptr<Texture> CreateTexture(const TextureDesc& desc) = 0;
+  virtual std::shared_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
+  virtual std::shared_ptr<AccelerationStructure> CreateAccelerationStructure(const AccelerationStructureDesc& desc) = 0;
 
-  std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc);
-  std::shared_ptr<RenderPipeline> CreateRenderPipeline(const GraphicPipelineDesc& desc);
-  std::shared_ptr<MeshPipeline> CreateMeshPipeline(const GraphicPipelineDesc& desc);
-  std::shared_ptr<RayTracingPipeline> CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc);
-  std::shared_ptr<ShaderTable> CreateShaderTable(const ShaderTableDesc& desc);
+  virtual std::shared_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc) = 0;
+  virtual std::shared_ptr<RenderPipeline> CreateRenderPipeline(const RenderPipelineDesc& desc) = 0;
+  virtual std::shared_ptr<RenderPipeline> CreateMeshPipeline(const RenderPipelineDesc& desc) = 0;
+  virtual std::shared_ptr<RayTracingPipeline> CreateRayTracingPipelinePipeline(const RayTracingPipelineDesc& desc) = 0;
+  virtual std::shared_ptr<ShaderTable> CreateShaderTable(const ShaderTableDesc& desc) = 0;
 
   uint64_t TimestampFrequencyHz() const { return m_TimestampFrequencyHz; }
 
-public:
-  DescriptorAllocation AllocCbvSrvUavDescriptor();
-  DescriptorAllocation AllocRtvDescriptor();
-  DescriptorAllocation AllocDsvDescriptor();
-
-  void FreeSrvUavDescriptor(DescriptorAllocation alloc);
-  void FreeRtvDescriptor(DescriptorAllocation alloc);
-  void FreeDsvDescriptor(DescriptorAllocation alloc);
-
-public:
-  ID3D12Device5* GetNativeDevice() const { return m_Device.Get(); }
-
-  IDXGIAdapter1* GetAdapter() const { return m_Adapter.Get(); }
-
-  D3D12MA::Allocator* GetAllocator() const { return m_Allocator.Get(); }
-
-  ID3D12DescriptorHeap* CbvSrvUavDescriptorHeap() const { return m_CbvSrvUavDescriptorHeap.Get(); }
-
-  ID3D12DescriptorHeap* RtvDescriptorHeap() const { return m_RtvDescriptorHeap.Get(); }
-
-  ID3D12DescriptorHeap* DsvDescriptorHeap() const { return m_DsvDescriptorHeap.Get(); }
-
-  ID3D12RootSignature* RootSignature() const { return m_RootSignature.Get(); }
-
-  ID3D12CommandSignature* DispatchSignature() const { return m_DispatchSignature.Get(); }
-
-  ID3D12CommandSignature* DrawCommandSignature() const { return m_DrawCommandSignature.Get(); }
-
-  ID3D12CommandSignature* DrawIndirectCommandSignature() const { return m_DrawIndirectCommandSignature.Get(); }
-
-  ID3D12CommandSignature* DispatchMeshCommandSignature() const { return m_DispatchMeshCommandSignature.Get(); }
-
-private:
+protected:
   std::unique_ptr<Queue> m_Queue;
   uint64_t m_TimestampFrequencyHz = 1;
-
-private:
-  DescriptorHeap m_CbvSrvUavDescriptorHeap;
-  DescriptorHeap m_RtvDescriptorHeap;
-  DescriptorHeap m_DsvDescriptorHeap;
-
-private:
-  Microsoft::WRL::ComPtr<IDXGIAdapter1> m_Adapter;
-  Microsoft::WRL::ComPtr<ID3D12Device5> m_Device;
-  Microsoft::WRL::ComPtr<D3D12MA::Allocator> m_Allocator;
-  // Used only when ENABLE_CPU_ALLOCATION_CALLBACKS
-  D3D12MA::ALLOCATION_CALLBACKS m_AllocationCallbacks;
-
-  Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
-  // For ExecuteIndirect
-  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DispatchSignature;
-  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DrawCommandSignature;
-  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DrawIndirectCommandSignature;
-  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_DispatchMeshCommandSignature;
 };
 
 struct SurfaceConfiguration {
   TextureFormat format;
-  UINT width;
-  UINT height;
-  UINT bufferCount;
+  uint32_t width;
+  uint32_t height;
+  uint32_t bufferCount;
   bool enableVsync = false;
 };
 
@@ -1217,19 +941,19 @@ class Surface
 {
 public:
   Surface(Device* device, void* handle);
-  ~Surface();
+  virtual ~Surface();
 
-  void Create();
+  virtual void Create() = 0;
 
   void Configure(SurfaceConfiguration& config);
-  std::shared_ptr<Texture> GetCurrentTexture();
-  void Present();
+  virtual std::shared_ptr<Texture> GetCurrentTexture() = 0;
+  virtual void Present() = 0;
 
   uint32_t CurrentFrameIndex() const { return m_FrameIndex; }
 
-private:
-  void CreateSwapChain(SurfaceConfiguration& config);
-  void CreateTextures(SurfaceConfiguration& config);
+protected:
+  virtual void CreateSwapChain(SurfaceConfiguration& config) = 0;
+  virtual void CreateTextures(SurfaceConfiguration& config) = 0;
 
   Device* m_Device;
   void* m_Handle;
@@ -1239,14 +963,6 @@ private:
   uint32_t m_FrameIndex;
   bool m_EnableVsync = false;
   bool m_Configured = false;
-
-private:
-  Microsoft::WRL::ComPtr<IDXGISwapChain3> m_SwapChain;
-
-  Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
-  HANDLE m_FenceEvent = nullptr;
-  UINT64 m_NextFenceValue = 0;
-  std::vector<UINT64> m_FenceValues;
 };
 
 class CommandEncoder;
@@ -1255,60 +971,46 @@ class CommandBuffer
 {
 public:
   CommandBuffer(Device* device);
-  ~CommandBuffer();
+  virtual ~CommandBuffer();
 
-  void Create();
-  void Init();
-  void Reset();
+  virtual void Create() = 0;
+  virtual void Init() = 0;
+  virtual void Reset() = 0;
 
-public:
-  void UpdateFenceValue(UINT64 value) { m_FenceValue = value; }
+  Device* GetDevice() const { return m_Device; }
 
-  UINT64 FenceValue() const { return m_FenceValue; }
+  uint64_t FenceValue() const { return m_FenceValue; }
 
-  void SetComputeRootSignatureIfNeeded();
-  void SetGraphicsRootSignatureIfNeeded();
+  void UpdateFenceValue(uint64_t value) { m_FenceValue = value; }
 
-public:
+protected:
   Device* m_Device;
-
-  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandList.Get(); }
-
-private:
-  Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_CommandAllocator;
-  Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList8> m_CommandList;
-
-  UINT64 m_FenceValue = 0;
-  bool m_ComputeRootSignatureSet = false;
-  bool m_GraphicRootSignatureSet = false;
-
-  // TODO: keep track of pso change
-  // TODO: basic resource state tracking?
+  uint64_t m_FenceValue = 0;
 };
 
 class Queue
 {
 public:
   Queue(Device* device);
-  ~Queue();
+  virtual ~Queue();
 
-  void Create();
+  virtual void Create() = 0;
 
-  CommandEncoder CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
+  std::unique_ptr<CommandEncoder> CreateCommandEncoder(std::optional<std::string> label = std::nullopt);
 
-  void Submit(std::span<CommandBuffer*> commandBuffers);
-  void WaitForAll();
+  virtual void Submit(std::span<CommandBuffer*> commandBuffers) = 0;
+  virtual void WaitForAll() = 0;
 
-public:
-  // TMP: remove this once public API is done
-  ID3D12CommandQueue* GetNativeQueue() const { return m_CommandQueue.Get(); }
-
-private:
+protected:
   CommandBuffer* FindOrCreateCommandBuffer();
   CommandBuffer* CreateCommandBuffer();
   void RecycleCommandBuffers();
-  void InitCommandBuffer(CommandBuffer* commandBuffer);
   void ResetCommandBuffer(CommandBuffer* commandBuffer);
+
+  virtual std::unique_ptr<CommandEncoder> CreateCommandEncoderImpl(std::string label, CommandBuffer* commandBuffer) = 0;
+  virtual std::unique_ptr<CommandBuffer> CreateCommandBufferImpl() = 0;
+
+  virtual uint64_t FenceCompletedValue() const = 0;
 
   Device* m_Device;
 
@@ -1316,40 +1018,15 @@ private:
   std::vector<std::unique_ptr<CommandBuffer>> m_CommandBuffers;
   std::list<CommandBuffer*> m_CommandBuffersExecuting;
   std::list<CommandBuffer*> m_CommandBuffersAvailable;
-
-private:
-  Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_CommandQueue;
-
-  Microsoft::WRL::ComPtr<ID3D12Fence> m_Fence;
-  UINT64 m_NextFenceValue = 0;
-  HANDLE m_FenceEvent = nullptr;
 };
 
 class ComputePassEncoder;
 class RenderPassEncoder;
-class MeshPassEncoder;
 class RayTracingPassEncoder;
 
 struct ComputePassDesc;
-struct GraphicPassDesc;
+struct RenderPassDesc;
 struct RayTracingPassDesc;
-
-class EncoderBase
-{
-public:
-  EncoderBase(CommandBuffer* commandBuffer);
-  virtual ~EncoderBase();
-
-  Device* GetDevice() const { return m_CommandBuffer->m_Device; }
-
-public:
-  ID3D12GraphicsCommandList8* CommandList() const { return m_CommandBuffer->CommandList(); }
-
-protected:
-  CommandBuffer* m_CommandBuffer;
-};
-
-// TODO: class PassEncoderBase : public EncoderBase => to manage begin/end, timestamp write
 
 struct GlobalBarrierDesc {
   StageAccess from;
@@ -1375,34 +1052,35 @@ struct BarriersDesc {
   std::span<TextureBarrierDesc> textures{};
 };
 
-class CommandEncoder : public EncoderBase
+class CommandEncoder
 {
 public:
   CommandEncoder(std::string label, CommandBuffer* commandBuffer);
-  ~CommandEncoder();
+  virtual ~CommandEncoder();
 
   // TODO: make it so that we can't begin a pass if another one hasn't yet ended
-  ComputePassEncoder BeginComputePass(const ComputePassDesc& desc);
-  RenderPassEncoder BeginRenderPass(const GraphicPassDesc& desc);
-  MeshPassEncoder BeginMeshPass(const GraphicPassDesc& desc);
-  RayTracingPassEncoder BeginRayTracingPass(const RayTracingPassDesc& desc);
+  virtual std::unique_ptr<ComputePassEncoder> BeginComputePass(const ComputePassDesc& desc) = 0;
+  virtual std::unique_ptr<RenderPassEncoder> BeginRenderPass(const RenderPassDesc& desc) = 0;
+  virtual std::unique_ptr<RayTracingPassEncoder> BeginRayTracingPass(const RayTracingPassDesc& desc) = 0;
 
   // TODO: make these uncallable if a pass has begun+not yet ended?
-  void Barrier(const BarriersDesc& desc);
-  void BuildTopLevelAccelerationStructure(AccelerationStructure* dst, BufferWithOffset instances, uint32_t instanceCount, AccelerationStructure* src = nullptr);
-  void BuildBottomLevelAccelerationStructure(AccelerationStructure* dst, std::span<BottomLevelGeometryDesc> geometries, AccelerationStructure* src = nullptr);
-  void CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size);
-  void ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset);
-  void WriteTimestamp(QuerySet* querySet, uint32_t index);
+  virtual void Barrier(const BarriersDesc& desc) = 0;
+  virtual void BuildTopLevelAccelerationStructure(AccelerationStructure* dst, BufferWithOffset instances, uint32_t instanceCount, AccelerationStructure* src = nullptr) = 0;
+  virtual void BuildBottomLevelAccelerationStructure(AccelerationStructure* dst, std::span<BottomLevelGeometryDesc> geometries, AccelerationStructure* src = nullptr) = 0;
+  virtual void CopyBufferToBuffer(Buffer* src, uint64_t srcOffset, Buffer* dst, uint64_t dstOffset, uint64_t size) = 0;
+  virtual void ResolveQuerySet(QuerySet* querySet, uint32_t firstQuery, uint32_t queryCount, Buffer* dst, uint64_t dstOffset) = 0;
+  virtual void WriteTimestamp(QuerySet* querySet, uint32_t index) = 0;
 
   // TODO: BuildOpacityMicroMaps
 
   // TODO: assert that every pass has ended
-  CommandBuffer* Finish();
+  virtual CommandBuffer* Finish() = 0;
 
-private:
-  void BeginGraphicPass(const GraphicPassDesc& desc);
+  Device* GetDevice() const { return m_CommandBuffer->GetDevice(); }
+
+protected:
   std::string m_Label;
+  CommandBuffer* m_CommandBuffer;
 };
 
 struct ComputePassDesc {
@@ -1410,19 +1088,20 @@ struct ComputePassDesc {
   std::optional<TimestampWrites> timestampWrites = std::nullopt;
 };
 
-class ComputePassEncoder : public EncoderBase
+class ComputePassEncoder
 {
 public:
   ComputePassEncoder(const ComputePassDesc& desc, CommandBuffer* commandBuffer);
-  ~ComputePassEncoder();
+  virtual ~ComputePassEncoder();
 
-  void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1);
-  // DispatchIndirect(indirectBuffer, indirectOffset)
-  void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void* data);
-  void SetPipeline(ComputePipeline* pipeline);
+  virtual void Dispatch(uint32_t x, uint32_t y = 1, uint32_t z = 1) = 0;
+  // TODO: virtual DispatchIndirect(indirectBuffer, indirectOffset)
+  virtual void End() = 0;
+  virtual void PushConstants(uint32_t offset, uint32_t size, const void* data) = 0;
+  virtual void SetPipeline(ComputePipeline* pipeline) = 0;
 
-private:
+protected:
+  CommandBuffer* m_CommandBuffer;
   ComputePassDesc m_Desc;  // FIXME: remove this and store TimestampWrites instead
   bool m_Ended = false;
 };
@@ -1460,52 +1139,33 @@ struct DepthStencilAttachment {
   // bool stencilReadOnly = false;
 };
 
-struct GraphicPassDesc {
+struct RenderPassDesc {
   std::string label;
   std::span<ColorAttachment> colorAttachment;
   DepthStencilAttachment depthStencilAttachment{};
   std::optional<TimestampWrites> timestampWrites = std::nullopt;
 };
 
-class GraphicPassEncoder : public EncoderBase
-{
-protected:
-  GraphicPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
-
-public:
-  ~GraphicPassEncoder() override;
-
-public:
-  void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void* data);
-
-protected:
-  GraphicPassDesc m_Desc;  // FIXME: remove this and store TimestampWrites instead.
-  bool m_Ended = false;
-};
-
-class RenderPassEncoder : public GraphicPassEncoder
+class RenderPassEncoder
 {
 public:
-  RenderPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
-  ~RenderPassEncoder() override;
+  RenderPassEncoder(const RenderPassDesc& desc, CommandBuffer* commandBuffer);
+  virtual ~RenderPassEncoder();
 
-  void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
+  virtual void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0) = 0;
   // TODO: DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
   // TODO: DrawIndirect(indirectBuffer, indirectOffset)
   // TODO: DrawIndexedIndirect(indirectBuffer, indirectOffset)
-  void SetPipeline(RenderPipeline* pipeline);
-};
-
-class MeshPassEncoder : public GraphicPassEncoder
-{
-public:
-  MeshPassEncoder(const GraphicPassDesc& desc, CommandBuffer* commandBuffer);
-  ~MeshPassEncoder() override;
-
   // TODO: DrawMesh();
-  void DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer = nullptr, uint64_t countOffset = 0);
-  void SetPipeline(MeshPipeline* pipeline);
+  virtual void DrawMeshIndirect(Buffer* indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, Buffer* countBuffer = nullptr, uint64_t countOffset = 0) = 0;
+  virtual void End() = 0;
+  virtual void PushConstants(uint32_t offset, uint32_t size, const void* data) = 0;
+  virtual void SetPipeline(RenderPipeline* pipeline) = 0;
+
+protected:
+  CommandBuffer* m_CommandBuffer;
+  RenderPassDesc m_Desc;  // FIXME: remove this and store TimestampWrites instead.
+  bool m_Ended = false;
 };
 
 // TODO: DRY somehow with compute pass ?
@@ -1514,19 +1174,20 @@ struct RayTracingPassDesc {
   std::optional<TimestampWrites> timestampWrites = std::nullopt;
 };
 
-class RayTracingPassEncoder : public EncoderBase
+class RayTracingPassEncoder
 {
 public:
   RayTracingPassEncoder(const RayTracingPassDesc& desc, CommandBuffer* commandBuffer);
-  ~RayTracingPassEncoder();
+  virtual ~RayTracingPassEncoder();
 
-  void TraceRays(ShaderTable* shaderTable, uint32_t width, uint32_t height, uint32_t depth = 1);
+  virtual void End() = 0;
+  virtual void PushConstants(uint32_t offset, uint32_t size, const void* data) = 0;
+  virtual void SetPipeline(RayTracingPipeline* pipeline) = 0;
+  virtual void TraceRays(ShaderTable* shaderTable, uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
   // TODO: TraceRaysIndirect
-  void End();
-  void PushConstants(uint32_t offset, uint32_t size, const void* data);
-  void SetPipeline(RayTracingPipeline* pipeline);
 
-private:
+protected:
+  CommandBuffer* m_CommandBuffer;
   RayTracingPassDesc m_Desc;
   bool m_Ended = false;
 };

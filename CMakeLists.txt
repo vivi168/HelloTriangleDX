@@ -12,9 +12,9 @@ if(MSVC)
     target_compile_definitions(common INTERFACE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 endif()
 
-add_subdirectory(third_party/D3D12MemoryAllocator)
 add_subdirectory(third_party/DirectXMesh)
 add_subdirectory(third_party/DirectXTex)
+add_subdirectory(IssouRHI)
 
 add_library(imgui)
 target_sources(imgui
@@ -33,44 +33,6 @@ target_include_directories(imgui
         third_party/imgui/backends
 )
 target_link_libraries(imgui PRIVATE common)
-
-add_library(IssouRHI)
-target_sources(IssouRHI
-    PRIVATE
-        IssouRHI/AccelerationStructure.cpp
-        IssouRHI/Buffer.cpp
-        IssouRHI/CommandEncoder.cpp
-        IssouRHI/DescriptorHeap.cpp
-        IssouRHI/Device.cpp
-        IssouRHI/Pipeline.cpp
-        IssouRHI/QuerySet.cpp
-        IssouRHI/Queue.cpp
-        IssouRHI/ShaderTable.cpp
-        IssouRHI/Surface.cpp
-        IssouRHI/Texture.cpp
-        IssouRHI/Utils.cpp
-    PUBLIC
-        FILE_SET headers
-        TYPE HEADERS
-        BASE_DIRS
-            IssouRHI/include
-        FILES
-            IssouRHI/include/IssouRHI.h
-)
-target_include_directories(IssouRHI
-    PUBLIC # PRIVATE TODO: make these private when we remove these include from IssouRHI.h
-        third_party/DirectX-Headers/include/directx
-        third_party/D3D12MemoryAllocator/include
-)
-target_link_libraries(IssouRHI
-    PRIVATE
-        common
-        D3D12MemoryAllocator
-        d3d12.lib
-        dxgi.lib
-        dxguid.lib
-        shlwapi.lib
-)
 
 set(SHADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(HLSL_SOURCES
@@ -119,7 +81,6 @@ target_sources(HelloTriangleDX
 target_precompile_headers(HelloTriangleDX PRIVATE stdafx.h)
 target_include_directories(HelloTriangleDX
     PRIVATE
-        third_party/DirectX-Headers/include/directx # TODO remove when everything is done through the rhi
         third_party/DirectXMesh/DirectXMesh
         third_party/DirectXTex/DirectXTex
 )
@@ -130,7 +91,6 @@ target_link_libraries(HelloTriangleDX
         DirectXTex
         imgui
         IssouRHI
-        d3d12.lib # TODO: remove when everything dx12 is done through the rhi
 )
 
 find_program(DXC_EXECUTABLE dxc.exe)

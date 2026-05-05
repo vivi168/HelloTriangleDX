@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "IssouRHI.h"
+#include "InteropD3D12.h"
 #include "Win32Application.h"
 
 #include <shellapi.h>
@@ -64,7 +65,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
   }
 
   if (g_CommandLineParameters.m_List) {
-    IssouRHI::PrintAdapterList();
+#ifdef BUILD_D3D12_BACKEND
+    IssouRHI::D3D12::PrintAdapterList();
+#endif
     return (int)ExitCode::GPUList;
   }
 

@@ -97,13 +97,9 @@ int Win32Application::Run(HINSTANCE hInstance, int nCmdShow, std::unique_ptr<Iss
 
 HWND Win32Application::GetHwnd() { return g_Hwnd; }
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd,
-                                                             UINT msg,
-                                                             WPARAM wParam,
-                                                             LPARAM lParam);
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam,
-                                   LPARAM lParam)
+static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
   if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
     return true;

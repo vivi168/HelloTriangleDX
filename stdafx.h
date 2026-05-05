@@ -6,8 +6,6 @@
 
 #include <windows.h>
 
-#include <d3dx12_resource_helpers.h>
-
 #include <DirectXMath.h>
 #include <DirectXMesh.h>
 #include <DirectXTex.h>
