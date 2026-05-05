@@ -2,7 +2,7 @@
 
 namespace IssouRHI
 {
-CommandEncoder::CommandEncoder(std::string label, CommandBuffer* commandBuffer) : m_CommandBuffer(commandBuffer), m_Label(label) {}
+CommandEncoder::CommandEncoder(std::string label, CommandBuffer* commandBuffer) : m_Label(label), m_CommandBuffer(commandBuffer) {}
 
 CommandEncoder::~CommandEncoder()
 {

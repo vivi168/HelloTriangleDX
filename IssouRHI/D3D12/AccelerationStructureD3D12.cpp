@@ -145,12 +145,11 @@ void AccelerationStructureImpl::Create(const AccelerationStructureDesc& desc)
   }
 
   {
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{
-        .ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .RaytracingAccelerationStructure = {
-            .Location = m_Buffer->GpuAddress(),
-        },
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.RaytracingAccelerationStructure = {
+        .Location = m_Buffer->GpuAddress(),
     };
 
     m_Srv = ToBackend(m_Device)->AllocCbvSrvUavDescriptor();
