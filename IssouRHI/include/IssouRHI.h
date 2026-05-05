@@ -41,8 +41,8 @@
 namespace IssouRHI
 {
 struct GPUSelection {
-  uint32_t Index = UINT32_MAX;
-  std::wstring Substring;  // FIXME: make this not wstring
+  uint32_t index = std::numeric_limits<uint32_t>::max();
+  std::string substring;
 };
 
 // TODO: Utils

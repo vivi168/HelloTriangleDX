@@ -1,18 +1,18 @@
-#include "stdafx.h"
-#include "IssouRHI.h"
 #include "InteropD3D12.h"
+#include "IssouRHI.h"
 #include "Win32Application.h"
+#include "stdafx.h"
 
 #include <shellapi.h>
 
 static void PrintHelp()
 {
-  wprintf(
-      L"Command line syntax:\n"
-      L"-h, --Help   Print this information\n"
-      L"-l, --List   Print list of GPUs\n"
-      L"-g S, --GPU S   Select GPU with name containing S\n"
-      L"-i N, --GPUIndex N   Select GPU index N\n");
+  printf(
+      "Command line syntax:\n"
+      "-h, --Help   Print this information\n"
+      "-l, --List   Print list of GPUs\n"
+      "-g S, --GPU S   Select GPU with name containing S\n"
+      "-i N, --GPUIndex N   Select GPU index N\n");
 }
 
 struct CommandLineParameters {
@@ -20,17 +20,17 @@ struct CommandLineParameters {
   bool m_List = false;
   IssouRHI::GPUSelection m_GPUSelection;
 
-  bool Parse(int argc, wchar_t** argv)
+  bool Parse(int argc, char** argv)
   {
     for (int i = 1; i < argc; ++i) {
-      if (_wcsicmp(argv[i], L"-h") == 0 || _wcsicmp(argv[i], L"--Help") == 0) {
+      if (_stricmp(argv[i], "-h") == 0 || _stricmp(argv[i], "--Help") == 0) {
         m_Help = true;
-      } else if (_wcsicmp(argv[i], L"-l") == 0 || _wcsicmp(argv[i], L"--List") == 0) {
+      } else if (_stricmp(argv[i], "-l") == 0 || _stricmp(argv[i], "--List") == 0) {
         m_List = true;
-      } else if ((_wcsicmp(argv[i], L"-g") == 0 || _wcsicmp(argv[i], L"--GPU") == 0) && i + 1 < argc) {
-        m_GPUSelection.Substring = argv[++i];
-      } else if ((_wcsicmp(argv[i], L"-i") == 0 || _wcsicmp(argv[i], L"--GPUIndex") == 0) && i + 1 < argc) {
-        m_GPUSelection.Index = _wtoi(argv[++i]);
+      } else if ((_stricmp(argv[i], "-g") == 0 || _stricmp(argv[i], "--GPU") == 0) && i + 1 < argc) {
+        m_GPUSelection.substring = argv[++i];
+      } else if ((_stricmp(argv[i], "-i") == 0 || _stricmp(argv[i], "--GPUIndex") == 0) && i + 1 < argc) {
+        m_GPUSelection.index = atoi(argv[++i]);
       } else {
         return false;
       }
@@ -47,13 +47,9 @@ enum class ExitCode : int {
   CommandLineError = -2,
 };
 
-_Use_decl_annotations_
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+int main(int argc, char** argv)
 {
-  int argc;
-  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-  if (!g_CommandLineParameters.Parse(argc, argv)) {
+    if (!g_CommandLineParameters.Parse(argc, argv)) {
     wprintf(L"ERROR: Invalid command line syntax.\n");
     PrintHelp();
     return (int)ExitCode::CommandLineError;
@@ -72,12 +68,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
   }
 
   auto device = IssouRHI::Device::CreateDevice(IssouRHI::Backend::D3D12, g_CommandLineParameters.m_GPUSelection);
-  auto result = Win32Application::Run(hInstance, nCmdShow, std::move(device));
+  auto result = Win32Application::Run(GetModuleHandle(NULL), SW_SHOW, std::move(device));
 
   return result;
-}
-
-int main(int argc, char** argv)
-{
-  return WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
 }

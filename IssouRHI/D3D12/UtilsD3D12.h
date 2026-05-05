@@ -10,7 +10,7 @@ namespace IssouRHI
 namespace D3D12
 {
 std::wstring StringToWstring(std::string_view s);
-void ReportLiveObjects(); // TODO: move this to device static member + D3D12 only
+void ReportLiveObjects();
 void PrintAdapterList();
 void PrintStateObjectDesc(const D3D12_STATE_OBJECT_DESC* desc);
 

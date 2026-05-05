@@ -68,22 +68,22 @@ static ComPtr<IDXGIAdapter1> SelectAdapter(const GPUSelection& GPUSelection)
 
   CHECK_HR(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&dxgiFactory)));
 
-  if (GPUSelection.Index != UINT32_MAX) {
+  if (GPUSelection.index != std::numeric_limits<uint32_t>::max()) {
     // Cannot specify both index and name.
-    if (!GPUSelection.Substring.empty()) {
+    if (!GPUSelection.substring.empty()) {
       return adapter;
     }
 
-    CHECK_HR(dxgiFactory->EnumAdapters1(GPUSelection.Index, &adapter));
+    CHECK_HR(dxgiFactory->EnumAdapters1(GPUSelection.index, &adapter));
     return adapter;
   }
 
-  if (!GPUSelection.Substring.empty()) {
+  if (!GPUSelection.substring.empty()) {
     ComPtr<IDXGIAdapter1> tmpAdapter;
     for (UINT i = 0; dxgiFactory->EnumAdapters1(i, &tmpAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
       DXGI_ADAPTER_DESC1 desc;
       tmpAdapter->GetDesc1(&desc);
-      if (StrStrI(desc.Description, GPUSelection.Substring.c_str())) {
+      if (StrStrI(desc.Description, StringToWstring(GPUSelection.substring).c_str())) {
         // Second matching adapter found - error.
         if (adapter) {
           adapter.Reset();
