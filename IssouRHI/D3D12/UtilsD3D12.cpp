@@ -1,5 +1,8 @@
 #include "UtilsD3D12.h"
 
+#include <iomanip>
+#include <sstream>
+
 #include <dxgidebug.h>
 
 using Microsoft::WRL::ComPtr;
@@ -10,7 +13,7 @@ namespace D3D12
 {
 std::wstring StringToWstring(std::string_view s)
 {
-  size_t len = s.length();
+  int len = static_cast<int>(s.length());
 
   if (len == 0) return std::wstring();
 

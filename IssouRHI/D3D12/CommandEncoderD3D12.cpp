@@ -88,7 +88,7 @@ std::unique_ptr<RenderPassEncoder> CommandEncoderImpl::BeginRenderPass(const Ren
     }
   }
 
-  bool hasColorAttachment = rtvHandles.size() > 0;
+  // bool hasColorAttachment = rtvHandles.size() > 0;
   bool hasDepthStencilAttachment = desc.depthStencilAttachment.view != nullptr;
 
   if (hasDepthStencilAttachment) {
@@ -113,11 +113,11 @@ std::unique_ptr<RenderPassEncoder> CommandEncoderImpl::BeginRenderPass(const Ren
     CommandList()->ClearDepthStencilView(dsvHandle,
                                          clearFlags,
                                          desc.depthStencilAttachment.depthClearValue,
-                                         static_cast<UINT>(desc.depthStencilAttachment.stencilClearValue),
+                                         static_cast<UINT8>(desc.depthStencilAttachment.stencilClearValue),
                                          0, nullptr);
   }
 
-  CommandList()->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE, hasDepthStencilAttachment ? &dsvHandle : nullptr);
+  CommandList()->OMSetRenderTargets(static_cast<UINT>(rtvHandles.size()), rtvHandles.data(), FALSE, hasDepthStencilAttachment ? &dsvHandle : nullptr);
 
   if (hasReference) {
     D3D12_VIEWPORT viewport{0.f, 0.f, static_cast<float>(referenceSize.width), static_cast<float>(referenceSize.height), 0.f, 1.f};

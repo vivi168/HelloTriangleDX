@@ -2,6 +2,7 @@
 
 #include "CommonD3D12.h"
 
+#include <string_view>
 #include <string>
 #include <vector>
 

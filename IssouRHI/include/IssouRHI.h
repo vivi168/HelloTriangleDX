@@ -2,14 +2,11 @@
 
 // TODO: get rid of STL in public header?
 // would need: string (=> const char* ?) span(=> ptr + size?), optional(=> nullptr ?), variant(=> enum+union ?), shared_ptr(=> ComPtr like class?)
-#include <deque>
-#include <filesystem>
-#include <fstream>
+#include <list>
+#include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -44,18 +41,6 @@ struct GPUSelection {
   uint32_t index = std::numeric_limits<uint32_t>::max();
   std::string substring;
 };
-
-// TODO: Utils
-inline bool IsPowerOfTwo(size_t v)
-{
-  return (v != 0) && ((v & (v - 1)) == 0);
-}
-
-inline size_t AlignUpPowerOfTwo(size_t size, size_t align)
-{
-  assert(IsPowerOfTwo(align));
-  return (size + align - 1) & ~(align - 1);
-}
 
 class Device;
 
@@ -240,6 +225,8 @@ inline uint32_t PlaneSlice(TextureAspect aspect)
     case TextureAspect::StencilOnly:
       // TODO
       return 1;
+    default:
+      std::unreachable();
   }
 }
 

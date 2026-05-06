@@ -14,14 +14,25 @@ ShaderTableImpl::~ShaderTableImpl() = default;
 
 static constexpr uint32_t RecordAlignment = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT;
 
+static bool IsPowerOfTwo(uint32_t v)
+{
+  return (v != 0) && ((v & (v - 1)) == 0);
+}
+
+static uint32_t AlignUpPowerOfTwo(uint32_t size, uint32_t align)
+{
+  assert(IsPowerOfTwo(align));
+  return (size + align - 1) & ~(align - 1);
+}
+
 void ShaderTableImpl::Create(const ShaderTableDesc& desc)
 {
   static constexpr uint32_t TableAlignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
 
   m_RayGenShaderRecordSize = TableAlignment;
-  m_MissShaderTableSize = desc.missEntryPoints.size() * RecordAlignment;
-  m_HitGroupTableSize = desc.hitGroupNames.size() * RecordAlignment;
-  m_CallableShaderTableSize = desc.callableEntryPoints.size() * RecordAlignment;
+  m_MissShaderTableSize = static_cast<uint32_t>(desc.missEntryPoints.size()) * RecordAlignment;
+  m_HitGroupTableSize = static_cast<uint32_t>(desc.hitGroupNames.size()) * RecordAlignment;
+  m_CallableShaderTableSize = static_cast<uint32_t>(desc.callableEntryPoints.size()) * RecordAlignment;
 
   m_MissShaderTableOffset = m_RayGenShaderRecordSize;
   m_HitGroupTableOffset = AlignUpPowerOfTwo(m_MissShaderTableOffset + m_MissShaderTableSize, TableAlignment);

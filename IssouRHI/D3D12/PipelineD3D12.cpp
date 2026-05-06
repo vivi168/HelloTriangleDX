@@ -288,7 +288,7 @@ void RenderPipelineImpl::Create(const RenderPipelineDesc& desc)
     };
 
     assert(desc.targets.size() <= D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT);
-    psoDesc.NumRenderTargets = desc.targets.size();
+    psoDesc.NumRenderTargets = static_cast<UINT>(desc.targets.size());
 
     for (size_t i = 0; i < psoDesc.NumRenderTargets; i++) {
       auto& target = desc.targets[i];
