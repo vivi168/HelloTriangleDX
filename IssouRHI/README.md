@@ -1,5 +1,10 @@
 # IssouRHI
 
+Learning project. Don't take anything too seriously. (Heavily) inspired by webgpu.
+Originally a way to procrastinate a ReSTIR implementation.
+D3D12 Backend mostly done (at least for my need)
+Metal in the work. Vulkan planned later?
+
 ```
 %%%%%%%%##*************************++++++++=====---------------------=======++++**####***++*#%@@%%%#
 %%%%%%%%##*************####%%#########********++=====--------------====++++****#########****#%%@@@%#
@@ -43,6 +48,3 @@
 %@@@@%%%%%%%%%%%##**++**#**+++++++++++++=====+++++++++++==========================+++++++++++
 %%@@@%%%%%%%%%%%%#******###**+++++++++++=======+++++++++++++===+++++=============++++++++==
 ```
-
-MEGA WIP. don't expect anything other than DX12 for now.
-public interface is a bit inspired by webgpu.
