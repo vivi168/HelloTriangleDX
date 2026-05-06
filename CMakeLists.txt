@@ -14,7 +14,7 @@ endif()
 
 add_subdirectory(third_party/DirectXMesh)
 add_subdirectory(third_party/DirectXTex)
-add_subdirectory(IssouRHI)
+add_subdirectory(third_party/IssouRHI)
 
 add_library(imgui)
 target_sources(imgui

@@ -1,15 +1,12 @@
 [submodule "imgui"]
 	path = third_party/imgui
 	url = https://github.com/ocornut/imgui
-[submodule "D3D12MemoryAllocator"]
-	path = IssouRHI/third_party/D3D12MemoryAllocator
-	url = https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator
-[submodule "DirectX-Headers"]
-	path = IssouRHI/third_party/DirectX-Headers
-	url = https://github.com/microsoft/DirectX-Headers
 [submodule "third_party/DirectXMesh"]
 	path = third_party/DirectXMesh
 	url = https://github.com/microsoft/DirectXMesh
 [submodule "third_party/DirectXTex"]
 	path = third_party/DirectXTex
 	url = https://github.com/microsoft/DirectXTex
+[submodule "third_party/IssouRHI"]
+	path = third_party/IssouRHI
+	url = https://github.com/vivi168/IssouRHI
