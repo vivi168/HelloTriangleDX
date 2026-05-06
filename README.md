@@ -4,8 +4,8 @@ For learning purpose.
 
 ```
 git submodule update --init --recursive
-cmake --preset Release
-ninja -C Release
+cmake --preset Clang-Cl
+cmake --build build --config Release
 ```
 
 ## Implemented as of August 05 2025
