@@ -15,6 +15,10 @@ elseif(BUILD_METAL_BACKEND AND NOT APPLE)
     message(FATAL_ERROR "BUILD_METAL_BACKEND requires Apple")
 endif()
 
+if(NOT BUILD_D3D12_BACKEND AND NOT BUILD_METAL_BACKEND)
+    message(FATAL_ERROR "At least one backend is required")
+endif()
+
 add_library(IssouRHI_common INTERFACE)
 target_compile_features(IssouRHI_common INTERFACE cxx_std_23)
 
