@@ -1112,7 +1112,7 @@ void Render(float time)
     };
     auto passEncoder = encoder->BeginRenderPass({
         .label = "Visibilty Buffer Pass",
-        .colorAttachment = targets,
+        .colorAttachments = targets,
         .depthStencilAttachment = {
             .view = g_DepthStencilBuffer->CreateView().get(),
             .depthClearValue = 1.0f,
@@ -1231,7 +1231,7 @@ void Render(float time)
     };
     auto passEncoder = encoder->BeginRenderPass({
         .label = "Final Compose Pass",
-        .colorAttachment = targets,
+        .colorAttachments = targets,
         .timestampWrites = IssouRHI::TimestampWrites{
             .beginningOfPassWriteIndex = Timestamp::FinalComposeBegin,
             .endOfPassWriteIndex = Timestamp::FinalComposeEnd,
