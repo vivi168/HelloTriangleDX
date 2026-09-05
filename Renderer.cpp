@@ -1455,10 +1455,14 @@ static void InitFrameResources()
     auto meshShaderBlob = ReadData(L"Meshlet.ms.cso");
     auto pixelShaderBlob = ReadData(L"Meshlet.ps.cso");
 
+    auto amplificationShaderLib = g_Device->CreateShaderLibrary(amplificationShaderBlob);
+    auto meshShaderLib = g_Device->CreateShaderLibrary(meshShaderBlob);
+    auto pixelShaderLib = g_Device->CreateShaderLibrary(pixelShaderBlob);
+
     IssouRHI::ShaderModule shaderModules[] = {
-        {.stage = IssouRHI::ShaderStage::Mesh, .code = meshShaderBlob.data(), .size = meshShaderBlob.size()},
-        {.stage = IssouRHI::ShaderStage::Task, .code = amplificationShaderBlob.data(), .size = amplificationShaderBlob.size()},
-        {.stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size()},
+        {.library = meshShaderLib.get(), .stage = IssouRHI::ShaderStage::Mesh, .entryPointName = "main"},
+        {.library = amplificationShaderLib.get(), .stage = IssouRHI::ShaderStage::Task, .entryPointName = "main"},
+        {.library = pixelShaderLib.get(), .stage = IssouRHI::ShaderStage::Fragment, .entryPointName = "main"},
     };
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::R32Uint,
@@ -1480,42 +1484,45 @@ static void InitFrameResources()
 
   // Compute skinning pipeline
   {
-    auto computeShaderBlob = ReadData(L"Skinning.cs.cso");
+    auto libBlob = ReadData(L"Skinning.cs.cso");
+    auto lib = g_Device->CreateShaderLibrary(libBlob);
 
     g_ComputePipelines[PSO::SkinningCS] = g_Device->CreateComputePipeline({
         .label = "Skinning Pipeline",
         .shader = {
+            .library = lib.get(),
             .stage = IssouRHI::ShaderStage::Compute,
-            .code = computeShaderBlob.data(),
-            .size = computeShaderBlob.size(),
+            .entryPointName = "main",
         },
     });
   }
 
   // Compute culling pipeline
   {
-    auto computeShaderBlob = ReadData(L"InstanceCulling.cs.cso");
+    auto libBlob = ReadData(L"InstanceCulling.cs.cso");
+    auto lib = g_Device->CreateShaderLibrary(libBlob);
 
     g_ComputePipelines[PSO::InstanceCullingCS] = g_Device->CreateComputePipeline({
         .label = "Culling Pipeline",
         .shader = {
+            .library = lib.get(),
             .stage = IssouRHI::ShaderStage::Compute,
-            .code = computeShaderBlob.data(),
-            .size = computeShaderBlob.size(),
+            .entryPointName = "main",
         },
     });
   }
 
   // Fill G-Buffer pipeline
   {
-    auto computeShaderBlob = ReadData(L"FillGBuffer.cs.cso");
+    auto libBlob = ReadData(L"FillGBuffer.cs.cso");
+    auto lib = g_Device->CreateShaderLibrary(libBlob);
 
     g_ComputePipelines[PSO::FillGBufferCS] = g_Device->CreateComputePipeline({
         .label = "Fill G-Buffer Pipeline",
         .shader = {
+            .library = lib.get(),
             .stage = IssouRHI::ShaderStage::Compute,
-            .code = computeShaderBlob.data(),
-            .size = computeShaderBlob.size(),
+            .entryPointName = "main",
         },
     });
   }
@@ -1525,9 +1532,12 @@ static void InitFrameResources()
     auto vertexShaderBlob = ReadData(L"FullScreenTriangle.vs.cso");
     auto pixelShaderBlob = ReadData(L"FinalCompose.ps.cso");
 
+    auto vertexShaderLib = g_Device->CreateShaderLibrary(vertexShaderBlob);
+    auto pixelShaderLib = g_Device->CreateShaderLibrary(pixelShaderBlob);
+
     IssouRHI::ShaderModule shaderModules[] = {
-        {.stage = IssouRHI::ShaderStage::Vertex, .code = vertexShaderBlob.data(), .size = vertexShaderBlob.size()},
-        {.stage = IssouRHI::ShaderStage::Fragment, .code = pixelShaderBlob.data(), .size = pixelShaderBlob.size()},
+        {.library = vertexShaderLib.get(), .stage = IssouRHI::ShaderStage::Vertex, .entryPointName = "main"},
+        {.library = pixelShaderLib.get(), .stage = IssouRHI::ShaderStage::Fragment, .entryPointName = "main"},
     };
     IssouRHI::ColorTargetState targets[] = {{
         .format = IssouRHI::TextureFormat::RGBA8Unorm,
@@ -1542,14 +1552,13 @@ static void InitFrameResources()
 
   // Ray traced shadow pipeline
   {
-    auto rahitBlob = ReadData(L"RayTracing.rahit.cso");
-    auto rmissBlob = ReadData(L"RayTracing.rmiss.cso");
-    auto rgenBlob = ReadData(L"RayTracing.rgen.cso");
+    auto libBlob = ReadData(L"RayTracing.rt.cso");
+    auto lib = g_Device->CreateShaderLibrary(libBlob);
 
     IssouRHI::ShaderModule shaderModules[] = {
-        {.stage = IssouRHI::ShaderStage::RayAnyHit, .code = rahitBlob.data(), .size = rahitBlob.size(), .entryPointName = "ShadowAnyHit"},
-        {.stage = IssouRHI::ShaderStage::RayMiss, .code = rmissBlob.data(), .size = rmissBlob.size(), .entryPointName = "ShadowMiss"},
-        {.stage = IssouRHI::ShaderStage::RayGen, .code = rgenBlob.data(), .size = rgenBlob.size(), .entryPointName = "ShadowRayGen"},
+        {.library = lib.get(), .stage = IssouRHI::ShaderStage::RayAnyHit, .entryPointName = "ShadowAnyHit"},
+        {.library = lib.get(), .stage = IssouRHI::ShaderStage::RayMiss, .entryPointName = "ShadowMiss"},
+        {.library = lib.get(), .stage = IssouRHI::ShaderStage::RayGen, .entryPointName = "ShadowRayGen"},
     };
     IssouRHI::HitGroupDesc hitGroups[] = {
         {

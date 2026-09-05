@@ -14,7 +14,7 @@ inline std::filesystem::path GetExecutableDirectory()
 #endif
 }
 
-inline std::vector<uint8_t> ReadData(std::filesystem::path file)
+inline std::vector<std::byte> ReadData(std::filesystem::path file)
 {
   std::ifstream inFile(file, std::ios::in | std::ios::binary | std::ios::ate);
 
@@ -27,7 +27,7 @@ inline std::vector<uint8_t> ReadData(std::filesystem::path file)
   const std::streampos len = inFile.tellg();
   if (!inFile) throw std::runtime_error("Read ShaderModule");
 
-  std::vector<uint8_t> v;
+  std::vector<std::byte> v;
   v.resize(size_t(len));
 
   inFile.seekg(0, std::ios::beg);
