@@ -1,9 +1,6 @@
 #include "MeshletCommon.hlsli"
 
-cbuffer PushConstants : register(b0) {
-  BuffersDescriptorIndices g_DescIds;
-  uint FrameConstantsIndex;
-}
+ConstantBuffer<VisibilityBufferPassArgs> g_Args : register(b0);
 
 cbuffer IndirectArgumentConstants : register(b1) {
   uint InstanceIndex;
@@ -11,13 +8,13 @@ cbuffer IndirectArgumentConstants : register(b1) {
 
 VertexOut GetVertexAttributes(MeshInstanceData mi, uint meshletIndex, uint vertexIndex, uint textureIndex)
 {
-  StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
+  StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_Args.buffers.vertexPositionsBufferId];
   float3 position = positions[mi.firstPosition + vertexIndex];
 
-  StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_DescIds.vertexUVsBufferId];
+  StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_Args.buffers.vertexUVsBufferId];
   float2 uv = uvs[mi.firstUV + vertexIndex];
 
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
 
   VertexOut vout;
   vout.posCS = mul(float4(position, 1.0f), mul(mi.worldMatrix, g_FrameConstants.ViewProj));
@@ -51,7 +48,7 @@ void main(
     out vertices VertexOut verts[MESHLET_MAX_VERT]
 )
 {
-  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.instancesBufferId];
+  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_Args.buffers.instancesBufferId];
   MeshInstanceData mi = meshInstances[InstanceIndex];
 
   uint meshletIndex = payload.MeshletIndices[gid];
@@ -59,16 +56,16 @@ void main(
 
   if (meshletIndex >= mi.numMeshlets) return;
 
-  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
+  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_Args.buffers.meshletsBufferId];
   MeshletData m = meshlets[mi.firstMeshlet + meshletIndex];
 
   SetMeshOutputCounts(m.numVerts, m.numPrims);
 
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
 
   if (gtid < m.numVerts)
   {
-    uint vertexIndex = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + gtid);
+    uint vertexIndex = GetVertexIndex(g_Args.buffers, mi.firstVertIndex + m.firstVert + gtid);
     VertexOut v = GetVertexAttributes(mi, mi.firstMeshlet + meshletIndex, vertexIndex, textureIndex);
     verts[gtid] = v;
     s_PositionsCS[gtid] = float3(ClipToScreen(v.posCS.xy / v.posCS.w, g_FrameConstants.ScreenSize), v.posCS.w);
@@ -78,7 +75,7 @@ void main(
 
   if (gtid < m.numPrims)
   {
-    uint3 tri = GetPrimitive(g_DescIds, mi.firstPrimitive + m.firstPrim + gtid);
+    uint3 tri = GetPrimitive(g_Args.buffers, mi.firstPrimitive + m.firstPrim + gtid);
     tris[gtid] = tri;
 
     bool culled = false;

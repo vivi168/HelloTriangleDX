@@ -18,6 +18,7 @@ using hlsl_uint = UINT;
 using hlsl_bounding_sphere = DirectX::BoundingSphere;
 using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
 #define ASSERT_SIZE_M16(T) static_assert(sizeof(T) % 16 == 0, #T " size must be multiple of 16")
+#define ASSERT_SIZE_U32(T) static_assert(sizeof(T) % sizeof(UINT) == 0, #T " size must be multiple of UINT32")
 #else
 #define hlsl_float4x4 float4x4
 #define hlsl_float3x3 float3x3
@@ -28,6 +29,7 @@ using hlsl_byte4 = DirectX::PackedVector::XMUBYTEN4;
 #define hlsl_bounding_sphere float4
 #define hlsl_byte4 uint
 #define ASSERT_SIZE_M16(T)
+#define ASSERT_SIZE_U32(T)
 #endif
 
 struct FrameConstants {
@@ -87,6 +89,47 @@ struct FillGBufferPerDispatchConstants {
   hlsl_uint WorldNormalId;
   hlsl_uint BaseColorId;
 };
+
+// Arguments for each pass
+struct SkinningPassArgs {
+  SkinningBuffersDescriptorIndices buffers;
+  SkinningPerDispatchConstants constants;
+};
+ASSERT_SIZE_U32(SkinningPassArgs);
+
+struct InstanceCullingPassArgs {
+  CullingBuffersDescriptorIndices buffers;
+  hlsl_uint FrameConstantsIndex;
+  hlsl_uint NumInstances;
+};
+ASSERT_SIZE_U32(InstanceCullingPassArgs);
+
+struct VisibilityBufferPassArgs {
+  BuffersDescriptorIndices buffers;
+  hlsl_uint FrameConstantsIndex;
+};
+ASSERT_SIZE_U32(VisibilityBufferPassArgs);
+
+struct FillGBufferPassArgs {
+  FillGBufferPerDispatchConstants targets;
+  BuffersDescriptorIndices buffers;
+  hlsl_uint FrameConstantsIndex;
+};
+ASSERT_SIZE_U32(FillGBufferPassArgs);
+
+struct ShadowPassArgs {
+  hlsl_uint GBufferWorldPosId;
+  hlsl_uint ShadowBufferId;
+  hlsl_uint TlasId;
+  hlsl_uint FrameConstantsIndex;
+};
+ASSERT_SIZE_U32(ShadowPassArgs);
+
+struct FinalComposePassArgs {
+  hlsl_uint GBufferBaseColorId;
+  hlsl_uint ShadowBufferId;
+};
+ASSERT_SIZE_U32(FinalComposePassArgs);
 
 struct MaterialData {
   hlsl_uint baseColorId;

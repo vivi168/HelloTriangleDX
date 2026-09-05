@@ -1,11 +1,7 @@
 #include "MeshletCommon.hlsli"
 #include "VisibilityBufferCommon.hlsli"
 
-cbuffer PushConstants : register(b0) {
-  FillGBufferPerDispatchConstants g_PerDispatchConstants;
-  BuffersDescriptorIndices g_DescIds;
-  uint FrameConstantsIndex;
-}
+ConstantBuffer<FillGBufferPassArgs> g_Args : register(b0);
 
 SamplerState s1 : register(s1);
 
@@ -26,19 +22,19 @@ struct BarycentricDeriv {
 
 Vertex GetVertexAttributes(MeshInstanceData mi, uint vertexIndex)
 {
-  StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_DescIds.vertexPositionsBufferId];
+  StructuredBuffer<float3> positions = ResourceDescriptorHeap[g_Args.buffers.vertexPositionsBufferId];
   float3 position = positions[mi.firstPosition + vertexIndex];
 
-  StructuredBuffer<float3> normals = ResourceDescriptorHeap[g_DescIds.vertexNormalsBufferId];
+  StructuredBuffer<float3> normals = ResourceDescriptorHeap[g_Args.buffers.vertexNormalsBufferId];
   float3 normal = normals[mi.firstNormal + vertexIndex];
 
-  StructuredBuffer<float4> tangents = ResourceDescriptorHeap[g_DescIds.vertexTangentsBufferId];
+  StructuredBuffer<float4> tangents = ResourceDescriptorHeap[g_Args.buffers.vertexTangentsBufferId];
   float4 tangent = tangents[mi.firstTangent + vertexIndex];
 
-  StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_DescIds.vertexUVsBufferId];
+  StructuredBuffer<float2> uvs = ResourceDescriptorHeap[g_Args.buffers.vertexUVsBufferId];
   float2 uv = uvs[mi.firstUV + vertexIndex];
 
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
 
   Vertex vout;
   vout.posCS = mul(float4(position, 1.0f), mul(mi.worldMatrix, g_FrameConstants.ViewProj));
@@ -115,23 +111,23 @@ void main(uint3 dtid : SV_DispatchThreadID)
 {
   uint2 position = dtid.xy;
 
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
 
   if (any(position >= uint2(g_FrameConstants.ScreenSize))) {
     return;
   }
 
-  Texture2D<uint> tex = ResourceDescriptorHeap[g_PerDispatchConstants.VisibilityBufferId];
+  Texture2D<uint> tex = ResourceDescriptorHeap[g_Args.targets.VisibilityBufferId];
   uint value = tex.Load(int3(position, 0));
 
   if (value == 0) {
-    RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_PerDispatchConstants.BaseColorId];
+    RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_Args.targets.BaseColorId];
     gBufferBaseColor[position] = float4(0, 0, 0, 0);
 
-    RWTexture2D<float4> gBufferWorldPos = ResourceDescriptorHeap[g_PerDispatchConstants.WorldPositionId];
+    RWTexture2D<float4> gBufferWorldPos = ResourceDescriptorHeap[g_Args.targets.WorldPositionId];
     gBufferWorldPos[position] = float4(0, 0, 0, 0);
 
-    RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_PerDispatchConstants.WorldNormalId];
+    RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_Args.targets.WorldNormalId];
     gBufferWorldNorm[position] = float4(0, 0, 0, 0);
 
     return;
@@ -139,18 +135,18 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
   Visibility vis = UnpackVisibility(value);
 
-  MeshletData m = GetMeshletData(g_DescIds, vis.meshletIndex);
-  MeshInstanceData mi = GetInstanceData(g_DescIds, m.instanceIndex);
+  MeshletData m = GetMeshletData(g_Args.buffers, vis.meshletIndex);
+  MeshInstanceData mi = GetInstanceData(g_Args.buffers, m.instanceIndex);
 
-  uint3 tri = GetPrimitive(g_DescIds, mi.firstPrimitive + m.firstPrim + vis.primitiveIndex);
+  uint3 tri = GetPrimitive(g_Args.buffers, mi.firstPrimitive + m.firstPrim + vis.primitiveIndex);
 
-  uint i0 = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + tri.x);
+  uint i0 = GetVertexIndex(g_Args.buffers, mi.firstVertIndex + m.firstVert + tri.x);
   Vertex v0 = GetVertexAttributes(mi, i0);
 
-  uint i1 = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + tri.y);
+  uint i1 = GetVertexIndex(g_Args.buffers, mi.firstVertIndex + m.firstVert + tri.y);
   Vertex v1 = GetVertexAttributes(mi, i1);
 
-  uint i2 = GetVertexIndex(g_DescIds, mi.firstVertIndex + m.firstVert + tri.z);
+  uint i2 = GetVertexIndex(g_Args.buffers, mi.firstVertIndex + m.firstVert + tri.z);
   Vertex v2 = GetVertexAttributes(mi, i2);
 
   // Compute Barycentrics
@@ -169,20 +165,20 @@ void main(uint3 dtid : SV_DispatchThreadID)
   float2 uv_ddx = float2(uvx.y, uvy.y);
   float2 uv_ddy = float2(uvx.z, uvy.z);
 
-  StructuredBuffer<MaterialData> materials = ResourceDescriptorHeap[g_DescIds.materialsBufferId];
+  StructuredBuffer<MaterialData> materials = ResourceDescriptorHeap[g_Args.buffers.materialsBufferId];
   MaterialData material = materials[m.materialIndex];
 
   Texture2D baseColorTex = ResourceDescriptorHeap[NonUniformResourceIndex(material.baseColorId)];
   float4 baseColor = baseColorTex.SampleGrad(s1, uv, uv_ddx, uv_ddy);
 
-  RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_PerDispatchConstants.BaseColorId];
+  RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_Args.targets.BaseColorId];
   gBufferBaseColor[position] = baseColor;
 
   // World position
 
   float3 worldPos = Interpolate(barycentrics.m_lambda, v0.posWS.xyz, v1.posWS.xyz, v2.posWS.xyz);
 
-  RWTexture2D<float4> gBufferWorldPos = ResourceDescriptorHeap[g_PerDispatchConstants.WorldPositionId];
+  RWTexture2D<float4> gBufferWorldPos = ResourceDescriptorHeap[g_Args.targets.WorldPositionId];
   gBufferWorldPos[position] = float4(worldPos, 1.0f);
 
   // World normal
@@ -203,6 +199,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
   tangentSpaceNormal.z = sqrt(1.0 - saturate(dot(tangentSpaceNormal.xy, tangentSpaceNormal.xy)));
   float3 finalWorldNormal = normalize(mul(tangentSpaceNormal, tbn));
 
-  RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_PerDispatchConstants.WorldNormalId];
+  RWTexture2D<float4> gBufferWorldNorm = ResourceDescriptorHeap[g_Args.targets.WorldNormalId];
   gBufferWorldNorm[position] = float4(finalWorldNormal, 1.0f);
 }

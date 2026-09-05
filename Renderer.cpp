@@ -1039,12 +1039,13 @@ void Render(float time)
     });
 
     passEncoder->SetPipeline(g_ComputePipelines[PSO::SkinningCS].get());
-    passEncoder->PushConstants(0, SizeOfInUint(SkinningBuffersDescriptorIndices), &ctx->skinningBuffersDescriptorsIndices);
 
     for (auto smi : g_Scene.skinnedMeshInstances) {
-      auto o = smi->BuffersOffsets();
-      passEncoder->PushConstants(SizeOfInUint(SkinningBuffersDescriptorIndices), SizeOfInUint(o), &o);
-      passEncoder->Dispatch(DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE));
+      const SkinningPassArgs args{
+          .buffers = ctx->skinningBuffersDescriptorsIndices,
+          .constants = smi->BuffersOffsets(),
+      };
+      passEncoder->Dispatch(args, DivRoundUp(smi->numVertices, COMPUTE_GROUP_SIZE));
     }
 
     passEncoder->End();
@@ -1084,11 +1085,12 @@ void Render(float time)
 
     passEncoder->SetPipeline(g_ComputePipelines[PSO::InstanceCullingCS].get());
 
-    passEncoder->PushConstants(0, SizeOfInUint(CullingBuffersDescriptorIndices), &ctx->cullingBuffersDescriptorsIndices);
-    passEncoder->PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices), 1, &frameConstantsIndex);
-    passEncoder->PushConstants(SizeOfInUint(CullingBuffersDescriptorIndices) + 1, 1, &g_Scene.numMeshInstances);
-
-    passEncoder->Dispatch(DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
+    const InstanceCullingPassArgs args{
+        .buffers = ctx->cullingBuffersDescriptorsIndices,
+        .FrameConstantsIndex = frameConstantsIndex,
+        .NumInstances = g_Scene.numMeshInstances,
+    };
+    passEncoder->Dispatch(args, DivRoundUp(g_Scene.numMeshInstances, COMPUTE_GROUP_SIZE));
 
     passEncoder->End();
   }
@@ -1126,10 +1128,11 @@ void Render(float time)
 
     passEncoder->SetPipeline(g_MeshPipeline.get());
 
-    passEncoder->PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
-    passEncoder->PushConstants(SizeOfInUint(BuffersDescriptorIndices), 1, &frameConstantsIndex);
-
-    passEncoder->DrawMeshIndirect(g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
+    const VisibilityBufferPassArgs args{
+        .buffers = ctx->buffersDescriptorsIndices,
+        .FrameConstantsIndex = frameConstantsIndex,
+    };
+    passEncoder->DrawMeshIndirect(args, g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
     passEncoder->End();
   }
@@ -1158,19 +1161,12 @@ void Render(float time)
 
     passEncoder->SetPipeline(g_ComputePipelines[PSO::FillGBufferCS].get());
 
-    auto c = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read));
-    UINT n = SizeOfInUint(c);
-    UINT n2 = SizeOfInUint(ctx->buffersDescriptorsIndices);
-
-    // TODO: instead of beeing dumb. only do SetComputeRoot32BitConstants once at the beginning of frame
-    // same for SetGraphicsRoot32BitConstant. "bind" everything up front, and be done with it.
-    // Only have one "slot", so only one "InitAsConstant" and prepare some enum for the different offsets in the root signature.
-    // Also, instead of writing an entire struct to the root signature. have ConstantBuffer and write the cbv to it.
-    passEncoder->PushConstants(0, n, &c);
-    passEncoder->PushConstants(n, n2, &ctx->buffersDescriptorsIndices);
-    passEncoder->PushConstants(n + n2, 1, &frameConstantsIndex);
-
-    passEncoder->Dispatch(DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
+    const FillGBufferPassArgs args{
+        .targets = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read)),
+        .buffers = ctx->buffersDescriptorsIndices,
+        .FrameConstantsIndex = frameConstantsIndex,
+    };
+    passEncoder->Dispatch(args, DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
 
     passEncoder->End();
   }
@@ -1197,15 +1193,13 @@ void Render(float time)
 
     passEncoder->SetPipeline(g_RayTracingPipeline.get());
 
-    std::array<uint32_t, 4> pc = {
-        g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
-        g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
-        g_Scene.tlasBuffer->DescriptorIndex(),
-        frameConstantsIndex,
+    const ShadowPassArgs args{
+        .GBufferWorldPosId = g_GBuffer.worldPosition->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+        .ShadowBufferId = g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::ReadWrite),
+        .TlasId = g_Scene.tlasBuffer->DescriptorIndex(),
+        .FrameConstantsIndex = frameConstantsIndex,
     };
-    passEncoder->PushConstants(0, pc.size(), pc.data());
-
-    passEncoder->TraceRays(g_ShaderTable.get(), g_Width, g_Height);
+    passEncoder->TraceRays(args, g_ShaderTable.get(), g_Width, g_Height);
     passEncoder->End();
   } else {
     encoder->WriteTimestamp(g_TimestampQuerySet.get(), Timestamp::ShadowsBegin);
@@ -1240,13 +1234,11 @@ void Render(float time)
     });
 
     passEncoder->SetPipeline(g_RenderPipeline.get());
-    uint32_t c[] = {
-        g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
-        g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+    const FinalComposePassArgs args{
+        .GBufferBaseColorId = g_GBuffer.baseColor->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
+        .ShadowBufferId = g_ShadowBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read),
     };
-    passEncoder->PushConstants(0, SizeOfInUint(BuffersDescriptorIndices), &ctx->buffersDescriptorsIndices);
-    passEncoder->PushConstants(SizeOfInUint(BuffersDescriptorIndices), 2, c);
-    passEncoder->Draw(3);
+    passEncoder->Draw(args, 3);
     passEncoder->End();
   }
 

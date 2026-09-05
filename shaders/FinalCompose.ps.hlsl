@@ -1,17 +1,12 @@
 #include "MeshletCommon.hlsli"
 #include "VisibilityBufferCommon.hlsli"
 
-cbuffer PushConstants : register(b0)
-{
-  BuffersDescriptorIndices g_DescIds;
-  uint GBufferBaseColorId;
-  uint ShadowBufferId;
-}
+ConstantBuffer<FinalComposePassArgs> g_Args : register(b0);
 
 float4 main(float4 position : SV_Position) : SV_Target
 {
-  Texture2D<float4> baseColor = ResourceDescriptorHeap[GBufferBaseColorId];
-  Texture2D<float> shadow = ResourceDescriptorHeap[ShadowBufferId];
+  Texture2D<float4> baseColor = ResourceDescriptorHeap[g_Args.GBufferBaseColorId];
+  Texture2D<float> shadow = ResourceDescriptorHeap[g_Args.ShadowBufferId];
 
   float4 color = baseColor.Load(int3(position.xy, 0));
   float lit = shadow.Load(int3(position.xy, 0));

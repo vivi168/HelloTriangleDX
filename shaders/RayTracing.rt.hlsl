@@ -5,31 +5,25 @@ struct ShadowPayload
   float visibility;
 };
 
-cbuffer PushConstants : register(b0)
-{
-  uint GBufferWorldPosId;
-  uint ShadowBufferId;
-  uint TlasId;
-  uint FrameConstantsIndex;
-}
+ConstantBuffer<ShadowPassArgs> g_Args : register(b0);
 
 [shader("raygeneration")]
 void ShadowRayGen()
 {
   uint2 launchIdx = DispatchRaysIndex().xy;
 
-  Texture2D<float4> positions = ResourceDescriptorHeap[GBufferWorldPosId];
+  Texture2D<float4> positions = ResourceDescriptorHeap[g_Args.GBufferWorldPosId];
   float4 worldPos = positions.Load(int3(launchIdx, 0));
 
-  RaytracingAccelerationStructure Scene = ResourceDescriptorHeap[TlasId];
+  RaytracingAccelerationStructure Scene = ResourceDescriptorHeap[g_Args.TlasId];
   uint flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
   RayDesc ray = { worldPos.xyz, 1.0e-2f, normalize(-g_FrameConstants.SunDirection), 1.0e3f };
   ShadowPayload payload = { 0.0f };
 
   TraceRay(Scene, flags, 0xff, 0, 1, 0, ray, payload);
 
-  RWTexture2D<float> RenderTarget = ResourceDescriptorHeap[ShadowBufferId];
+  RWTexture2D<float> RenderTarget = ResourceDescriptorHeap[g_Args.ShadowBufferId];
 
   RenderTarget[launchIdx] = payload.visibility;
 }

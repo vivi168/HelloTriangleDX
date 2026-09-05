@@ -1,9 +1,6 @@
 #include "MeshletCommon.hlsli"
 
-cbuffer PushConstants : register(b0) {
-  BuffersDescriptorIndices g_DescIds;
-  uint FrameConstantsIndex;
-}
+ConstantBuffer<VisibilityBufferPassArgs> g_Args : register(b0);
 
 cbuffer IndirectArgumentConstants : register(b1) {
   uint InstanceIndex;
@@ -33,7 +30,7 @@ bool IsVisible(MeshletData m, float4x4 world, float scale)
   float4 center = mul(float4(m.boundingSphere.xyz, 1), world);
   float radius = m.boundingSphere.w * scale;
 
-  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[FrameConstantsIndex];
+  ConstantBuffer<FrameConstants> g_FrameConstants = ResourceDescriptorHeap[g_Args.FrameConstantsIndex];
 
   for (int i = 0; i < 6; ++i) {
     if (dot(center, g_FrameConstants.FrustumPlanes[i]) < -radius) {
@@ -67,13 +64,13 @@ void main(uint gtid : SV_GroupThreadID, uint dtid : SV_DispatchThreadID, uint gi
 {
   bool visible = false;
 
-  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_DescIds.instancesBufferId];
+  StructuredBuffer<MeshInstanceData> meshInstances = ResourceDescriptorHeap[g_Args.buffers.instancesBufferId];
   MeshInstanceData mi = meshInstances[InstanceIndex];
 
-  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_DescIds.meshletsBufferId];
+  StructuredBuffer<MeshletData> meshlets = ResourceDescriptorHeap[g_Args.buffers.meshletsBufferId];
   MeshletData m = meshlets[mi.firstMeshlet + dtid];
 
-  StructuredBuffer<MaterialData> materials = ResourceDescriptorHeap[g_DescIds.materialsBufferId];
+  StructuredBuffer<MaterialData> materials = ResourceDescriptorHeap[g_Args.buffers.materialsBufferId];
   MaterialData material = materials[m.materialIndex];
 
   if (dtid < mi.numMeshlets) {
