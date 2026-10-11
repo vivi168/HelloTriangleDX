@@ -107,6 +107,7 @@ ASSERT_SIZE_U32(InstanceCullingPassArgs);
 struct VisibilityBufferPassArgs {
   BuffersDescriptorIndices buffers;
   hlsl_uint FrameConstantsIndex;
+  hlsl_uint MaterialSamplerId;
 };
 ASSERT_SIZE_U32(VisibilityBufferPassArgs);
 
@@ -114,6 +115,7 @@ struct FillGBufferPassArgs {
   FillGBufferPerDispatchConstants targets;
   BuffersDescriptorIndices buffers;
   hlsl_uint FrameConstantsIndex;
+  hlsl_uint MaterialSamplerId;
 };
 ASSERT_SIZE_U32(FillGBufferPassArgs);
 

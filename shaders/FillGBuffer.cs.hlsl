@@ -3,8 +3,6 @@
 
 ConstantBuffer<FillGBufferPassArgs> g_Args : register(b0);
 
-SamplerState s1 : register(s1);
-
 struct Vertex {
   float4 posCS;
   float4 posWS;
@@ -169,7 +167,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
   MaterialData material = materials[m.materialIndex];
 
   Texture2D baseColorTex = ResourceDescriptorHeap[NonUniformResourceIndex(material.baseColorId)];
-  float4 baseColor = baseColorTex.SampleGrad(s1, uv, uv_ddx, uv_ddy);
+  SamplerState materialSampler = SamplerDescriptorHeap[g_Args.MaterialSamplerId];
+  float4 baseColor = baseColorTex.SampleGrad(materialSampler, uv, uv_ddx, uv_ddy);
 
   RWTexture2D<float4> gBufferBaseColor = ResourceDescriptorHeap[g_Args.targets.BaseColorId];
   gBufferBaseColor[position] = baseColor;
@@ -192,7 +191,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
   float3x3 tbn = float3x3(t, b, n);
 
   Texture2D normalMapTex = ResourceDescriptorHeap[NonUniformResourceIndex(material.normalMapId)];
-  float4 normalMap = normalMapTex.SampleGrad(s1, uv, uv_ddx, uv_ddy);
+  float4 normalMap = normalMapTex.SampleGrad(materialSampler, uv, uv_ddx, uv_ddy);
 
   float3 tangentSpaceNormal;
   tangentSpaceNormal.xy = normalMap.xy * 2.0 - 1.0;

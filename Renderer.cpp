@@ -539,6 +539,7 @@ static FrameContext g_FrameContext[FRAME_BUFFER_COUNT];
 // Resources
 static std::shared_ptr<IssouRHI::Texture> g_DepthStencilBuffer;
 static std::shared_ptr<IssouRHI::QuerySet> g_TimestampQuerySet;
+static std::shared_ptr<IssouRHI::Sampler> g_MaterialSampler;
 
 // PSO
 static std::shared_ptr<IssouRHI::RenderPipeline> g_RenderPipeline;
@@ -996,7 +997,7 @@ static IssouRHI::TextureBarrierDesc BuildTransition(IssouRHI::Texture* tex, Isso
 
 void Render(float time)
 {
-  auto renderTarget = g_Surface->GetCurrentTexture();
+  auto* renderTarget = g_Surface->GetCurrentTexture();
   auto renderTargetView = renderTarget->CreateView();
   auto ctx = &g_FrameContext[g_Surface->CurrentFrameIndex()];
 
@@ -1009,7 +1010,7 @@ void Render(float time)
 
   {
     std::array transitions{
-        BuildTransition(renderTarget.get(), {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
+        BuildTransition(renderTarget, {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
         BuildTransition(g_VisibilityBuffer.get(), {IssouRHI::PipelineStage::ColorAttachment, IssouRHI::Access::ColorAttachmentWrite, IssouRHI::TextureLayout::ColorAttachment}),
     };
 
@@ -1131,6 +1132,7 @@ void Render(float time)
     const VisibilityBufferPassArgs args{
         .buffers = ctx->buffersDescriptorsIndices,
         .FrameConstantsIndex = frameConstantsIndex,
+        .MaterialSamplerId = g_MaterialSampler->DescriptorIndex(),
     };
     passEncoder->DrawMeshIndirect(args, g_DrawMeshCommands.get(), 0, MESH_INSTANCE_COUNT, g_DrawMeshCommands.get(), DRAW_MESH_CMDS_COUNTER_OFFSET);
 
@@ -1165,6 +1167,7 @@ void Render(float time)
         .targets = g_GBuffer.PerDispatchConstants(g_VisibilityBuffer->CreateView()->DescriptorIndex(IssouRHI::TextureAccess::Read)),
         .buffers = ctx->buffersDescriptorsIndices,
         .FrameConstantsIndex = frameConstantsIndex,
+        .MaterialSamplerId = g_MaterialSampler->DescriptorIndex(),
     };
     passEncoder->Dispatch(args, DivRoundUp(g_Width, FILL_GBUFFER_GROUP_SIZE_X), DivRoundUp(g_Height, FILL_GBUFFER_GROUP_SIZE_Y));
 
@@ -1254,7 +1257,7 @@ void Render(float time)
 
   {
     std::array transitions{
-        BuildTransition(renderTarget.get(), {IssouRHI::PipelineStage::None, IssouRHI::Access::None, IssouRHI::TextureLayout::Present}),
+        BuildTransition(renderTarget, {IssouRHI::PipelineStage::None, IssouRHI::Access::None, IssouRHI::TextureLayout::Present}),
     };
 
     encoder->Barrier({.textures = transitions});
@@ -1328,6 +1331,7 @@ void Cleanup()
   g_ShadowBuffer.reset();
 
   g_TimestampQuerySet.reset();
+  g_MaterialSampler.reset();
 
   g_DepthStencilBuffer.reset();
 
@@ -1398,6 +1402,18 @@ UINT CreateMaterial(std::filesystem::path baseDir, std::wstring filename)
 
 static void InitFrameResources()
 {
+  // Material texture sampler
+  g_MaterialSampler = g_Device->CreateSampler({
+      .label = "Material Anisotropic Sampler",
+      .addressModeU = IssouRHI::AddressMode::Repeat,
+      .addressModeV = IssouRHI::AddressMode::Repeat,
+      .addressModeW = IssouRHI::AddressMode::Repeat,
+      .minFilter = IssouRHI::FilterMode::Linear,
+      .magFilter = IssouRHI::FilterMode::Linear,
+      .mipmapFilter = IssouRHI::FilterMode::Linear,
+      .maxAnisotropy = 16,
+  });
+
   // DSV
   {
     IssouRHI::TextureDesc desc{
@@ -1426,7 +1442,7 @@ static void InitFrameResources()
   initInfo.Device = IssouRHI::D3D12::GetNativeDevice(g_Device.get());
   initInfo.CommandQueue = IssouRHI::D3D12::GetNativeQueue(g_Device->GetQueue());
   initInfo.NumFramesInFlight = FRAME_BUFFER_COUNT;
-  initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+  initInfo.RTVFormat = IssouRHI::D3D12::GetSwapChainFormat(g_Surface.get());
   initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
   // Allocating SRV descriptors (for textures) is up to the application, so we
   // provide callbacks. (current version of the backend will only allocate one
